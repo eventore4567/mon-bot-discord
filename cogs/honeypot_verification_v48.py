@@ -499,11 +499,14 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
                 logger.warning("Impossible de verrouiller %s sur %s.", channel.id, guild.id)
             await asyncio.sleep(0.05)
 
-    async def create_or_refresh_system(self, guild: discord.Guild, *, sanction: str = "softban"):
+    async def create_or_refresh_system(
+        self, guild: discord.Guild, *, sanction: str = "softban",
+        honeypot_enabled: bool = True,
+    ):
         if sanction not in {"softban", "kick"}:
             sanction = "softban"
 
-        missing = self._missing_permissions(guild, sanction)
+        missing = self._missing_permissions(guild, sanction if honeypot_enabled else "")
         if missing:
             return None, "Permissions manquantes : " + ", ".join(missing)
 
@@ -589,8 +592,8 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
                 overwrites={
                     guild.default_role: discord.PermissionOverwrite(view_channel=False),
                     unverified: discord.PermissionOverwrite(
-                        view_channel=True,
-                        send_messages=True,
+                        view_channel=honeypot_enabled,
+                        send_messages=honeypot_enabled,
                         read_message_history=True,
                         add_reactions=False,
                     ),
@@ -633,10 +636,13 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
         await _purge_bot_messages(verify_channel, bot_user_id)
         await _purge_bot_messages(trap_channel, bot_user_id)
         await panels.envoyer(verify_channel, await _web_panel(self.bot, guild))
-        await panels.envoyer(
-            trap_channel,
-            panels.depuis_embed(_trap_embed(verify_channel, sanction)),
-        )
+        # Mode 1 : le salon technique existe mais reste caché et sans panneau
+        # Honeypot. Ne jamais exposer le piège avant d'appliquer les réglages.
+        if honeypot_enabled:
+            await panels.envoyer(
+                trap_channel,
+                panels.depuis_embed(_trap_embed(verify_channel, sanction)),
+            )
 
         await self.bot.db.execute(
             "INSERT INTO honeypot_verification "
@@ -658,6 +664,9 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
                 int(time.time()),
             ),
         )
+        await self.ensure_verified_panel_hidden(
+            guild, honeypot_enabled=honeypot_enabled,
+        )
 
         return {
             "category": category,
@@ -668,7 +677,9 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
             "sanction": sanction,
         }, None
 
-    async def ensure_verified_panel_hidden(self, guild: discord.Guild) -> None:
+    async def ensure_verified_panel_hidden(
+        self, guild: discord.Guild, *, honeypot_enabled: bool | None = None,
+    ) -> None:
         """Hide verification-only channels from members once they receive the verified role.
 
         This only repairs permission overwrites on channels that already exist. It never
@@ -710,7 +721,10 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
             try:
                 from . import security_verification_v71 as security_v71
                 advanced = await security_v71.settings(self.bot, guild.id)
-                trap_active = bool(advanced.get("honeypot_enabled"))
+                trap_active = (
+                    bool(advanced.get("honeypot_enabled"))
+                    if honeypot_enabled is None else bool(honeypot_enabled)
+                )
                 await trap_channel.set_permissions(
                     unverified,
                     view_channel=trap_active,
@@ -730,7 +744,9 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
                     guild.id,
                 )
 
-    async def refresh_existing_panels(self, guild: discord.Guild) -> tuple[dict | None, str | None]:
+    async def refresh_existing_panels(
+        self, guild: discord.Guild, *, honeypot_enabled: bool | None = None,
+    ) -> tuple[dict | None, str | None]:
         """Replace verification/honeypot panels in the channels already configured.
 
         This method is intentionally non-creative: if a channel was deleted, nothing is
@@ -747,7 +763,7 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
         if not isinstance(trap_channel, discord.TextChannel):
             return None, "Le salon stay-muted configuré a été supprimé. SentriX ne le recrée pas automatiquement."
 
-        await self.ensure_verified_panel_hidden(guild)
+        await self.ensure_verified_panel_hidden(guild, honeypot_enabled=honeypot_enabled)
 
         # Ne jamais supprimer l'ancien panneau AVANT de savoir si Discord
         # accepte la publication du nouveau. Une permission manquante ou une
@@ -755,12 +771,23 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
         # L'autorité V5 édite et mémorise les vrais IDs : cette implémentation
         # historique est un repli conservateur, elle ne purge aucun message.
         await panels.envoyer(verify_channel, await _web_panel(self.bot, guild))
-        await panels.envoyer(
-            trap_channel,
-            panels.depuis_embed(_trap_embed(verify_channel, str(conf["sanction"] or "softban"))),
-        )
+        if honeypot_enabled is None:
+            from . import security_verification_v71 as security_v71
+            advanced = await security_v71.settings(self.bot, guild.id)
+            honeypot_enabled = bool(advanced["honeypot_enabled"])
         removed_verify = 0
         removed_trap = 0
+        if honeypot_enabled:
+            await panels.envoyer(
+                trap_channel,
+                panels.depuis_embed(_trap_embed(verify_channel, str(conf["sanction"] or "softban"))),
+            )
+        else:
+            # En mode 1, ne pas republier un panneau piège ; retirer uniquement
+            # les anciens messages du bot dans le salon technique masqué.
+            bot_user_id = getattr(getattr(self.bot, "user", None), "id", None)
+            if bot_user_id:
+                await _purge_bot_messages(trap_channel, bot_user_id)
         return {
             "verify": verify_channel,
             "trap": trap_channel,
