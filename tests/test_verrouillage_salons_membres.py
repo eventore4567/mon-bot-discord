@@ -677,3 +677,18 @@ def test_sans_verrouillage_confirme_rien_n_est_adapte(monkeypatch):
                  overwrites=dict(s.communaute.overwrites), synced=True)
     _creation(monkeypatch, s, neuf, publie=False)
     assert not neuf.ecritures
+
+
+def test_un_salon_membre_ferme_a_tous_est_rouvert_aux_verifies():
+    """Relevé du 30/10/2026 : « 0 à verrouiller, 19 inchangés » — tous les salons
+    membres étaient fermés à tout le monde, vérifiés compris."""
+    s = Serveur()
+    ferme = Salon(700, "💬・discussions", overwrites={s.default_role: ow(view_channel=False)})
+    piege = Salon(701, "honeypot", overwrites={s.default_role: ow(view_channel=False)})
+    for salon in (ferme, piege):
+        salon.guild = s
+        s.channels.append(salon)
+    plan = _plan(s)
+    assert ferme in plan.gate and ferme in plan.closed_opened
+    assert piege not in plan.gate and piege in plan.review
+    assert "fermé(s) à tous" in plan.preview()

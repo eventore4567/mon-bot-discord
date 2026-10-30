@@ -115,12 +115,23 @@ MEMBER = frozenset({
     "clips", "memes", "jeux", "game", "games", "gaming", "musique",
     "music", "vocal", "vocaux", "voice", "offtopic", "partage",
     "partages", "commandes", "bot", "bots", "forum", "salon", "salons",
+    # 30/10/2026 : salons membres vus fermés à tous sur un vrai serveur.
+    "annonces", "annonce", "news", "infos", "suggestions", "suggestion",
+    "giveaways", "giveaway", "events", "evenements", "recherche", "joueurs",
+    "important", "aide", "help",
+})
+#: Fermé à tous mais à NE PAS ouvrir d'office (pièges, travaux, préparation).
+_FERME_VOLONTAIRE = frozenset({
+    "honeypot", "piege", "setup", "config", "configuration", "test", "tests",
+    "bientot", "prochainement", "archive", "archives", "corbeille",
 })
 
 
 @dataclass
 class AccessPlan:
     gate: list = field(default_factory=list)
+    # Salons membres fermés à TOUS (même aux vérifiés) : rouverts au rôle Vérifié.
+    closed_opened: list = field(default_factory=list)
     # Catégories membres 100 % synchronisées et sans aucun salon sensible :
     # appliquer à la catégorie au lieu de rompre chaque synchronisation.
     category_gates: list = field(default_factory=list)
@@ -187,6 +198,11 @@ class AccessPlan:
         )
         if self.gate:
             lines.append(f"-# {names([*text_channels, *voice_channels])}")
+        if self.closed_opened:
+            lines.append(
+                f"🔓 Dont {len(self.closed_opened)} salon(s) aujourd'hui fermé(s) à tous, "
+                "ouverts aux membres vérifiés"
+            )
         if self.secure_targets:
             lines.append(
                 f"🛡️ Staff/logs à sécuriser : {len(self.secure_targets)} · "
@@ -496,6 +512,21 @@ def plan_access(
                 # Ouvert par un rôle facultatif (choix d'Onboarding, VIP…) :
                 # y ajouter « Vérifié » l'ouvrirait à TOUS les vérifiés.
                 plan.role_restricted.append(channel)
+            elif (verified_role is not None and channel.id not in exclude
+                  and getattr(channel.overwrites_for(everyone), "view_channel", None) is not True):
+                # Fermé à TOUT LE MONDE, vérifiés compris (relevé du 30/10/2026 :
+                # « 0 à verrouiller, 19 inchangés » sur un serveur dont tous les
+                # salons membres étaient invisibles après vérification). Un nom de
+                # salon membre : rouvert au rôle Vérifié. Sinon : à confirmer.
+                plan.protected.pop(channel.id, None)
+                plan.refused.pop(channel.id, None)
+                if (own | parent_words) & MEMBER and not own & _FERME_VOLONTAIRE \
+                        or channel.id in include:
+                    plan.gate.append(channel)
+                    plan.closed_opened.append(channel)
+                else:
+                    to_review(channel, "fermé à tous : à ouvrir aux membres vérifiés ?")
+                continue
             if is_voice_channel(channel):
                 plan.voice_already_locked.append(channel)
             continue
