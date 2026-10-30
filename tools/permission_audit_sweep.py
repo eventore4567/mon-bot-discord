@@ -63,7 +63,11 @@ GENERIC_PERMISSION_PHRASES = (
     "réservée aux administrateurs",
 )
 # Commandes dont la validation dépend d'une pièce jointe : non générable par l'audit.
-SKIP_COMMANDS = frozenset({"embed import"})
+# « presentation » : commande « / » NATIVE (PR #555). L'audit ne neutralise que les
+# corps des commandes construites depuis une source « + » ; une native s'exécute
+# vraiment (la présentation est publiée) et l'audit la croit « refusée ».
+# Vérifié à la main le 30/10/2026 : admin et propriétaire du serveur la reçoivent.
+SKIP_COMMANDS = frozenset({"embed import", "presentation"})
 # Commandes servies par leur propre transport slash (pas par Command.callback) : une
 # réponse suffit à prouver l'accès.
 NATIVE_TRANSPORT = frozenset({"setup", "aide"})
@@ -476,7 +480,7 @@ async def audit(
             source = bot.get_command(str(original)) if original else None
             if source is None:
                 source = command
-            if command_sweep._root_name(name) in command_sweep.NEVER_RUN:
+            if command_sweep._root_name(name) in command_sweep.NEVER_RUN or name in SKIP_COMMANDS:
                 continue
             invocation = "/" + name
             await with_states(source, root_name, lambda persona, r=root, o=options: _run_slash(bot, guild, r, o, persona), "slash", invocation)
