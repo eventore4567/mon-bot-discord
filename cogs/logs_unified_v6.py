@@ -331,6 +331,26 @@ def _link_actions_from_urls(urls: list[str]) -> list[tuple[str, str]]:
     return actions
 
 
+async def _deleted_message_already_logged_here(bot: commands.Bot, guild_id: int) -> bool:
+    """N'envoyer aucune seconde carte fichier DANS le même salon Messages.
+
+    Le journal Messages contient déjà la citation, les pièces jointes,
+    leurs liens et le transcript intégral. Un canal Fichiers distinct garde
+    volontairement son archive spécialisée.
+    """
+    try:
+        messages = await log_service.get_log_setting(bot, guild_id, "messages")
+        files = await log_service.get_log_setting(bot, guild_id, "files")
+        return bool(
+            messages.get("enabled") and files.get("enabled")
+            and messages.get("channel_id")
+            and messages.get("channel_id") == files.get("channel_id")
+        )
+    except Exception:
+        logger.warning("Impossible de vérifier l'unicité des logs fichiers.", exc_info=True)
+        return False
+
+
 async def _best_effort_files(attachments: list[discord.Attachment]) -> list[discord.File]:
     files: list[discord.File] = []
     for attachment in attachments[:10]:
@@ -523,7 +543,7 @@ def _patch_raw_file_recovery(bot: commands.Bot) -> None:
             urls = json.loads(raw)
         except Exception:
             urls = []
-        if urls:
+        if urls and not await _deleted_message_already_logged_here(bot, guild.id):
             channel_id = int(row["channel_id"] or fallback_channel_id or 0)
             message_id = int(row["message_id"])
             author_id = int(row["author_id"])
@@ -605,6 +625,10 @@ class UnifiedLogsV6(commands.Cog, name="UnifiedLogsV6"):
     @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message):
         if message.guild is None or message.author.bot or not message.attachments:
+            return
+        # Logs Messages et Fichiers peuvent être configurés dans le même salon.
+        # Une seule suppression ne doit pas créer deux panneaux identiques.
+        if await _deleted_message_already_logged_here(self.bot, message.guild.id):
             return
         _remember_channel(message.channel)
         files = await _best_effort_files(list(message.attachments))
