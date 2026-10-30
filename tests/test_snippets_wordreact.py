@@ -71,3 +71,26 @@ async def test_recurring_rejects_configured_logs_even_with_generic_name():
         "WHERE guild_id=? AND channel_id=? LIMIT 1",
         (777, 123),
     )
+
+
+def test_setup_has_all_automation_pages():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / "cogs/setup_experience_v74.py").read_text(encoding="utf-8")
+    for page in ("snippets", "word_reactions", "recurring_messages"):
+        assert '"' + page + '"' in source
+    assert "setup_automation_extras.build_page(self, page)" in source
+
+
+def test_recurring_new_rules_are_explicitly_paused():
+    import inspect
+    from cogs.setup_automation_extras import RecurringModal
+    source = inspect.getsource(RecurringModal.on_submit)
+    assert "VALUES(?,?,?,?,?,0)" in source
+    assert "Vous devez l'activer explicitement" in source
+
+
+def test_setup_pages_dont_publish_configuration_slash():
+    from utils.slash_catalog import CATALOG
+    roots = {x.path for x in CATALOG}
+    assert "snippet send" in roots
+    assert not any(x.startswith(("recurring ", "wordreact ")) for x in roots)
