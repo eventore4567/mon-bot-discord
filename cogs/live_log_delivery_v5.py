@@ -242,13 +242,15 @@ async def send_log_v5(
             state["last_result"] = "normal_send_success" if result else "normal_send_rejected"
             return bool(result)
 
-    # Si une route valide est volontairement désactivée, on respecte le choix admin.
-    if setting and not bool(setting.get("enabled")) and setting.get("channel_id"):
-        valid, _reason = log_service.validate_channel(guild, setting.get("channel_id"))
-        if valid:
-            state["last_channel_id"] = int(setting["channel_id"])
-            state["last_result"] = "explicitly_disabled"
-            return False
+    # Une catégorie désactivée dans /setup reste OFF même si son salon a
+    # été supprimé ou si aucun salon n'a jamais été configuré. La réparation
+    # automatique ne peut pas réactiver le choix de l'administrateur.
+    if setting and not bool(setting.get("enabled")):
+        state["last_channel_id"] = (
+            int(setting["channel_id"]) if setting.get("channel_id") else None
+        )
+        state["last_result"] = "explicitly_disabled"
+        return False
 
     # Route absente/cassée : découverte depuis la structure Discord visible en direct.
     candidate = _discover_channel(guild, log_type)
