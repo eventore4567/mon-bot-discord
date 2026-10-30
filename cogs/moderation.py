@@ -109,7 +109,7 @@ class _BanPurgeView(discord.ui.View):
         await interaction.response.edit_message(
             content=(
                 f"**Bannissement de {self.target.display_name}**\n"
-                "Combien de temps d'anciens messages veux-tu supprimer ?\n"
+                "Combien de temps d'anciens messages voulez-vous supprimer ?\n"
                 "Cette période concerne les messages AVANT le bannissement, pas sa durée."
             ),
             view=self,
@@ -863,11 +863,15 @@ class Moderation(commands.Cog):
     ):
         """Le slash ne bannit qu'après la réponse explicite du modérateur."""
         raison = clean_reason(raison)
+        # 30/10/2026 — refuser immédiatement une cible protégée avant le panneau
+        # Oui/Non, même lorsque le moteur de ban revalide au moment d’agir.
+        if not await self.check_targetable(ctx, membre):
+            return
         if ctx.interaction is not None:
             view = _BanPurgeView(self, ctx, membre, raison, envoyer_mp=envoyer_mp)
             view.message = await ctx.send(
                 f"**Bannissement de {membre.display_name}**\n"
-                "Veux-tu aussi supprimer ses anciens messages ?",
+                "Voulez-vous aussi supprimer ses anciens messages ?",
                 view=view, ephemeral=True, allowed_mentions=_SANS_PING,
             )
             return
