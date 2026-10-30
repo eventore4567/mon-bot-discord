@@ -186,6 +186,9 @@ EXTENSIONS = [
     "cogs.prefix_deprecation",
     "cogs.raid_protect",
     "cogs.custom_commands",
+    "cogs.snippets",
+    "cogs.word_reactions",
+    "cogs.recurring_messages",
     # cogs.visual_experience_v5 declenche finalize_runtime() et doit rester
     # DERNIERE : une extension chargee apres elle echappe a toute la pile de
     # style.
