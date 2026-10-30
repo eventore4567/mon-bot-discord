@@ -1,7 +1,7 @@
 """Audit de sécurité et de configuration à la demande : +auditbot.
 
 Lecture seule : NE JAMAIS exécuter les callbacks inspectés (ban/clear/pay/etc.).
-Un rapport local au serveur est envoyé uniquement en MP à l'administrateur.
+Un rapport local au serveur est envoyé uniquement en MP au créateur principal.
 Les erreurs passées du bot sont montrées uniquement au propriétaire global.
 """
 from __future__ import annotations
@@ -20,7 +20,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from utils import checks
+from database.db import PRIMARY_CREATOR_ID
 
 logger = logging.getLogger("bot.auditbot")
 
@@ -130,12 +130,11 @@ def _channel(bot_guild: discord.Guild, channel_id: Any):
 
 
 def _user_can_audit(ctx: commands.Context) -> bool:
-    member = ctx.author
-    guild = ctx.guild
-    return bool(guild and (
-        getattr(member, "id", None) == guild.owner_id
-        or getattr(getattr(member, "guild_permissions", None), "administrator", False)
-    ))
+    """Commande privée : ID du créateur principal uniquement, sans exception staff."""
+    return bool(
+        getattr(ctx, "guild", None) is not None
+        and getattr(getattr(ctx, "author", None), "id", None) == PRIMARY_CREATOR_ID
+    )
 
 
 def _check_registered_commands(bot: commands.Bot, report: AuditReport):
@@ -383,11 +382,11 @@ class AuditBot(commands.Cog):
 
     @commands.command(name="auditbot", help="Audit en lecture seule des commandes et de ce serveur.")
     @commands.guild_only()
-    @checks.is_owner_or_admin()
+    @commands.check(_user_can_audit)
     @commands.cooldown(1, 120, commands.BucketType.guild)
     async def auditbot(self, ctx: commands.Context):
-        if not _user_can_audit(ctx) and not await checks.is_verified_bot_owner(ctx):
-            return await ctx.send("Accès réservé aux administrateurs.",
+        if not _user_can_audit(ctx):
+            return await ctx.send("Accès réservé au créateur principal de SentriX.",
                                   allowed_mentions=discord.AllowedMentions.none())
         if ctx.guild.id in self._running:
             return await ctx.send("Un audit est déjà en cours sur ce serveur.",
