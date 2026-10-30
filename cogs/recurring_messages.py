@@ -51,6 +51,18 @@ def is_logs_channel(channel: discord.TextChannel) -> bool:
     )
 
 
+async def is_reserved_channel(bot, channel: discord.TextChannel) -> bool:
+    """Empêche aussi les salons de logs renommés (log_config est canonique)."""
+    if is_logs_channel(channel):
+        return True
+    row = await bot.db.fetchone(
+        "SELECT 1 AS configured FROM log_config "
+        "WHERE guild_id=? AND channel_id=? AND enabled=1 LIMIT 1",
+        (channel.guild.id, channel.id),
+    )
+    return bool(row)
+
+
 def card(title: str, text: str, *, kind: str = "info") -> panels.Panneau:
     return panels.Panneau(titre=title, sous_titre=text, kind=kind)
 
@@ -71,17 +83,22 @@ async def process_due(bot) -> int:
     sent = 0
     for row in rows:
         channel = bot.get_channel(int(row["channel_id"]))
-        if not isinstance(channel, discord.TextChannel) or is_logs_channel(channel):
+        if not isinstance(channel, discord.TextChannel) or await is_reserved_channel(bot, channel):
             await bot.db.execute("UPDATE recurring_messages SET enabled=0 WHERE id=?", (row["id"],))
             logger.warning("Message récurrent %s désactivé : salon supprimé ou journal.", row["id"])
             continue
         # Planifie le prochain passage AVANT l'envoi : au plus une publication,
         # même en cas d'exception ou d'ancien retard non rattrapé.
         next_at = int(time.time()) + max(int(row["every_s"]), MIN_INTERVAL)
-        await bot.db.execute(
-            "UPDATE recurring_messages SET next_at=? WHERE id=? AND enabled=1 AND next_at<=?",
+        claim = await bot.db.execute(
+            "UPDATE recurring_messages SET next_at=? "
+            "WHERE id=? AND enabled=1 AND next_at<=?",
             (next_at, row["id"], now),
         )
+        # La transition peut être concurrencée par le relais HA. Sans claim
+        # effectué par cette instance, n'envoyer AUCUN message.
+        if getattr(claim, "rowcount", 0) != 1:
+            continue
         try:
             await channel.send(str(row["content"]), allowed_mentions=discord.AllowedMentions.none())
         except discord.HTTPException:
@@ -108,7 +125,7 @@ class RecurringMessages(commands.Cog):
         seconds = parse_interval(intervalle)
         if seconds is None:
             return await panels.envoyer(ctx, card("Intervalle invalide", "Entre 10 minutes et 30 jours (10m, 6h, 2d).", kind="danger"))
-        if is_logs_channel(salon):
+        if await is_reserved_channel(self.bot, salon):
             return await panels.envoyer(ctx, card("Salon refusé", "Les messages récurrents sont interdits dans les journaux.", kind="danger"))
         content = texte.strip()
         if not 1 <= len(content) <= 1700:
@@ -155,7 +172,7 @@ class RecurringMessages(commands.Cog):
         if not row:
             return await panels.envoyer(ctx, card("Introuvable", "Aucun message avec cet identifiant.", kind="warning"))
         channel = self.bot.get_channel(int(row["channel_id"]))
-        if active and (not isinstance(channel, discord.TextChannel) or is_logs_channel(channel)):
+        if active and (not isinstance(channel, discord.TextChannel) or await is_reserved_channel(self.bot, channel)):
             return await panels.envoyer(ctx, card("Salon refusé", "Impossible d'activer ce message dans un salon de logs.", kind="danger"))
         await self.bot.db.execute(
             "UPDATE recurring_messages SET enabled=?,next_at=? WHERE id=? AND guild_id=?",
