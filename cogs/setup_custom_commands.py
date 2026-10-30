@@ -84,11 +84,13 @@ class CommandTextModal(discord.ui.Modal):
         self.existing = row
         if row:
             self.nom.default = str(row["name"])
-            self.nom.disabled = True
+            self.nom.label = "Nom (conservé lors de la modification)"
             self.texte.default = str(row["response"])
 
     async def on_submit(self, interaction: discord.Interaction):
-        name = str(self.nom.value or "").strip().casefold()
+        # Les actions sont indexées par (guild_id, name). La modification du
+        # message ne renomme donc jamais la commande et ne perd pas ses actions.
+        name = (str(self.existing["name"]) if self.existing else str(self.nom.value or "")).strip().casefold()
         if not VALID_NAME.fullmatch(name):
             return await notify(interaction, "Nom invalide : 2 à 32 lettres, chiffres, tirets ou underscores.")
         platform = self.shell.bot.get_cog("PlatformV4")
