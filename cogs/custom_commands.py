@@ -109,8 +109,16 @@ async def executer_actions(bot, message: discord.Message, name: str) -> list[str
                         (guild.id, member.id, role.id, int(time.time()) + int(action["duration_s"])),
                     )
             elif kind == "money":
+                from cogs.setup_v2_core import module_enabled
+                if not await module_enabled(bot, guild.id, "economy"):
+                    echecs.append("module économie désactivé")
+                    continue
                 await bot.db.add_balance(guild.id, member.id, value)
             elif kind == "xp":
+                from cogs.setup_v2_core import module_enabled
+                if not await module_enabled(bot, guild.id, "levels"):
+                    echecs.append("module niveaux désactivé")
+                    continue
                 levels = bot.get_cog("Levels")
                 if levels is None or not hasattr(levels, "_apply_xp_delta"):
                     echecs.append("module niveaux indisponible")

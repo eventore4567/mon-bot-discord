@@ -32,17 +32,43 @@ async def main() -> int:
     # Production : le « + » des commandes SentriX est coupé ; les personnalisées restent.
     os.environ["SENTRIX_PREFIXE_ACTIF"] = "0"
 
-    # Plus de commandes « / » pour les gérer (30/10/2026) : la commande et ses
-    # actions sont créées comme le fera /setup (PlatformV4 + table des actions).
+    # Décision du 30/10/2026 : l'administration /custom a été retirée ;
+    # les commandes personnalisées se configurent désormais depuis /setup.
+    # Le test conserve les mêmes garanties métier, dans les tables réellement
+    # écrites par la nouvelle interface (sans contourner les sanctions/actions).
+    from utils.slash_catalog import CATALOG
+    check(not any(e.path.startswith("custom ") for e in CATALOG),
+          "aucune commande de configuration /custom publiée")
+
     platform = bot.get_cog("PlatformV4")
-    check(platform is not None, "le module des commandes personnalisées est chargé avec le bot")
-    await platform.save_custom_command(guild, h.ADMIN_ID, {"name": "bonus", "response": "Bonus_pour_{user}"})
-    for kind, value in (("role_add", h.PING_ROLE_ID), ("money", 250)):
-        await bot.db.execute("INSERT INTO custom_command_actions(guild_id,name,kind,value,duration_s) VALUES(?,?,?,?,0)",
-                             (h.GID, "bonus", kind, value))
-    await bot.db.execute("INSERT INTO custom_command_settings(guild_id, delete_trigger) VALUES(?,1) "
-                         "ON CONFLICT(guild_id) DO UPDATE SET delete_trigger=1", (h.GID,))
-    check(bot.tree.get_command("custom") is None, "aucune commande /custom publiée")
+    check(platform is not None, "moteur de commandes personnalisées chargé")
+    if platform is None:
+        return 1
+
+    created = await platform.save_custom_command(guild, h.ADMIN_ID, {
+        "name": "bonus", "response": "Bonus_pour_{user}",
+    })
+    check(created["name"] == "bonus", "/setup enregistre le message via PlatformV4")
+    await bot.db.execute(
+        "INSERT INTO custom_command_actions(guild_id,name,kind,value,duration_s) VALUES(?,?,?,?,?)",
+        (h.GID, "bonus", "role_add", h.PING_ROLE_ID, 0),
+    )
+    await bot.db.execute(
+        "INSERT INTO custom_command_actions(guild_id,name,kind,value,duration_s) VALUES(?,?,?,?,?)",
+        (h.GID, "bonus", "money", 250, 0),
+    )
+    await bot.db.execute(
+        "INSERT INTO custom_command_settings(guild_id,delete_trigger) VALUES(?,1) "
+        "ON CONFLICT(guild_id) DO UPDATE SET delete_trigger=1",
+        (h.GID,),
+    )
+
+    # Vérifier que la page publique de /setup sait reconstruire la vue C V2.
+    from cogs.setup_experience_v74 import SentriXSetupV74
+    view = SentriXSetupV74(bot, guild, h.ADMIN_ID)
+    view.page = "custom_commands"
+    await view.rebuild()
+    check(bool(view.children), "page Commandes personnalisées de /setup construite")
 
     avant = await bot.db.fetchone("SELECT cash FROM economy WHERE guild_id=? AND user_id=?", (h.GID, h.TARGET_ID))
     avant = int(avant["cash"]) if avant else 0
