@@ -63,11 +63,9 @@ GENERIC_PERMISSION_PHRASES = (
     "réservée aux administrateurs",
 )
 # Commandes dont la validation dépend d'une pièce jointe : non générable par l'audit.
-# « presentation » : commande « / » NATIVE (PR #555). L'audit ne neutralise que les
-# corps des commandes construites depuis une source « + » ; une native s'exécute
-# vraiment (la présentation est publiée) et l'audit la croit « refusée ».
-# Vérifié à la main le 30/10/2026 : admin et propriétaire du serveur la reçoivent.
-SKIP_COMMANDS = frozenset({"embed import", "presentation"})
+# Les commandes natives comme /presentation passent désormais par le même
+# audit de permissions, sans publier leur message réel.
+SKIP_COMMANDS = frozenset({"embed import"})
 # Commandes servies par leur propre transport slash (pas par Command.callback) : une
 # réponse suffit à prouver l'accès.
 NATIVE_TRANSPORT = frozenset({"setup", "aide"})
@@ -143,6 +141,22 @@ def _patch_command_body() -> None:
         return stub
 
     commands.Command.callback = property(getter, original.fset)
+
+    # /presentation est une commande app_commands native, pas une commande
+    # historique préfixée. Pour auditer ses permissions, court-circuiter
+    # uniquement son _do_call APRÈS interaction_check et les checks Discord.
+    # Les autres slash conservent leur trajet normal vers le stub préfixe.
+    original_native = app_commands.Command._do_call
+    if not getattr(original_native, "_sentrix_permission_audit", False):
+        @functools.wraps(original_native)
+        async def native_probe(self, interaction, params):
+            if _Audit.active and self.qualified_name == "presentation":
+                _Audit.reached = True
+                return None
+            return await original_native(self, interaction, params)
+
+        native_probe._sentrix_permission_audit = True
+        app_commands.Command._do_call = native_probe
 
 
 def _reset_throttles(bot, command) -> None:
