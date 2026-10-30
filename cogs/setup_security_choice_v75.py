@@ -497,9 +497,10 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
     from . import setup_v2_ui as security_ui
     # Le parcours Honeypot/Vérification a son installateur transactionnel
     # dédié. Un simple bouton ON ici pourrait activer le piège sans salon.
+    known_filters = {key for key, _label in setup_ui.AUTOMOD}
     policy_options = tuple(
         entry for entry in security_ui.SECURITY_CENTER_PROTECTIONS
-        if entry[0] not in {"honeypot", "verification"}
+        if entry[0] in known_filters
     )
     policy_select = discord.ui.Select(
         placeholder="Configurer un filtre précis (sanction, whitelist, seuils)",
