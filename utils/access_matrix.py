@@ -189,6 +189,8 @@ CUSTOM_PERMISSION_COMMANDS = frozenset({"embed"})
 # groupe : c'est ce qui rendait "+season start" accessible a tout membre alors que la
 # racine "season" est publique.
 SUBCOMMAND_TIERS: dict[str, str] = {
+    "snippet create": "configuration",
+    "snippet delete": "configuration",
     # Groupe public, sous-commandes administratives
     "season start": "economie",
     "season end": "economie",
@@ -228,6 +230,7 @@ DISCORD_PERMISSION_COMMANDS: dict[str, str] = {
     # Le fil SentriX (cogs/trace.py) : relire une action du staff, comme on lit
     # le journal d'audit de Discord.
     "trace": "view_audit_log",
+    "snippet": "manage_messages",
     # Vérification : elle réécrit les permissions de TOUS les salons pour le rôle
     # Vérifié. Son code exige Administrateur (sentrix_verification_v96) ; classée
     # « configuration », la décision centrale disait « Gérer le serveur » et un
@@ -347,6 +350,7 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
         # Classees explicitement : elles tombaient en fail-closed, donc admin
         # par accident plutot que par declaration.
         "server-managed", "verification-review", "verification-calibration",
+        "wordreact", "recurring",
         "setprefix", "setmodrole", "setlogchannel", "create-logs", "logs-status",
         "logsetup", "logs", "setwelcomechannel", "setgoodbyechannel",
         "setwelcomemessage", "setgoodbyemessage", "setticketlogchannel",
