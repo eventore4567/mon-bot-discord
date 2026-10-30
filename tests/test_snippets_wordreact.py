@@ -68,6 +68,6 @@ async def test_recurring_rejects_configured_logs_even_with_generic_name():
     assert await is_reserved_channel(bot, channel)
     db.fetchone.assert_awaited_once_with(
         "SELECT 1 AS configured FROM log_config "
-        "WHERE guild_id=? AND channel_id=? AND enabled=1 LIMIT 1",
+        "WHERE guild_id=? AND channel_id=? LIMIT 1",
         (777, 123),
     )
