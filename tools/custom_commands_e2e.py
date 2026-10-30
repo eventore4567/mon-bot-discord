@@ -32,21 +32,17 @@ async def main() -> int:
     # Production : le « + » des commandes SentriX est coupé ; les personnalisées restent.
     os.environ["SENTRIX_PREFIXE_ACTIF"] = "0"
 
-    async def slash(spec: str) -> str:
-        since = len(h.CALLS)
-        root, opts = h.slash_options_from_spec(bot, spec)
-        inter = h.build_interaction(bot, root, opts, **ADMIN)
-        await asyncio.wait_for(bot.tree._call(inter), 20)
-        await h.settle(idle=0.4, maximum=3)
-        return h.visible_text(h.CALLS[since:])
-
-    texte = await slash("custom create nom=bonus message=Bonus_pour_{user}")
-    check("Commande enregistrée" in texte and "bonus" in texte, "/custom create enregistre la commande", texte[:200])
-    texte = await slash(f"custom role-add nom=bonus role={h.PING_ROLE_ID}")
-    check("Action ajoutée" in texte and f"<@&{h.PING_ROLE_ID}>" in texte, "/custom role-add ajoute l'action", texte[:200])
-    texte = await slash("custom money nom=bonus montant=250")
-    check("Action ajoutée" in texte and "250" in texte, "/custom money ajoute l'action", texte[:200])
-    await slash("custom delete-trigger etat=on")
+    # Plus de commandes « / » pour les gérer (30/10/2026) : la commande et ses
+    # actions sont créées comme le fera /setup (PlatformV4 + table des actions).
+    platform = bot.get_cog("PlatformV4")
+    check(platform is not None, "le module des commandes personnalisées est chargé avec le bot")
+    await platform.save_custom_command(guild, h.ADMIN_ID, {"name": "bonus", "response": "Bonus_pour_{user}"})
+    for kind, value in (("role_add", h.PING_ROLE_ID), ("money", 250)):
+        await bot.db.execute("INSERT INTO custom_command_actions(guild_id,name,kind,value,duration_s) VALUES(?,?,?,?,0)",
+                             (h.GID, "bonus", kind, value))
+    await bot.db.execute("INSERT INTO custom_command_settings(guild_id, delete_trigger) VALUES(?,1) "
+                         "ON CONFLICT(guild_id) DO UPDATE SET delete_trigger=1", (h.GID,))
+    check(bot.tree.get_command("custom") is None, "aucune commande /custom publiée")
 
     avant = await bot.db.fetchone("SELECT cash FROM economy WHERE guild_id=? AND user_id=?", (h.GID, h.TARGET_ID))
     avant = int(avant["cash"]) if avant else 0
