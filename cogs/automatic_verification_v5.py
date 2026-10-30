@@ -694,9 +694,52 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
             raise RuntimeError("Le panneau de vérification n'a pas renvoyé de message Discord.")
         return sent
 
+    async def ensure_verified_panel_hidden(
+        self, guild: discord.Guild, *, honeypot_enabled: bool | None = None,
+    ) -> None:
+        """Répare la visibilité des deux salons dans le moteur V5 ACTIF.
+
+        Le Cog V5 a remplacé les anciens moteurs et n'hérite pas de leur
+        méthode. Cette opération ne crée ni rôle, ni salon, ni panneau.
+        """
+        from . import security_verification_v71 as security_v71
+
+        if honeypot_enabled is None:
+            cfg = await security_v71.settings(self.bot, guild.id)
+            honeypot_enabled = bool(cfg["honeypot_enabled"])
+        conf = await self.config(guild.id, enabled_only=True)
+        if not conf:
+            return
+        unverified = guild.get_role(int(conf["unverified_role_id"] or 0))
+        verified = guild.get_role(int(conf["verified_role_id"] or 0))
+        if unverified is None or verified is None:
+            return
+        verify = guild.get_channel(int(conf["verify_channel_id"] or 0))
+        trap = guild.get_channel(int(conf["trap_channel_id"] or 0))
+        for channel, visible, can_write in (
+            (verify, True, False), (trap, bool(honeypot_enabled), bool(honeypot_enabled)),
+        ):
+            if not isinstance(channel, discord.TextChannel):
+                continue
+            try:
+                await channel.set_permissions(
+                    unverified, view_channel=visible,
+                    send_messages=can_write, read_message_history=True,
+                    add_reactions=False,
+                    reason="SentriX : visibilité du portail et Honeypot selon le mode choisi",
+                )
+                await channel.set_permissions(
+                    verified, view_channel=False,
+                    reason="SentriX : masquer la vérification après validation",
+                )
+            except (discord.Forbidden, discord.HTTPException):
+                logger.warning(
+                    "Impossible de régler la visibilité du salon %s guild=%s",
+                    channel.id, guild.id,
+                )
+
     async def refresh_existing_panels(
-        self,
-        guild: discord.Guild,
+        self, guild: discord.Guild, *, honeypot_enabled: bool | None = None,
     ) -> tuple[dict | None, str | None]:
         """Met à jour les panneaux existants sans les supprimer au redémarrage."""
         conf = await self.config(guild.id, enabled_only=True)
@@ -715,6 +758,14 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
                 "Le salon stay-muted configuré a été supprimé. "
                 "SentriX ne le recrée pas automatiquement."
             )
+
+        if honeypot_enabled is None:
+            from . import security_verification_v71 as security_v71
+            advanced = await security_v71.settings(self.bot, guild.id)
+            honeypot_enabled = bool(advanced["honeypot_enabled"])
+        await self.ensure_verified_panel_hidden(
+            guild, honeypot_enabled=honeypot_enabled,
+        )
 
         await self.bot.db.execute(
             "CREATE TABLE IF NOT EXISTS automatic_verification_panel_messages_v5 ("
@@ -737,12 +788,31 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
             verify_message_id,
             kind="verify",
         )
-        trap_message = await self._update_or_send_panel(
-            trap,
-            panels.depuis_embed(_trap_embed(verify, str(conf["sanction"] or "softban"))),
-            trap_message_id,
-            kind="trap",
-        )
+        trap_message = None
+        removed_trap_messages = 0
+        if honeypot_enabled:
+            trap_message = await self._update_or_send_panel(
+                trap,
+                panels.depuis_embed(_trap_embed(verify, str(conf["sanction"] or "softban"))),
+                trap_message_id,
+                kind="trap",
+            )
+        else:
+            # Si le mode 1 est choisi, retirer seulement le panneau du piège
+            # identifié comme appartenant au bot. Ne toucher à aucun message
+            # membre et ne pas recréer de panneau au prochain redémarrage.
+            old_trap_panel = await self._remembered_panel_message(
+                trap, trap_message_id, kind="trap",
+            )
+            if old_trap_panel is not None:
+                try:
+                    await old_trap_panel.delete()
+                    removed_trap_messages = 1
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    logger.warning(
+                        "Impossible de retirer l'ancien panneau Honeypot guild=%s",
+                        guild.id,
+                    )
         await self.bot.db.execute(
             "INSERT INTO automatic_verification_panel_messages_v5 "
             "(guild_id,verify_channel_id,verify_message_id,trap_channel_id,trap_message_id,updated_at) "
@@ -750,7 +820,8 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
             "verify_channel_id=excluded.verify_channel_id,verify_message_id=excluded.verify_message_id,"
             "trap_channel_id=excluded.trap_channel_id,trap_message_id=excluded.trap_message_id,"
             "updated_at=excluded.updated_at",
-            (guild.id, verify.id, verify_message.id, trap.id, trap_message.id, int(time.time())),
+            (guild.id, verify.id, verify_message.id, trap.id,
+             trap_message.id if trap_message is not None else None, int(time.time())),
         )
         return {
             "verify": verify,
@@ -758,7 +829,7 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
             "verify_message": verify_message,
             "trap_message": trap_message,
             "removed_verify_messages": 0,
-            "removed_trap_messages": 0,
+            "removed_trap_messages": removed_trap_messages,
         }, None
 
     async def create_or_refresh_system(
@@ -766,6 +837,7 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
         guild: discord.Guild,
         *,
         sanction: str = "softban",
+        honeypot_enabled: bool = True,
     ):
         """Une configuration existante est éditée sur place ; seule la première activation crée."""
         existing = await self.config(guild.id, enabled_only=True)
@@ -773,7 +845,9 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
             verify = guild.get_channel(int(existing["verify_channel_id"] or 0))
             trap = guild.get_channel(int(existing["trap_channel_id"] or 0))
             if isinstance(verify, discord.TextChannel) and isinstance(trap, discord.TextChannel):
-                refreshed, refresh_error = await self.refresh_existing_panels(guild)
+                refreshed, refresh_error = await self.refresh_existing_panels(
+                    guild, honeypot_enabled=honeypot_enabled,
+                )
                 if refresh_error:
                     return None, refresh_error
                 return {
@@ -785,11 +859,15 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
                     "sanction": str(existing["sanction"] or sanction),
                 }, None
 
-        result, error = await super().create_or_refresh_system(guild, sanction=sanction)
+        result, error = await super().create_or_refresh_system(
+            guild, sanction=sanction, honeypot_enabled=honeypot_enabled,
+        )
         if error or result is None:
             return result, error
 
-        refreshed, refresh_error = await self.refresh_existing_panels(guild)
+        refreshed, refresh_error = await self.refresh_existing_panels(
+            guild, honeypot_enabled=honeypot_enabled,
+        )
         if refresh_error:
             return None, refresh_error
         result.update({
