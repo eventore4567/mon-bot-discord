@@ -861,6 +861,7 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
 
         result, error = await super().create_or_refresh_system(
             guild, sanction=sanction, honeypot_enabled=honeypot_enabled,
+            publish_panels=False,
         )
         if error or result is None:
             return result, error
