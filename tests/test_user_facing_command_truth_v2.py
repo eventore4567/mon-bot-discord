@@ -60,7 +60,7 @@ def test_dashboard_share_link_is_the_public_sentrix_link():
     help_source = _read("cogs/help.py")
     ai = _read("cogs/ai.py")
 
-    expected = "https://sentrix-standby-production.up.railway.app/app"
+    expected = "https://sentrixbot.up.railway.app/app"
     assert expected in config
     for source in (arrival, access, help_source, ai):
         assert "DASHBOARD_SHARE_URL" in source

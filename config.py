@@ -102,7 +102,9 @@ DASHBOARD_CALLBACK_URL = f"{DASHBOARD_PUBLIC_URL}/oauth/callback"
 # Lien public que SentriX partage aux utilisateurs. Il est volontairement séparé de
 # DASHBOARD_PUBLIC_URL : ce dernier reste l'hôte OAuth canonique interne, tandis que le
 # domaine standby est le lien public stable utilisé dans les MP, boutons et réponses du bot.
-_DEFAULT_DASHBOARD_SHARE_URL = "https://sentrix-standby-production.up.railway.app/app"
+# 30/10/2026 : lien court choisi par Jayden. L'ancien sentrix-standby-production
+# n'existe plus (domaine renommé) : il renvoyait une 404 dans les boutons.
+_DEFAULT_DASHBOARD_SHARE_URL = "https://sentrixbot.up.railway.app/app"
 _raw_dashboard_share_url = os.getenv("DASHBOARD_SHARE_URL", "").strip().rstrip("/")
 if _raw_dashboard_share_url:
     if _raw_dashboard_share_url.endswith("/oauth/callback"):
