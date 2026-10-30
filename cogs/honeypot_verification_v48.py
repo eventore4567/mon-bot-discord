@@ -1664,14 +1664,13 @@ async def _repair_enabled_systems(bot: commands.Bot) -> None:
             if not conf:
                 continue
             verify_channel = guild.get_channel(int(conf["verify_channel_id"] or 0))
-            from . import security_verification_v71 as security_v71
-            mode = await security_v71.settings(bot, guild.id)
-            trap_channel = guild.get_channel(int(conf["trap_channel_id"] or 0))
-            if not isinstance(verify_channel, discord.TextChannel) or (
-                mode["honeypot_enabled"] and not isinstance(trap_channel, discord.TextChannel)
-            ):
+            # Seul le portail est absolument requis ici. Le moteur V5 vérifie
+            # lui-même le réglage Honeypot et signalera si son salon manque.
+            # Ne pas bloquer tous les portails si la lecture des options
+            # avancées échoue (migration ou DB temporairement occupée).
+            if not isinstance(verify_channel, discord.TextChannel):
                 logger.info(
-                    "V122 : salon nécessaire introuvable guild=%s ; aucune recréation au démarrage.",
+                    "V122 : salon du portail introuvable guild=%s ; aucune recréation au démarrage.",
                     guild.id,
                 )
                 continue
