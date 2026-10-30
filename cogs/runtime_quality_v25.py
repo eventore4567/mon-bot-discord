@@ -36,9 +36,10 @@ _CRITICAL_CONTRACTS: dict[str, tuple[str, ...]] = {
     "rps": ("choix",),
     "mute": ("membre", "duree", "raison"),
     "tempban": ("membre", "duree", "raison"),
-    # supprimer_messages : option ajoutée à +ban (messages envoyés avant le ban) ;
-    # l'ancien contrat la signalait en [ERROR] à chaque démarrage de production.
-    "ban": ("membre", "raison", "supprimer_messages"),
+    # 30/10/2026 : le choix de purge des messages est désormais interactif.
+    # /ban expose envoyer_mp pour le MP facultatif. Synchronisé avec
+    # tools/v25_quality_gate.py et les signatures réellement chargées.
+    "ban": ("membre", "raison", "envoyer_mp"),
     "kick": ("membre", "raison"),
 }
 
