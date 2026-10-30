@@ -371,10 +371,27 @@ class VerificationSetupView(discord.ui.View):
             # Aussi quand le système est marqué actif mais que ses salons ont été
             # supprimés : sinon « Activer » refusait, le panneau ne s'affichait plus
             # et rien ne permettait de le republier (signalé le 15/10/2026).
-            result, error = await honeypot.create_or_refresh_system(
-                interaction.guild, sanction=sanction,
-                honeypot_enabled=(mode == "both"),
-            )
+            try:
+                result, error = await honeypot.create_or_refresh_system(
+                    interaction.guild, sanction=sanction,
+                    honeypot_enabled=(mode == "both"),
+                )
+            except discord.Forbidden:
+                return await interaction.followup.send(
+                    "Discord refuse la création du portail. Donnez à SentriX les permissions "
+                    "Gérer les salons, Gérer les rôles et Envoyer des messages.", ephemeral=True,
+                )
+            except discord.HTTPException as exc:
+                logger.exception(
+                    "Installation du portail refusée par Discord guild=%s mode=%s",
+                    self.guild_id, mode,
+                )
+                return await interaction.followup.send(
+                    "Discord a refusé l'installation du portail. Vérifiez la catégorie "
+                    "de vérification et les permissions de SentriX puis relancez "
+                    "Activer / mettre à jour. Aucune protection supplémentaire n'a été activée.",
+                    ephemeral=True,
+                )
             if error:
                 return await interaction.followup.send(error, ephemeral=True)
             message = (
