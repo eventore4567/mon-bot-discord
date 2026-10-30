@@ -187,26 +187,70 @@ class VerificationSetupView(discord.ui.View):
         # Ouvert depuis la page Sécurité, le message est un panneau (Components V2) :
         # il ne peut pas être réédité avec un embed (Discord renvoie 400).
         self.panneau = panneau
+        # Deux choix utilisables avec le moteur web existant. Ne jamais
+        # prétendre offrir un Challenge Discord natif encore non disponible.
+        self.mode: str | None = None
+        self.sanction: str | None = None
+
+        mode_select = discord.ui.Select(
+            placeholder="1. Choisir le type de vérification",
+            min_values=1,
+            max_values=1,
+            row=0,
+            options=[
+                discord.SelectOption(
+                    label="Vérification seule",
+                    value="verification",
+                    description="Portail web avec CAPTCHA, sans piège actif.",
+                ),
+                discord.SelectOption(
+                    label="Vérification + Honeypot",
+                    value="both",
+                    description="Portail web et salon piège anti-bot.",
+                ),
+            ],
+        )
+
+        async def mode_cb(interaction: discord.Interaction):
+            self.mode = mode_select.values[0]
+            await interaction.response.defer()
+            await self._render(interaction)
+
+        mode_select.callback = mode_cb
+        self.add_item(mode_select)
+
+        sanction_select = discord.ui.Select(
+            placeholder="2. Action du Honeypot (si activé)",
+            min_values=1,
+            max_values=1,
+            row=1,
+            options=[
+                discord.SelectOption(label="Softban", value="softban",
+                                     description="Bannir puis débannir le compte piégé."),
+                discord.SelectOption(label="Kick", value="kick",
+                                     description="Expulser le compte piégé."),
+            ],
+        )
+
+        async def sanction_cb(interaction: discord.Interaction):
+            self.sanction = sanction_select.values[0]
+            await interaction.response.defer()
+            await self._render(interaction)
+
+        sanction_select.callback = sanction_cb
+        self.add_item(sanction_select)
 
         repair_btn = discord.ui.Button(
-            label="Activer / mettre à jour", style=discord.ButtonStyle.success, row=0
+            label="Activer / mettre à jour", style=discord.ButtonStyle.success, row=2
         )
 
         async def repair_cb(interaction: discord.Interaction):
-            await self._apply(interaction, "softban")
+            await self._apply(interaction)
 
         repair_btn.callback = repair_cb
         self.add_item(repair_btn)
 
-        kick_btn = discord.ui.Button(label="Mode kick", style=discord.ButtonStyle.secondary, row=0)
-
-        async def kick_cb(interaction: discord.Interaction):
-            await self._apply(interaction, "kick")
-
-        kick_btn.callback = kick_cb
-        self.add_item(kick_btn)
-
-        disable_btn = discord.ui.Button(label="Désactiver", style=discord.ButtonStyle.danger, row=0)
+        disable_btn = discord.ui.Button(label="Désactiver", style=discord.ButtonStyle.danger, row=2)
 
         async def disable_cb(interaction: discord.Interaction):
             honeypot = self.bot.get_cog("HoneypotVerification")
@@ -232,7 +276,17 @@ class VerificationSetupView(discord.ui.View):
             return False
         return True
 
-    async def _apply(self, interaction: discord.Interaction, sanction: str) -> None:
+    async def _apply(self, interaction: discord.Interaction) -> None:
+        from . import security_verification_v71 as security_v71
+
+        current_settings = await security_v71.settings(self.bot, self.guild_id)
+        mode = self.mode or (
+            "both" if current_settings["honeypot_enabled"] else "verification"
+        )
+        if mode not in {"verification", "both"}:
+            return await interaction.response.send_message(
+                "Choisissez l'un des deux modes proposés.", ephemeral=True
+            )
         honeypot = self.bot.get_cog("HoneypotVerification")
         if honeypot is None:
             return await interaction.response.send_message(
@@ -240,6 +294,9 @@ class VerificationSetupView(discord.ui.View):
             )
         await interaction.response.defer()
         current = await honeypot.config(interaction.guild.id, enabled_only=False)
+        sanction = self.sanction or (str(current["sanction"] or "softban") if current else "softban")
+        if sanction not in {"softban", "kick"}:
+            sanction = "softban"
         error = None
         if current and current["enabled"]:
             # Système actif et intact : on met à jour la sanction et les panneaux
@@ -265,26 +322,41 @@ class VerificationSetupView(discord.ui.View):
             if error:
                 return await interaction.followup.send(error, ephemeral=True)
             message = (
-                f"Vérification web activée : {result['verify'].mention} · "
-                f"Honeypot : {result['trap'].mention}."
+                f"Vérification web activée dans {result['verify'].mention}. "
+                + (
+                    f"Honeypot actif dans {result['trap'].mention}."
+                    if mode == "both" else
+                    "Le Honeypot reste désactivé et son salon technique est masqué."
+                )
             )
         # Installé = chaque arrivant reçoit « Non vérifié ». Si la vérification restait
         # désactivée côté réglages, son bouton répondait « désactivée » et le nouveau
         # membre restait bloqué dehors. L'administrateur vient de l'activer : on suit.
-        await self._set_protections(interaction, True)
+        await self._set_protections(interaction, True, honeypot_on=(mode == "both"))
+        # Le moteur historique conserve le salon piège comme ressource technique
+        # de repli ; il doit être inaccessible aux non vérifiés en mode simple.
+        # ensure_verified_panel_hidden utilise le choix réel du serveur.
+        await honeypot.ensure_verified_panel_hidden(interaction.guild)
+        self.mode, self.sanction = None, None
         await self._render(interaction)
-        await interaction.followup.send(message, ephemeral=True)
+        await interaction.followup.send(message, ephemeral=True,
+                                        allowed_mentions=_SANS_PING)
 
-    async def _set_protections(self, interaction: discord.Interaction, enabled: bool) -> None:
+    async def _set_protections(
+        self, interaction: discord.Interaction, enabled: bool, *,
+        honeypot_on: bool | None = None,
+    ) -> None:
         from . import security_verification_v71 as security_v71
 
-        try:
-            for field in ("honeypot_enabled", "verification_enabled"):
-                await security_v71.update_setting(
-                    self.bot, self.guild_id, field, int(enabled), interaction.user.id
-                )
-        except Exception:
-            logger.exception("Réglages vérification/piège non synchronisés guild=%s", self.guild_id)
+        choices = {
+            "verification_enabled": int(enabled),
+            "honeypot_enabled": int(enabled and (honeypot_on if honeypot_on is not None else True)),
+        }
+        for field, value in choices.items():
+            await security_v71.update_setting(
+                self.bot, self.guild_id, field, value, interaction.user.id
+            )
+        security_v71._invalidate_automod(self.bot, self.guild_id)
 
     async def _render(self, interaction: discord.Interaction) -> None:
         embed = await self.build_embed()
@@ -308,17 +380,48 @@ class VerificationSetupView(discord.ui.View):
             if active and guild and conf["trap_channel_id"]
             else None
         )
+        from . import security_verification_v71 as security_v71
+        settings = await security_v71.settings(self.bot, self.guild_id)
+        existing_mode = "both" if settings["honeypot_enabled"] else "verification"
+        selected = self.mode or existing_mode
         sanction = str(conf["sanction"] or "softban") if conf else "softban"
+        planned_sanction = self.sanction or sanction
+
+        for item in self.children:
+            if isinstance(item, discord.ui.Select):
+                if item.row == 0:
+                    for option in item.options:
+                        option.default = option.value == selected
+                elif item.row == 1:
+                    for option in item.options:
+                        option.default = option.value == planned_sanction
+
+        mode_label = (
+            "Vérification + Honeypot" if settings["honeypot_enabled"]
+            else "Vérification seule"
+        ) if active else "Désactivé"
+        desired = "Vérification + Honeypot" if selected == "both" else "Vérification seule"
+        pending = (
+            f"**Choix non appliqué :** {desired} · {planned_sanction}. Cliquez sur **Activer / mettre à jour**.\n\n"
+            if (selected != existing_mode or planned_sanction != sanction) else ""
+        )
         description = (
-            f"État : **{'ACTIF' if active else 'INACTIF'}**\n"
-            f"Vérification : {verify.mention if verify else '**non publiée**'}\n"
-            f"Honeypot : {trap.mention if trap else '**non publié**'}\n"
-            f"Sanction du piège : **{sanction}**\n\n"
-            "Le membre clique sur le panel Discord puis termine la vérification sur le site SentriX "
-            "(OAuth Discord, règlement, ancienneté du compte, CAPTCHA et calcul).\n\n"
-            "Si le système est déjà actif, **Mettre à jour** remplace seulement les panels existants. "
-            "Un salon supprimé n'est jamais recréé automatiquement. La création de structure n'arrive "
-            "que lors d'une nouvelle activation explicite."
+            f"**État :** {'ACTIF' if active else 'INACTIF'}\n"
+            f"**Mode actif :** {mode_label}\n"
+            f"**Portail :** {verify.mention if verify else 'non publié'}\n"
+            f"**Salon piège :** "
+            + (trap.mention if trap and settings["honeypot_enabled"] else "désactivé")
+            + f"\n**Sanction du piège :** {sanction if settings['honeypot_enabled'] else 'aucune'}\n\n"
+            + pending
+            + "### Deux configurations au choix\n"
+            "**1. Vérification seule :** accès par le portail web SentriX (CAPTCHA, règlement, contrôle du compte). "
+            "Aucune sanction Honeypot et salon piège masqué.\n"
+            "**2. Vérification + Honeypot :** même portail et salon piège pour les comptes en attente "
+            "avec sanction Softban ou Kick au choix.\n\n"
+            "La vérification utilise le site SentriX : le challenge classique de RaidProtect "
+            "n'est pas simulé. Aucun module n'est activé sans clic explicite.\n"
+            "-# Les salons techniques existants sont conservés ; l'installation initiale "
+            "peut créer les ressources nécessaires."
         )
         return discord.Embed(
             title="Vérification & Honeypot",
