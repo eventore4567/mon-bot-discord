@@ -20,6 +20,9 @@ _BG_DARK = (35, 36, 40)
 _BORDER = (74, 76, 82)
 
 EVENT_BACKGROUND_PRESETS = {
+    # 30/10/2026 (Jayden : « niveau et bienvenue n'ont pas de bannière ») :
+    # fond SentriX par défaut, dégradé violet de la bannière du bot.
+    "preset:sentrix": ((15, 12, 44), (24, 18, 70)),
     "preset:dark": ((28, 29, 33), (39, 40, 45)),
     "preset:gray": ((43, 45, 49), (52, 54, 60)),
     "preset:light": ((66, 68, 75), (78, 80, 88)),
@@ -140,8 +143,43 @@ async def read_member_avatar(member: discord.Member) -> bytes | None:
         return None
 
 
+DEFAULT_PRESET = "preset:sentrix"
+
+
 def _preset_palette(preset: str | None):
-    return EVENT_BACKGROUND_PRESETS.get(str(preset or ""), EVENT_BACKGROUND_PRESETS["preset:gray"])
+    return EVENT_BACKGROUND_PRESETS.get(str(preset or ""), EVENT_BACKGROUND_PRESETS[DEFAULT_PRESET])
+
+
+def _fond_sentrix() -> Image.Image:
+    """Dégradé indigo → violet, trame de points et halo : l'identité de la bannière."""
+    w, h = _SIZE
+    c1, c2, c3 = (15, 12, 44), (48, 30, 132), (96, 66, 220)
+    fond = Image.new("RGB", (w, 1))
+    for x in range(w):
+        a = x / max(1, w - 1)
+        if a < 0.5:
+            k = a / 0.5
+            c = tuple(int(c1[i] + (c2[i] - c1[i]) * k) for i in range(3))
+        else:
+            k = (a - 0.5) / 0.5
+            c = tuple(int(c2[i] + (c3[i] - c2[i]) * k) for i in range(3))
+        fond.putpixel((x, 0), c)
+    image = fond.resize((w, h)).convert("RGBA")
+    calque = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    trace = ImageDraw.Draw(calque)
+    for x in range(12, w, 26):
+        for y in range(12, h, 26):
+            trace.ellipse((x - 1, y - 1, x + 1, y + 1), fill=(255, 255, 255, 18))
+    halo = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    ImageDraw.Draw(halo).ellipse((w - 520, -160, w + 120, h + 120), fill=(150, 120, 255, 80))
+    from PIL import ImageFilter
+
+    halo = halo.filter(ImageFilter.GaussianBlur(90))
+    return Image.alpha_composite(Image.alpha_composite(image, calque), halo)
+
+
+#: Filet d'accent par type de carte.
+_FILETS = {"welcome": (170, 150, 255), "level": (255, 196, 76), "goodbye": (150, 160, 190)}
 
 
 def _neutral_background(
@@ -159,6 +197,8 @@ def _neutral_background(
             return Image.alpha_composite(image, shade)
         except Exception:
             pass
+    if str(preset or DEFAULT_PRESET) not in EVENT_BACKGROUND_PRESETS or str(preset or DEFAULT_PRESET) == DEFAULT_PRESET:
+        return _fond_sentrix()
     canvas, _panel = _preset_palette(preset)
     return Image.new("RGBA", _SIZE, (*canvas, 255))
 
@@ -238,13 +278,22 @@ def build_member_event_card(
     server = str(getattr(guild, "name", None) or "le serveur").strip()
 
     # Cadre simple, plat, identique pour les trois cartes.
-    draw.rounded_rectangle(
+    sentrix = background_bytes is None and str(background_preset or DEFAULT_PRESET) in (DEFAULT_PRESET, "") \
+        or str(background_preset or "") not in EVENT_BACKGROUND_PRESETS
+    # Calque à part : sur une image RGBA, ImageDraw REMPLACE les pixels au lieu
+    # de les mélanger ; un panneau translucide sortait opaque.
+    panneau = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    ImageDraw.Draw(panneau).rounded_rectangle(
         (34, 38, 1166, 382),
         radius=24,
-        fill=(*panel_color, 255) if background_bytes is None else (15, 16, 18, 145),
-        outline=(*_BORDER, 255),
+        fill=(10, 8, 34, 110) if sentrix and background_bytes is None
+        else (*panel_color, 255) if background_bytes is None else (15, 16, 18, 145),
+        outline=(255, 255, 255, 70) if sentrix else (*_BORDER, 255),
         width=2,
     )
+    image.alpha_composite(panneau)
+    draw = ImageDraw.Draw(image, "RGBA")
+    draw.rounded_rectangle((365, 86, 445, 92), radius=3, fill=(*_FILETS.get(kind, _FILETS["welcome"]), 255))
     _paste_avatar(image, avatar_bytes, name)
 
     x = 365
