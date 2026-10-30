@@ -80,7 +80,6 @@ GROUP_DESCRIPTIONS: dict[str, str] = {
     "staff manage": "Server diagnosis, backups and safe fixes.",
     "protection guard": "Advanced server guards.",
     "protection raid": "Raid Protect: emergency pause and raid responses.",
-    "custom": "Custom commands with actions.",
     "protection exempt": "Exemptions from SentriX protections.",
     "moderation": "Moderation tools for your staff.",
     "security": "Protect the server against spam, raids and scams.",
@@ -223,19 +222,8 @@ CATALOG: tuple[SlashEntry, ...] = (
     # 28/10/2026 — lot 2 du passage à 100 % « / » (sécurité).
     _e("protection lockdown", "lockdown-server", "Lock every text channel of the server."),
     _e("protection unlock", "unlock-server", "Unlock every text channel of the server."),
-    # 30/10/2026 — commandes personnalisées à actions (cogs/custom_commands.py).
-    _e("custom create", "customcmd create", "Create or edit a custom command."),
-    _e("custom role-add", "customcmd role-add", "Action: give a role."),
-    _e("custom role-remove", "customcmd role-remove", "Action: remove a role."),
-    _e("custom role-timed", "customcmd role-temp", "Action: give a role for a while."),
-    _e("custom money", "customcmd money", "Action: add money."),
-    _e("custom xp", "customcmd xp", "Action: add XP."),
-    _e("custom clear-actions", "customcmd clear-actions", "Remove every action of a command."),
-    _e("custom show", "customcmd show", "Show a custom command and its actions."),
-    _e("custom list", "customcmd list", "List custom commands."),
-    _e("custom delete", "customcmd delete", "Delete a custom command."),
-    _e("custom prefix", "customcmd prefix", "Prefix for custom commands."),
-    _e("custom delete-trigger", "customcmd delete-trigger", "Delete the message that ran the command."),
+    # 30/10/2026 — ces commandes sont configurées dans /setup ;
+    # les commandes personnalisées des serveurs gardent leur préfixe propre.
     # 29/10/2026 — Raid Protect (cogs/raid_protect.py), tout désactivé par défaut.
     _e("protection raid status", "raidprotect status", "Raid Protect settings and current pause."),
     _e("protection raid auto", "raidprotect auto-pause", "Pause joins automatically during a fast raid."),
