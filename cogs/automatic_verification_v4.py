@@ -252,7 +252,10 @@ class AutomaticVerification(commands.Cog, name=_COG_NAME):
                 logger.warning("Impossible de verrouiller le salon %s", channel.id)
             await asyncio.sleep(0.02)
 
-    async def create_or_refresh_system(self, guild: discord.Guild, *, sanction: str = "softban"):
+    async def create_or_refresh_system(
+        self, guild: discord.Guild, *, sanction: str = "softban",
+        honeypot_enabled: bool = True, publish_panels: bool = True,
+    ):
         """API compatible V3, mais le salon verification est purement informatif : aucun captcha."""
         await self.ensure_schema()
         if sanction not in {"softban", "kick"}:
@@ -265,9 +268,9 @@ class AutomaticVerification(commands.Cog, name=_COG_NAME):
             "Gérer les salons": me.guild_permissions.manage_channels,
             "Gérer les messages": me.guild_permissions.manage_messages,
         }
-        if sanction == "softban":
+        if honeypot_enabled and sanction == "softban":
             required["Bannir des membres"] = me.guild_permissions.ban_members
-        elif sanction == "kick":
+        elif honeypot_enabled and sanction == "kick":
             required["Expulser des membres"] = me.guild_permissions.kick_members
         missing = [label for label, ok in required.items() if not ok]
         if missing:
@@ -297,7 +300,10 @@ class AutomaticVerification(commands.Cog, name=_COG_NAME):
             await verify.set_permissions(guild.default_role, view_channel=False)
             await verify.set_permissions(unverified, view_channel=True, send_messages=False, read_message_history=True)
             await trap.set_permissions(guild.default_role, view_channel=False)
-            await trap.set_permissions(unverified, view_channel=True, send_messages=True, read_message_history=True)
+            await trap.set_permissions(
+                unverified, view_channel=honeypot_enabled,
+                send_messages=honeypot_enabled, read_message_history=True,
+            )
             await verify.set_permissions(verified, view_channel=False)
             await trap.set_permissions(verified, view_channel=False)
         except (discord.Forbidden, discord.HTTPException):
@@ -305,10 +311,13 @@ class AutomaticVerification(commands.Cog, name=_COG_NAME):
         await self._lock_channels(guild, unverified, {category.id, verify.id, trap.id})
 
         settings = await self.settings(guild.id)
-        try:
-            await verify.purge(limit=20, check=lambda m: self.bot.user is not None and m.author.id == self.bot.user.id)
-        except (discord.Forbidden, discord.HTTPException):
-            pass
+        # Le moteur V5 gère les panneaux persistants lui-même.
+        # Ne pas publier ici un ancien texte indiquant « aucun CAPTCHA ».
+        if publish_panels:
+            try:
+                await verify.purge(limit=20, check=lambda m: self.bot.user is not None and m.author.id == self.bot.user.id)
+            except (discord.Forbidden, discord.HTTPException):
+                pass
         info = discord.Embed(
             title="SentriX • Vérification automatique",
             description=(
@@ -317,15 +326,17 @@ class AutomaticVerification(commands.Cog, name=_COG_NAME):
             colour=discord.Color.blurple(),
         )
         info.set_footer(text="SentriX • Aucun captcha, aucun calcul, aucun code")
-        try:
-            await panels.envoyer(verify, panels.depuis_embed(info))
-        except discord.HTTPException:
-            pass
+        if publish_panels:
+            try:
+                await panels.envoyer(verify, panels.depuis_embed(info))
+            except discord.HTTPException:
+                pass
 
-        try:
-            await trap.purge(limit=20, check=lambda m: self.bot.user is not None and m.author.id == self.bot.user.id)
-        except (discord.Forbidden, discord.HTTPException):
-            pass
+        if publish_panels:
+            try:
+                await trap.purge(limit=20, check=lambda m: self.bot.user is not None and m.author.id == self.bot.user.id)
+            except (discord.Forbidden, discord.HTTPException):
+                pass
         trap_embed = discord.Embed(
             title="NE PAS ENVOYER DE MESSAGE DANS CE SALON",
             description=(
@@ -334,10 +345,11 @@ class AutomaticVerification(commands.Cog, name=_COG_NAME):
             ),
             colour=discord.Color.red(),
         )
-        try:
-            await panels.envoyer(trap, panels.depuis_embed(trap_embed))
-        except discord.HTTPException:
-            pass
+        if publish_panels and honeypot_enabled:
+            try:
+                await panels.envoyer(trap, panels.depuis_embed(trap_embed))
+            except discord.HTTPException:
+                pass
 
         await self.bot.db.execute(
             "INSERT INTO honeypot_verification(guild_id,enabled,category_id,trap_channel_id,verify_channel_id,unverified_role_id,verified_role_id,sanction,created_at) "
@@ -605,6 +617,12 @@ class AutomaticVerification(commands.Cog, name=_COG_NAME):
             return
         conf = await self.config(message.guild.id)
         if conf is None or message.channel.id != int(conf["trap_channel_id"] or 0):
+            return
+        # La classe V5 utilise ce listener hérité : interdire toute sanction
+        # quand seul le portail de vérification est actif.
+        from . import security_verification_v71 as security_v71
+        advanced = await security_v71.settings(self.bot, message.guild.id)
+        if not advanced["honeypot_enabled"]:
             return
         member = message.author
         if member.id == message.guild.owner_id or member.guild_permissions.administrator or await self._trusted(member):

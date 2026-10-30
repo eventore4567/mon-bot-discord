@@ -119,7 +119,10 @@ def test_one_time_cleanup_only_targets_old_duplicate_verification_channels():
 
 
 def test_existing_active_setup_updates_panels_without_creating_structure():
-    assert "refresh_existing_panels(interaction.guild)" in SETUP_SOURCE
+    # Le refresh doit désormais connaître le mode choisi pour ne PAS
+    # republier le panneau du piège lorsque seul le CAPTCHA est activé.
+    assert "await honeypot.refresh_existing_panels(" in SETUP_SOURCE
+    assert "interaction.guild, honeypot_enabled=(mode == \"both\")," in SETUP_SOURCE
     assert "Aucun salon ni catégorie n'a été créé." in SETUP_SOURCE
     assert "create_or_refresh_system" in SETUP_SOURCE
 
