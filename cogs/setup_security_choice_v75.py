@@ -476,6 +476,37 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
     exceptions.callback = open_exceptions
     container.add_item(discord.ui.ActionRow(exceptions))
 
+    # Accès direct à CHAQUE règle, inspiré des écrans de réglages par filtre :
+    # état réel et configuration explicite. Ce menu ne coche rien et n'active
+    # aucune protection à la place de l'administrateur.
+    from . import setup_v2_ui as security_ui
+    policy_options = security_ui.SECURITY_CENTER_PROTECTIONS
+    policy_select = discord.ui.Select(
+        placeholder="Configurer un filtre précis (sanction, whitelist, seuils)",
+        min_values=1,
+        max_values=1,
+        options=[
+            discord.SelectOption(
+                label=label[:100], value=key,
+                description=f"{group} · {description}"[:100],
+            )
+            for key, label, group, description in policy_options
+        ],
+    )
+
+    async def open_specific_policy(interaction: discord.Interaction):
+        chosen = policy_select.values[0]
+        await panels.envoyer(
+            interaction.response,
+            await security_ui._security_policy_setup_panel(
+                self, interaction.user.id, chosen,
+            ),
+            ephemere=True,
+        )
+
+    policy_select.callback = open_specific_policy
+    container.add_item(discord.ui.ActionRow(policy_select))
+
     # La liste « Actuellement : … » répétait mot pour mot les choix déjà visibles
     # dans le menu ci-dessus (capture du 28/10/2026) : un compteur suffit.
     container.add_item(discord.ui.TextDisplay(
