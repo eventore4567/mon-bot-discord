@@ -879,8 +879,11 @@ def _patch_setup_display(bot: commands.Bot) -> None:
             and getattr(self, "_v4_subpage", None) == "auto_verification"
         ):
             embed.description = (
-                "Aucun captcha ni calcul : SentriX combine **40 signaux** en "
-                "**8 familles pondérées**, puis produit un score sur **20**."
+                "**Analyse adaptative :** SentriX évalue **40 signaux** répartis "
+                "en **8 familles pondérées** et calcule un score sur **20**. "
+                "Cette analyse ne donne jamais directement le rôle final. "
+                "Pour accéder au serveur, le membre termine ensuite le "
+                "**portail web SentriX** (règlement, OAuth Discord et CAPTCHA)."
             )
             for index in reversed(range(len(embed.fields))):
                 name = str(embed.fields[index].name or "").casefold()
