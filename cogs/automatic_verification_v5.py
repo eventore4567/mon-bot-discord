@@ -738,6 +738,54 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
                     channel.id, guild.id,
                 )
 
+    async def _retire_unused_honeypot_channel(
+        self, guild: discord.Guild, conf, trap: discord.TextChannel | None,
+    ) -> bool:
+        """Nettoie uniquement le salon piège que SentriX a créé et laissé vide.
+
+        Ne supprime JAMAIS un salon contenant des messages de membres,
+        des publications non identifiées du bot ou de l'historique trop long.
+        Le mode simple reste sûr même si la suppression est impossible.
+        """
+        if not isinstance(trap, discord.TextChannel):
+            return False
+        category = guild.get_channel(int(conf["category_id"] or 0))
+        if (
+            trap.name != "stay-muted"
+            or not isinstance(category, discord.CategoryChannel)
+            or not category.name.startswith("SentriX")
+            or trap.category_id != category.id
+        ):
+            return False
+        bot_id = getattr(getattr(self.bot, "user", None), "id", None)
+        if bot_id is None:
+            return False
+        count = 0
+        try:
+            async for msg in trap.history(limit=50):
+                count += 1
+                if (
+                    msg.author.id != bot_id
+                    or not self._looks_like_own_panel(msg, "trap")
+                ):
+                    return False
+            # Un salon de 50+ messages peut cacher des messages plus anciens.
+            if count >= 50:
+                return False
+        except (discord.Forbidden, discord.HTTPException):
+            return False
+        try:
+            await trap.delete(reason="SentriX : vérification seule, salon piège inutilisé")
+        except (discord.Forbidden, discord.HTTPException):
+            logger.warning("Salon piège inactif conservé guild=%s.", guild.id)
+            return False
+        await self.bot.db.execute(
+            "UPDATE honeypot_verification SET trap_channel_id=NULL WHERE guild_id=?",
+            (guild.id,),
+        )
+        logger.info("Salon stay-muted inutilisé supprimé après passage en mode 1 guild=%s.", guild.id)
+        return True
+
     async def refresh_existing_panels(
         self, guild: discord.Guild, *, honeypot_enabled: bool | None = None,
     ) -> tuple[dict | None, str | None]:
@@ -753,16 +801,15 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
                 "Le salon de vérification configuré a été supprimé. "
                 "SentriX ne le recrée pas automatiquement."
             )
-        if not isinstance(trap, discord.TextChannel):
-            return None, (
-                "Le salon stay-muted configuré a été supprimé. "
-                "SentriX ne le recrée pas automatiquement."
-            )
-
         if honeypot_enabled is None:
             from . import security_verification_v71 as security_v71
             advanced = await security_v71.settings(self.bot, guild.id)
             honeypot_enabled = bool(advanced["honeypot_enabled"])
+        if honeypot_enabled and not isinstance(trap, discord.TextChannel):
+            return None, (
+                "Le salon Honeypot est introuvable. "
+                "Cliquez sur Activer / mettre à jour pour créer le piège du mode 2."
+            )
         await self.ensure_verified_panel_hidden(
             guild, honeypot_enabled=honeypot_enabled,
         )
@@ -797,10 +844,9 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
                 trap_message_id,
                 kind="trap",
             )
-        else:
-            # Si le mode 1 est choisi, retirer seulement le panneau du piège
-            # identifié comme appartenant au bot. Ne toucher à aucun message
-            # membre et ne pas recréer de panneau au prochain redémarrage.
+        elif isinstance(trap, discord.TextChannel):
+            # Conserver les éventuels messages des membres; retirer seulement
+            # le panneau identifié de SentriX.
             old_trap_panel = await self._remembered_panel_message(
                 trap, trap_message_id, kind="trap",
             )
@@ -809,10 +855,11 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
                     await old_trap_panel.delete()
                     removed_trap_messages = 1
                 except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                    logger.warning(
-                        "Impossible de retirer l'ancien panneau Honeypot guild=%s",
-                        guild.id,
-                    )
+                    logger.warning("Ancien panneau Honeypot conservé guild=%s", guild.id)
+            # Si le canal technique est vide (ou ne contenait que le panneau
+            # officiel), le retirer aussi pour n'avoir QU'UN salon visible.
+            if await self._retire_unused_honeypot_channel(guild, conf, trap):
+                trap = None
         await self.bot.db.execute(
             "INSERT INTO automatic_verification_panel_messages_v5 "
             "(guild_id,verify_channel_id,verify_message_id,trap_channel_id,trap_message_id,updated_at) "
@@ -820,7 +867,7 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
             "verify_channel_id=excluded.verify_channel_id,verify_message_id=excluded.verify_message_id,"
             "trap_channel_id=excluded.trap_channel_id,trap_message_id=excluded.trap_message_id,"
             "updated_at=excluded.updated_at",
-            (guild.id, verify.id, verify_message.id, trap.id,
+            (guild.id, verify.id, verify_message.id, trap.id if isinstance(trap, discord.TextChannel) else None,
              trap_message.id if trap_message is not None else None, int(time.time())),
         )
         return {
@@ -844,7 +891,9 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
         if existing is not None:
             verify = guild.get_channel(int(existing["verify_channel_id"] or 0))
             trap = guild.get_channel(int(existing["trap_channel_id"] or 0))
-            if isinstance(verify, discord.TextChannel) and isinstance(trap, discord.TextChannel):
+            if isinstance(verify, discord.TextChannel) and (
+                not honeypot_enabled or isinstance(trap, discord.TextChannel)
+            ):
                 refreshed, refresh_error = await self.refresh_existing_panels(
                     guild, honeypot_enabled=honeypot_enabled,
                 )

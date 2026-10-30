@@ -371,10 +371,27 @@ class VerificationSetupView(discord.ui.View):
             # Aussi quand le système est marqué actif mais que ses salons ont été
             # supprimés : sinon « Activer » refusait, le panneau ne s'affichait plus
             # et rien ne permettait de le republier (signalé le 15/10/2026).
-            result, error = await honeypot.create_or_refresh_system(
-                interaction.guild, sanction=sanction,
-                honeypot_enabled=(mode == "both"),
-            )
+            try:
+                result, error = await honeypot.create_or_refresh_system(
+                    interaction.guild, sanction=sanction,
+                    honeypot_enabled=(mode == "both"),
+                )
+            except discord.Forbidden:
+                return await interaction.followup.send(
+                    "Discord refuse la création du portail. Donnez à SentriX les permissions "
+                    "Gérer les salons, Gérer les rôles et Envoyer des messages.", ephemeral=True,
+                )
+            except discord.HTTPException as exc:
+                logger.exception(
+                    "Installation du portail refusée par Discord guild=%s mode=%s",
+                    self.guild_id, mode,
+                )
+                return await interaction.followup.send(
+                    "Discord a refusé l'installation du portail. Vérifiez la catégorie "
+                    "de vérification et les permissions de SentriX puis relancez "
+                    "Activer / mettre à jour. Aucune protection supplémentaire n'a été activée.",
+                    ephemeral=True,
+                )
             if error:
                 return await interaction.followup.send(error, ephemeral=True)
             message = (
@@ -477,7 +494,7 @@ class VerificationSetupView(discord.ui.View):
             if (selected != existing_mode or (selected == "both" and planned_sanction != sanction)) else ""
         )
         resources_ok = isinstance(verify, discord.TextChannel) and (
-            selected != "both" or isinstance(trap, discord.TextChannel)
+            not settings["honeypot_enabled"] or isinstance(trap, discord.TextChannel)
         )
         state = "ACTIF" if active and resources_ok else (
             "À RÉPARER" if active else "INACTIF"
@@ -491,14 +508,14 @@ class VerificationSetupView(discord.ui.View):
             + f"\n**Sanction du piège :** {sanction if settings['honeypot_enabled'] else 'aucune'}\n\n"
             + pending
             + "### Deux configurations au choix\n"
-            "**1. Vérification seule :** accès par le portail web SentriX (CAPTCHA, règlement, contrôle du compte). "
-            "Aucune sanction Honeypot et salon piège masqué.\n"
-            "**2. Vérification + Honeypot :** même portail et salon piège pour les comptes en attente "
-            "avec sanction Softban ou Kick au choix.\n\n"
+            "**1. Vérification seule :** un seul salon #verification-auto avec le portail web "
+            "(CAPTCHA, règlement et contrôle du compte). Aucun salon piège créé, aucune sanction.\n"
+            "**2. Vérification + Honeypot :** le même portail et un second salon "
+            "#stay-muted créé uniquement si ce mode est activé. Sanction Kick ou Softban.\n\n"
             "La vérification utilise le site SentriX : le challenge classique de RaidProtect "
             "n'est pas simulé. Aucun module n'est activé sans clic explicite.\n"
-            "-# Les salons techniques existants sont conservés ; l'installation initiale "
-            "peut créer les ressources nécessaires."
+            "-# Un ancien #stay-muted vide peut être retiré lorsque vous repassez en mode 1. "
+            "Un salon avec des messages ou du contenu non identifié est conservé et masqué."
         )
         return discord.Embed(
             title="Vérification & Honeypot",
@@ -529,7 +546,7 @@ def _extend_guided_catalogue() -> None:
         guided._s(
             "portal",
             "Portail & Honeypot",
-            "Publie ou répare le panneau de vérification et le salon piège anti-bot.",
+            "Installe le portail web seul ou avec un Honeypot au choix, sans doublons.",
             "internal:verification",
         ),
         guided._s(
@@ -555,7 +572,7 @@ def _extend_guided_catalogue() -> None:
             guided._s(
                 "verification_portal",
                 "Portail de vérification",
-                "Active ou répare verification et stay-muted avec leurs panneaux SentriX.",
+                "Active un seul salon de vérification, ou le Honeypot en supplément.",
                 "internal:verification",
             )
         )

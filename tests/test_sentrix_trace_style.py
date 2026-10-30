@@ -66,7 +66,8 @@ def test_deleted_message_media_uses_trace_preview_and_file_actions():
     assert "def _attachment_summary(" in logs_source
     assert "def _attachment_links(" in logs_source
     assert '("Pièces jointes", _attachment_summary(media_items), False)' in logs_source
-    assert "links=_attachment_links(media_items)" in logs_source
+    assert '"Accéder au salon", _discord_channel_url(message.guild.id, message.channel.id)' in logs_source
+    assert "*_attachment_links(media_items)" in logs_source
     assert "media_items=media_items" in logs_source
     assert "media_items: list[tuple[str, str, str]] | None = None" in service_source
 

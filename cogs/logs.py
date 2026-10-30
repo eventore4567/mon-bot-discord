@@ -900,7 +900,12 @@ class Logs(commands.Cog, name="Logs"):
                 ("Copier l'ID de l'auteur", message.author.id),
                 ("Copier l'ID du message", message.id),
             ],
-            links=_attachment_links(media_items),
+            # Le message est supprimé : ne pas proposer de lien 404 vers lui.
+            # En revanche, ouvrir le salon d'origine et chaque pièce jointe.
+            links=[
+                ("Accéder au salon", _discord_channel_url(message.guild.id, message.channel.id)),
+                *_attachment_links(media_items),
+            ],
         )
         key = log_service.make_event_key(
             message.guild.id,
