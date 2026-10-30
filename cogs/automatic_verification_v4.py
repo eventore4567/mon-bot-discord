@@ -286,18 +286,65 @@ class AutomaticVerification(commands.Cog, name=_COG_NAME):
 
         category = guild.get_channel(old["category_id"]) if old and old["category_id"] else None
         if not isinstance(category, discord.CategoryChannel):
-            category = await guild.create_category("SentriX • Vérification", reason="SentriX : vérification automatique")
+            # Un précédent essai peut avoir créé la catégorie mais échoué
+            # avant l'écriture en base. Réutiliser cette ressource au lieu
+            # d'empiler des catégories à chaque clic.
+            category = next((
+                item for item in getattr(guild, "categories", ())
+                if item.name == "SentriX • Vérification"
+            ), None)
+        if not isinstance(category, discord.CategoryChannel):
+            category = await guild.create_category(
+                "SentriX • Vérification", reason="SentriX : vérification web",
+            )
+
+        async def create_channel_safely(name: str, reason: str) -> discord.TextChannel:
+            nonlocal category
+            try:
+                return await guild.create_text_channel(name, category=category, reason=reason)
+            except discord.HTTPException as exc:
+                # Certains serveurs gardent momentanément une catégorie Discord
+                # supprimée dans le cache de guild.get_channel(). Discord refuse
+                # alors la création avec 50035 / parent_id: Category does not exist.
+                if "parent_id" not in str(exc).casefold() or "does not exist" not in str(exc).casefold():
+                    raise
+                live = await guild.fetch_channels()
+                fresh = next((
+                    item for item in live
+                    if isinstance(item, discord.CategoryChannel) and item.id == category.id
+                ), None)
+                if fresh is None:
+                    fresh = next((
+                        item for item in live
+                        if isinstance(item, discord.CategoryChannel)
+                        and item.name == "SentriX • Vérification"
+                    ), None)
+                category = fresh or await guild.create_category(
+                    "SentriX • Vérification",
+                    reason="SentriX : ancienne catégorie supprimée pendant la configuration",
+                )
+                return await guild.create_text_channel(name, category=category, reason=reason)
 
         verify = guild.get_channel(old["verify_channel_id"]) if old and old["verify_channel_id"] else None
         if not isinstance(verify, discord.TextChannel):
-            verify = await guild.create_text_channel("verification-auto", category=category, reason="SentriX : vérification automatique")
+            verify = next((
+                channel for channel in getattr(guild, "text_channels", ())
+                if channel.name == "verification-auto" and channel.category_id == category.id
+            ), None)
+        if not isinstance(verify, discord.TextChannel):
+            verify = await create_channel_safely(
+                "verification-auto", "SentriX : vérification web",
+            )
         # Vérification seule = UN seul salon créé. Le Honeypot ne fait
         # partie de l'installation que si l'admin choisit explicitement le mode 2.
         trap = guild.get_channel(old["trap_channel_id"]) if old and old["trap_channel_id"] else None
         if honeypot_enabled and not isinstance(trap, discord.TextChannel):
-            trap = await guild.create_text_channel(
-                "stay-muted", category=category, reason="SentriX : Honeypot activé",
-            )
+            trap = next((
+                channel for channel in getattr(guild, "text_channels", ())
+                if channel.name == "stay-muted" and channel.category_id == category.id
+            ), None)
+        if honeypot_enabled and not isinstance(trap, discord.TextChannel):
+            trap = await create_channel_safely("stay-muted", "SentriX : Honeypot activé")
 
         # Visibilité : les nouveaux voient uniquement l'information et le honeypot jusqu'au verdict.
         try:
