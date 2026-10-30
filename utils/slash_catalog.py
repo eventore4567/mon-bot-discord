@@ -126,7 +126,7 @@ GROUP_DESCRIPTIONS: dict[str, str] = {
     "duel": "Challenge another member.",
     "race": "First to answer wins.",
     "staff": "Staff collaboration and moderation follow-up.",
-    "snippet": "Post a stored staff message."
+    "snippet": "Post a stored staff message.",
     "invites": "Invitation tracking and reward management.",
 }
 
