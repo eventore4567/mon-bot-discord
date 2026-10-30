@@ -336,6 +336,39 @@ class EmbedDraft:
         return d
 
 
+def apply_author_preset(
+    draft: EmbedDraft,
+    choice: str,
+    *,
+    guild: discord.Guild | None = None,
+    bot_user: discord.abc.User | None = None,
+) -> bool:
+    """Choix visuel de l'auteur DANS l'embed, pas l'identité de l'application.
+
+    Discord détermine lui-même le nom et le badge APP de l'expéditeur. Ce
+    réglage n'utilise ni webhook ni usurpation d'une autre application.
+    """
+    if choice == "none":
+        draft.author_name = None
+        draft.author_icon_url = None
+    elif choice == "bot":
+        if bot_user is None:
+            return False
+        draft.author_name = str(getattr(bot_user, "display_name", None) or getattr(bot_user, "name", "SentriX"))[:MAX_AUTHOR_NAME]
+        avatar = getattr(bot_user, "display_avatar", None)
+        draft.author_icon_url = str(avatar.url) if avatar is not None else None
+    elif choice == "guild":
+        if guild is None:
+            return False
+        draft.author_name = str(guild.name)[:MAX_AUTHOR_NAME]
+        icon = getattr(guild, "icon", None)
+        draft.author_icon_url = str(icon.url) if icon is not None else None
+    else:
+        return False
+    draft.dirty = True
+    return True
+
+
 # ---------------------------------------------------------------- MODALS
 
 class EmbedTextModal(discord.ui.Modal, title="📝 Modifier le texte"):
@@ -375,6 +408,46 @@ class EmbedTextModal(discord.ui.Modal, title="📝 Modifier le texte"):
 
     async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
         await _report_ui_error(interaction, error, "modal Modifier le texte")
+
+
+class EmbedIdentityModal(discord.ui.Modal, title="Identité affichée dans l'embed"):
+    """Personnalise l'en-tête de l'embed ; n'affecte pas le profil du bot."""
+    def __init__(self, view: "EmbedAppearanceView"):
+        super().__init__()
+        self.view_ref = view
+        self.author_input = discord.ui.TextInput(
+            label="Nom affiché dans l'embed", required=False, max_length=MAX_AUTHOR_NAME,
+            default=view.draft.author_name or "", placeholder="Selimor x Tomioka",
+        )
+        self.icon_input = discord.ui.TextInput(
+            label="URL de la photo (facultatif)", required=False, max_length=MAX_URL_LEN,
+            default=view.draft.author_icon_url or "", placeholder="https://...",
+        )
+        self.add_item(self.author_input)
+        self.add_item(self.icon_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        name = str(self.author_input.value or "").strip()
+        icon = str(self.icon_input.value or "").strip()
+        if icon and not valid_url(icon):
+            return await panels.envoyer(
+                interaction.response,
+                panels.depuis_embed(embeds.error("L'icône doit être une URL https:// ou http:// valide.")),
+                ephemere=True,
+            )
+        if icon and not name:
+            return await panels.envoyer(
+                interaction.response,
+                panels.depuis_embed(embeds.error("Indiquez un nom pour afficher une icône d'auteur.")),
+                ephemere=True,
+            )
+        self.view_ref.draft.author_name = name or None
+        self.view_ref.draft.author_icon_url = icon or None
+        self.view_ref.draft.dirty = True
+        await self.view_ref.refresh(interaction)
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
+        await _report_ui_error(interaction, error, "modal Identité de l'embed")
 
 
 class EmbedColourModal(discord.ui.Modal, title="🎨 Couleur personnalisée"):
@@ -551,13 +624,39 @@ class EmbedAppearanceView(discord.ui.View):
         self.draft.dirty = True
         await self.refresh(interaction)
 
-    @discord.ui.button(label="Date automatique : activer/désactiver", style=discord.ButtonStyle.secondary, emoji="🕒", row=1)
+    @discord.ui.select(
+        placeholder="Photo + nom dans l'embed (pas le badge APP)",
+        options=[
+            discord.SelectOption(label="SentriX", value="bot", description="Nom et photo de l'application"),
+            discord.SelectOption(label="Ce serveur", value="guild", description="Nom et icône de ce serveur"),
+            discord.SelectOption(label="Personnalisé", value="custom", description="Saisir un nom et une photo"),
+            discord.SelectOption(label="Aucun auteur", value="none", description="Masquer le nom et la photo"),
+        ],
+        row=1,
+    )
+    async def pick_author(self, interaction: discord.Interaction, select: discord.ui.Select):
+        choice = select.values[0]
+        if choice == "custom":
+            return await interaction.response.send_modal(EmbedIdentityModal(self))
+        ok = apply_author_preset(
+            self.draft, choice, guild=interaction.guild,
+            bot_user=self.parent.cog.bot.user,
+        )
+        if not ok:
+            return await panels.envoyer(
+                interaction.response,
+                panels.depuis_embed(embeds.warning("Identité indisponible. Réessayez après un instant.")),
+                ephemere=True,
+            )
+        await self.refresh(interaction)
+
+    @discord.ui.button(label="Date automatique : activer/désactiver", style=discord.ButtonStyle.secondary, emoji="🕒", row=2)
     async def toggle_timestamp(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.draft.timestamp_enabled = not self.draft.timestamp_enabled
         self.draft.dirty = True
         await self.refresh(interaction)
 
-    @discord.ui.button(label="◀ Retour", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="◀ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.parent.refresh(interaction)
 
@@ -775,7 +874,7 @@ class EmbedBuilderView(discord.ui.View):
         # qui appelle exactement les mêmes actions ; restent 4 boutons d'action.
         reglages = [
             ("texte", "Texte : titre, description, footer", "📝", self.edit_text),
-            ("apparence", "Apparence : couleur, date", "🎨", self.open_appearance),
+            ("apparence", "Apparence : couleur, photo, nom, date", "🎨", self.open_appearance),
             ("images", "Images et miniature", "🖼️", self.edit_images),
             ("ajout_champ", "Ajouter un champ", "➕", self.add_field),
             ("champs", "Gérer les champs", "📋", self.manage_fields),
