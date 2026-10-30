@@ -52,6 +52,11 @@ def test_setup_offers_per_filter_automod_settings_without_auto_activation():
     assert 'policy_select = discord.ui.Select(' in SECURITY_UI
     assert 'placeholder="Configurer un filtre précis (sanction, whitelist, seuils)"' in SECURITY_UI
     assert 'security_ui._security_policy_setup_panel(' in SECURITY_UI
+    # « Vérification seule » reste reconnue même quand stay-muted n'existe pas.
+    assert 'require_trap: bool = False' in SECURITY_UI
+    assert 'not require_trap or isinstance(trap_channel, discord.TextChannel)' in SECURITY_UI
+    assert 'chosen.add("verification")' in SECURITY_UI
+    assert 'chosen.discard("honeypot")' in SECURITY_UI
 
 
 class DummyCategory:
