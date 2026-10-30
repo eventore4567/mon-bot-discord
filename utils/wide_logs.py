@@ -406,6 +406,14 @@ def compact_fields(embed: discord.Embed, *, limit: int = 2200) -> str:
     # deuxième fois comme champ avec l'ID recopié sous la citation.
     if (embed.title or "").casefold().startswith("message supprimé"):
         ignored |= {"supprimé par", "supprime par"}
+    # Le contrôle adaptatif a une narration métier dédiée : son score, sa
+    # décision et ses signaux sont lisibles dans des lignes courtes ci-dessous.
+    # Ne jamais recopier tous ces champs une seconde fois en fin de panneau.
+    if "vérification adaptative" in (embed.title or "").casefold():
+        ignored |= {
+            "décision", "decision", "blocage fort", "signaux non validés",
+            "signaux neutres / non disponibles", "moteur",
+        }
     for name, value in _field_map(embed):
         low = name.casefold().strip(" :")
         if any(token == low for token in ignored):
@@ -879,6 +887,49 @@ def narrative_body(
         reference = _field_value(embed, "référence", "reference")
         if reference:
             lines.append(f"**Référence :** {reference}")
+    elif (
+        (event_type in {"automod", "antiraid", "spam", "raid"} or event_type.startswith("automod_"))
+        and "vérification adaptative" in (embed.title or "").casefold()
+    ):
+        # Le moteur V5 fournit déjà score, seuil, décision, blocages et signaux.
+        # La branche AutoMod générique les ignorait, puis remplaçait tout par
+        # « Une protection SentriX s'est déclenchée pour ... » : très trompeur
+        # pour un contrôle informatif, notamment quand il réussit.
+        decision = _field_value_exact(embed, "Décision")
+        original = _clean_lines(embed.description)
+        scores = re.search(
+            r"(\d+(?:[.,]\d+)?)\s*/\s*20\s*[•·—-]\s*seuil\s*\*{0,2}(\d+(?:[.,]\d+)?)\s*/\s*20",
+            original, flags=re.IGNORECASE,
+        )
+        lines.append("**Contrôle d'entrée du compte**")
+        if decision:
+            lines.append(f"**Résultat :** {decision}")
+        else:
+            lines.append("**Résultat :** Vérification effectuée, décision indisponible.")
+        if scores:
+            lines.append(f"**Score de confiance :** {scores.group(1)}/20 · **Seuil requis :** {scores.group(2)}/20")
+        elif original:
+            lines.append(f"**Analyse :** {_strip_identity_prelude(original, identity_name, identity_id)[:220]}")
+        blockers = _field_value_exact(embed, "Blocage fort")
+        if blockers:
+            lines.append("**Blocage principal :**\n" + blockers[:650])
+        failed = _field_value_exact(embed, "Signaux non validés")
+        if failed and failed.casefold() != "aucun":
+            # Un signal seul doit rester visible : compact_fields élimine les
+            # petits champs, et une image sans contexte ne permet aucun audit.
+            lines.append("**Points à examiner :**\n" + failed[:1050])
+        elif decision and "non vérifié" in decision.casefold():
+            lines.append("**Points à examiner :** Aucun signal individuel renseigné.")
+        neutral = _field_value_exact(embed, "Signaux neutres / non disponibles")
+        if neutral and neutral.isdecimal() and int(neutral):
+            lines.append(f"**Signaux indisponibles (non pénalisants) :** {neutral}")
+        if "web" in decision.casefold() and "requise" in decision.casefold():
+            lines.append("**Suite :** le membre doit terminer le portail web et le CAPTCHA.")
+        elif "non vérifié" in decision.casefold():
+            lines.append("**Suite :** accès non vérifié conservé ; une revue staff est possible.")
+        elif "vérifié" in decision.casefold():
+            lines.append("**Suite :** vérification enregistrée.")
+        lines.append("-# Information de vérification : aucune sanction automatique liée à ce score.")
     elif (event_type in {"automod", "antiraid", "spam", "raid"} or event_type.startswith("automod_")) \
             and _field_value_exact(embed, "Statut"):
         # Carte d'incident complète (utils/automod_incident_card, 29/10/2026) :
@@ -1283,7 +1334,8 @@ def _trace_identity_ref(event_type: str, identity_id: int | None) -> str:
     if event.startswith("channel_") or event == "pins_update":
         return f"<#{identity_id}>"
     if (
-        event.startswith(("message_", "member_", "voice_", "ticket_", "automod_", "spam_", "raid_"))
+        event in {"automod", "antiraid", "spam", "raid"}
+        or event.startswith(("message_", "member_", "voice_", "ticket_", "automod_", "spam_", "raid_"))
         or event.startswith("invite_")
     ):
         return f"<@{identity_id}>"
@@ -1306,7 +1358,7 @@ def _trace_identity_label(event_type: str) -> str:
         return "Membre"
     if event.startswith("message_"):
         return "Auteur"
-    if event.startswith(("member_", "voice_", "ticket_", "automod_", "spam_", "raid_")):
+    if event in {"automod", "antiraid", "spam", "raid"} or event.startswith(("member_", "voice_", "ticket_", "automod_", "spam_", "raid_")):
         return "Membre"
     if event.startswith("channel_") or event == "pins_update":
         return "Salon"
