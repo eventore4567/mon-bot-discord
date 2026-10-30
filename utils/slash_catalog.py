@@ -126,6 +126,7 @@ GROUP_DESCRIPTIONS: dict[str, str] = {
     "duel": "Challenge another member.",
     "race": "First to answer wins.",
     "staff": "Staff collaboration and moderation follow-up.",
+    "snippet": "Post a stored staff message."
     "invites": "Invitation tracking and reward management.",
 }
 
@@ -136,6 +137,8 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("help", "help", "Browse SentriX commands and how to use them."),
     _e("ping", "ping", "Check SentriX latency."),
     _e("presentation", "presentation", "Post the SentriX intro and invite button."),
+    # 30/10/2026 : configuration via /setup, une seule action du staff en slash.
+    _e("snippet send", "snippet send", "Post a saved staff message."),
 
     # ---------------------------------------------------------------- Modération
     # Les gestes quotidiens restent à la racine, comme sur la plupart des bots :
