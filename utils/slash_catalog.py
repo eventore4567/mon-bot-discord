@@ -136,6 +136,7 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("setup", "setup", "Configure SentriX for this server."),
     _e("help", "help", "Browse SentriX commands and how to use them."),
     _e("ping", "ping", "Check SentriX latency."),
+    _e("presentation", "presentation", "Post the SentriX intro and invite button."),
 
     # ---------------------------------------------------------------- Modération
     # Les gestes quotidiens restent à la racine, comme sur la plupart des bots :
