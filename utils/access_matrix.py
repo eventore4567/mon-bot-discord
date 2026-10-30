@@ -137,6 +137,7 @@ PUBLIC_COMMANDS = frozenset({
 })
 
 OWNER_ONLY_COMMANDS = frozenset({
+    "auditbot",  # L'identité exacte est vérifiée dans evaluate().
     "bl", "blinfo", "unbl", "editbl", "sync", "syncguild", "setstatus",
     "status-rotate", "footer", "theme", "set-bot", "bot-servers", "bot-leave",
     # Diagnostics globaux (checks.is_bot_owner dans les cogs d'origine)
@@ -227,8 +228,6 @@ SUBCOMMAND_TIERS: dict[str, str] = {
 }
 
 DISCORD_PERMISSION_COMMANDS: dict[str, str] = {
-    # Seul +auditbot reste accessible avec le préfixe désactivé : accès admin.
-    "auditbot": "administrator",
     # Le fil SentriX (cogs/trace.py) : relire une action du staff, comme on lit
     # le journal d'audit de Discord.
     "trace": "view_audit_log",
@@ -1000,6 +999,17 @@ async def evaluate(bot, *, command_name: Any, author: Any, guild: Any) -> Access
                 f"Vous n'êtes pas autorisé à utiliser SentriX. Raison : {reason}",
                 "global-blacklist",
             )
+
+    # Exception privée : pas d'accès pour les administrateurs, guild owners
+    # ou autres propriétaires globaux même s'ils sont ajoutés dans OWNER_IDS.
+    if name == "auditbot":
+        from database.db import PRIMARY_CREATOR_ID
+        if user_id == PRIMARY_CREATOR_ID:
+            return AccessDecision(True, policy="auditbot:primary-creator")
+        return _deny(
+            "Cette commande est réservée au **créateur principal de SentriX**.",
+            "owner-global",
+        )
 
     is_global_owner = user_id is not None and await backend.is_global_owner(user_id)
 
