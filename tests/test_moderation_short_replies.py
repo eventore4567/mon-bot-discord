@@ -115,6 +115,13 @@ async def test_ban_envoie_une_carte_compacte_et_journalise_la_fiche_complete():
     membre = Mock(spec=discord.Member)
     membre.id = 7
     membre.mention = "<@7>"
+    # 30/10/2026 : /ban valide la hiérarchie AVANT le panneau ; ce scénario
+    # de succès doit représenter un auteur et un bot réellement au-dessus.
+    ctx.author.guild = ctx.guild
+    ctx.guild.owner_id = 99
+    ctx.author.top_role = 20
+    membre.top_role = 10
+    ctx.guild.me.top_role = 30
     outcome = SimpleNamespace(executed=True, hierarchy_error=None, case_number=12)
 
     with patch.object(moderation_module.moderation_service, "ban", AsyncMock(return_value=outcome)), \
