@@ -76,6 +76,8 @@ def _e(path: str, source: str, description: str) -> SlashEntry:
 #: Description de chaque racine (et sous-groupe) — affichée sous le nom du groupe.
 GROUP_DESCRIPTIONS: dict[str, str] = {
     "fun": "Fun interactions with other members.",
+    "snippet": "Saved staff messages.",
+    "wordreact": "Automatic reactions to configured words.",
     "music playlist": "Your personal playlists.",
     "staff manage": "Server diagnosis, backups and safe fixes.",
     "protection guard": "Advanced server guards.",
@@ -136,6 +138,13 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("help", "help", "Browse SentriX commands and how to use them."),
     _e("ping", "ping", "Check SentriX latency."),
     _e("presentation", "presentation", "Post the SentriX intro and invite button."),
+    _e("snippet create", "snippet create", "Save a reusable staff message."),
+    _e("snippet send", "snippet send", "Post a saved message in this channel."),
+    _e("snippet list", "snippet list", "List saved messages."),
+    _e("snippet delete", "snippet delete", "Delete a saved staff message."),
+    _e("wordreact add", "wordreact add", "React whenever a configured word appears."),
+    _e("wordreact remove", "wordreact remove", "Remove a word reaction."),
+    _e("wordreact list", "wordreact list", "Show configured word reactions."),
 
     # ---------------------------------------------------------------- Modération
     # Les gestes quotidiens restent à la racine, comme sur la plupart des bots :
