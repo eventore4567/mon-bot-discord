@@ -138,6 +138,25 @@ def score_signals(
 # Alias explicite pour les futurs tests/outils qui cherchent encore score_factors.
 score_factors = score_signals
 
+WEB_READY_LOG_DEDUP_SECONDS = 600
+
+
+def should_log_web_ready(previous: Any, *, now: int | None = None) -> bool:
+    """Réduire seulement les doublons de réussite, jamais les alertes négatives.
+
+    Utilise le résultat durable en base : fonctionne aussi après un basculement
+    HA. Un état inconnu ou une date incohérente produit toujours le log.
+    """
+    if previous is None:
+        return True
+    try:
+        prior_status = str(previous["status"] or "").casefold()
+        evaluated_at = int(previous["evaluated_at"])
+        elapsed = (int(time.time()) if now is None else int(now)) - evaluated_at
+    except (KeyError, TypeError, ValueError):
+        return True
+    return not (prior_status == "web_ready" and 0 <= elapsed < WEB_READY_LOG_DEDUP_SECONDS)
+
 
 class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
     def __init__(self, bot: commands.Bot):
@@ -544,9 +563,23 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
         # V120 : le moteur adaptatif reste un signal de sécurité, mais il ne donne plus
         # automatiquement le rôle final. Le membre doit terminer le parcours web
         # (OAuth Discord + règlement + CAPTCHA + contrôle adaptatif courant).
+        # Un membre déjà prêt peut être réévalué plusieurs fois (join, followup,
+        # activité). Ne pas publier le même résultat banal toutes les minutes.
+        # Lire l'état AVANT de le remplacer; une transition review -> web_ready
+        # est toujours journalisée, et tous les refus restent journalisés.
+        prior = None
+        try:
+            prior = await self.bot.db.fetchone(
+                "SELECT status,evaluated_at FROM automatic_verification_results_v4 "
+                "WHERE guild_id=? AND user_id=?",
+                (member.guild.id, member.id),
+            )
+        except Exception:
+            logger.debug("Historique adaptatif indisponible ; conserver le log.", exc_info=True)
         await self._save_result(member, score, threshold, "web_ready", factors)
         await self._event(member.guild.id, member.id, "web_ready")
-        await self._log_result(member, score, threshold, "web_ready", factors)
+        if should_log_web_ready(prior):
+            await self._log_result(member, score, threshold, "web_ready", factors)
         return score, False
 
     def schedule_evaluation(
