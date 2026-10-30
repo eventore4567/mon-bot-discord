@@ -1664,12 +1664,14 @@ async def _repair_enabled_systems(bot: commands.Bot) -> None:
             if not conf:
                 continue
             verify_channel = guild.get_channel(int(conf["verify_channel_id"] or 0))
+            from . import security_verification_v71 as security_v71
+            mode = await security_v71.settings(bot, guild.id)
             trap_channel = guild.get_channel(int(conf["trap_channel_id"] or 0))
-            if not isinstance(verify_channel, discord.TextChannel) or not isinstance(
-                trap_channel, discord.TextChannel
+            if not isinstance(verify_channel, discord.TextChannel) or (
+                mode["honeypot_enabled"] and not isinstance(trap_channel, discord.TextChannel)
             ):
                 logger.info(
-                    "V120 : vérification active mais salon supprimé guild=%s ; aucune recréation.",
+                    "V122 : salon nécessaire introuvable guild=%s ; aucune recréation au démarrage.",
                     guild.id,
                 )
                 continue
