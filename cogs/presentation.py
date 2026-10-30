@@ -78,7 +78,6 @@ def presentation_panel(url: str, *, banner: bool | None = None) -> panels.Pannea
 
 
 @app_commands.guild_only()
-@app_commands.default_permissions(manage_guild=True)
 @app_commands.describe(channel="Text channel where SentriX should publish the presentation.")
 async def _publish(interaction: discord.Interaction, channel: discord.TextChannel | None = None) -> None:
     guild = interaction.guild
@@ -87,7 +86,12 @@ async def _publish(interaction: discord.Interaction, channel: discord.TextChanne
             "Cette commande s'utilise dans un serveur Discord.", ephemeral=True,
         )
         return
-    if not getattr(getattr(interaction.user, "guild_permissions", None), "manage_guild", False):
+    # Le propriétaire du bot peut publier sans disposer de Gérer le serveur
+    # (lui aussi reste soumis aux permissions d’écriture du salon cible).
+    from database.db import PRIMARY_CREATOR_ID
+    authorized = bool(getattr(getattr(interaction.user, "guild_permissions", None), "manage_guild", False))
+    authorized = authorized or interaction.user.id == PRIMARY_CREATOR_ID
+    if not authorized:
         await interaction.response.send_message(
             "Il faut la permission **Gérer le serveur** pour publier cette présentation.",
             ephemeral=True,
