@@ -64,7 +64,7 @@ from cogs.games_catalog import (
 )
 from services import game_stakes
 from utils import command_refs
-from utils import checks, design_system, game_rewards, game_visuals, stats_service, temporary_boosts
+from utils import checks, design_system, game_rewards, stats_service, temporary_boosts
 from utils import sentrix_panels as panels
 from utils.game_duel_invites import DuelInvitation
 
@@ -106,11 +106,9 @@ async def _embed(bot, guild_id: int | None, *, title: str, description: str = No
     embed.title = f"{_game_icon(title)} {resolved_title}"
     if description:
         embed.description = str(description)
-    # `graine` fait varier l'animation d'un tour à l'autre sans la faire
-    # clignoter à l'intérieur d'un même tour : même graine, même image.
-    return await game_visuals.decorate_embed_checked(
-        embed, title=title, description=description, kind=kind, scene=scene, graine=graine
-    )
+    # Les jeux restent des cartes Discord rapides : aucun GIF, lien d'image
+    # aléatoire ni récupération externe à chaque tour de jeu.
+    return embed
 
 
 # Plus haut ou plus bas : la valeur reste un nombre de 1 a 13 pour la comparaison,
@@ -1242,11 +1240,7 @@ class _EmojiOrderButton(discord.ui.Button):
 
 
 class _BossFightView(discord.ui.View):
-    """Un duel contre le boss avec phases animées ATTACK/POWER/GUARD/COUNTER.
-
-    Le GIF de l'action s'affiche AVANT la riposte. Les boutons sont désactivés
-    pendant la séquence pour qu'un second clic ne dépense pas deux tours.
-    """
+    """Un combat au tour par tour avec boutons verrouillés pendant chaque action."""
     def __init__(self, cog: GamesRapides, ctx: commands.Context, session_id: str):
         super().__init__(timeout=110)
         self.cog = cog
@@ -1273,7 +1267,7 @@ class _BossFightView(discord.ui.View):
         )
 
     async def _phase(self, status: str, *, scene: str | None, buttons: bool) -> None:
-        """Édite le MÊME panneau Discord avec le GIF propre à cette phase."""
+        """Édite le même panneau Discord sans média externe."""
         for child in self.children:
             child.disabled = not buttons
         # Le numéro de tour sert de graine : l'animation change d'un tour à
@@ -1365,7 +1359,7 @@ class _BossFightButton(discord.ui.Button):
 
             await asyncio.sleep(0.9)
 
-            # 2) Le boss agit : son GIF est DIFFERENT de celui du joueur.
+            # 2) Le boss riposte dans la même carte, sans média externe.
             retaliation = max(0, game_rewards.secure_randint(2, 5) - defense)
             await view._phase(
                 f"🐲 Le boss prépare une riposte !\n"
@@ -2374,7 +2368,6 @@ class ConnectFourView(discord.ui.View):
         self.current = p1
         self.message: discord.Message | None = None
         self._settled = False
-        self._victory_gif: str | None = None
         for col in range(self.COLS):
             self.add_item(_ConnectFourButton(col))
 
@@ -2408,12 +2401,6 @@ class ConnectFourView(discord.ui.View):
             sections=[panels.Section("Plateau", texte=rows_text)],
             pied=f"{self.p1.display_name} {self.SYMBOLS['p1']}  ·  "
             f"{self.p2.display_name} {self.SYMBOLS['p2']}",
-            # Un GIF de victoire UNIQUEMENT quand la partie se termine :
-            # laisser le plateau et les boutons en haut pendant les tours.
-            image=(
-                self._victory_gif
-                if "gagne la partie" in status.casefold() else None
-            ),
         )
 
     def _lowest_row(self, col: int) -> int | None:
@@ -2465,9 +2452,6 @@ class ConnectFourView(discord.ui.View):
             self._settled = True
             await _finish_duel(self.cog.bot, self.guild_id, "connect4", self.p1, self.p2)
             winner = self.current
-            self._victory_gif = await game_visuals.verified_image_for(
-                "Puissance 4", "Victoire !", kind="success"
-            )
             reward = await game_rewards.reward_game_winner(self.cog.bot, self.guild_id, winner.id, "connect4", 40, self.session_id, result="win")
             await panels.editer(
                 interaction.response,
@@ -3496,9 +3480,4 @@ async def setup(bot: commands.Bot):
     await bot.add_cog(GamesPlayerCommands(bot))
     from cogs.games_setup import GamesSetup
     await bot.add_cog(GamesSetup(bot))
-    # Diagnostic non bloquant : les images sont testées en arrière-plan.
-    # Pas de création de salons, pas de dépendance aux GIFs pour jouer.
-    if not getattr(bot, "_sentrix_games_media_preflight_task", None):
-        bot._sentrix_games_media_preflight_task = asyncio.create_task(
-            game_visuals.preflight_assets(), name="sentrix-game-gifs"
-        )
+

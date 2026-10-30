@@ -20,10 +20,9 @@ from discord import app_commands
 from discord.ext import commands
 
 from cogs.games_catalog import ROULEAU_SLOTS
-from utils import embeds, helpers, design_system, game_rewards, game_visuals
+from utils import embeds, helpers, design_system, game_rewards
 from utils import sentrix_panels as panels
 from utils.game_duel_invites import DuelInvitation
-from utils.blackjack_cards import render_table_gif
 
 logger = logging.getLogger("bot.minigames")
 
@@ -91,10 +90,8 @@ class Minigames(commands.Cog, name="Minigames"):
         # Le titre d'un mini-jeu porte le pictogramme de CE jeu, comme dans
         # cogs/games_economy : « Question de culture générale » arrivait nu.
         embed.title = f"{pictogramme_de_titre(title)} {resolu}"
-        # Le blackjack a SA propre animation de vraies cartes, sans GIF générique.
-        if title == "Blackjack":
-            return embed
-        return await game_visuals.decorate_embed_checked(embed, title=title, description=description, kind=kind)
+        # Aucun GIF dans les mini-jeux, y compris le Blackjack.
+        return embed
 
     @staticmethod
     def _coeurs(restants: int, total: int = ESSAIS_PENDU) -> str:
@@ -576,23 +573,8 @@ class Minigames(commands.Cog, name="Minigames"):
         croupier: list[tuple[str, int]], *,
         devoile: bool, phase: str,
     ) -> panels.Panneau:
-        """Cartes et animation dans le MÊME message Components V2 que les boutons."""
-        panneau = panels.depuis_embed(embed)
-        try:
-            animation = render_table_gif(joueur, croupier, hidden=not devoile, phase=phase)
-            galerie = discord.ui.MediaGallery()
-            galerie.add_item(media="attachment://sentrix_blackjack.gif")
-            conteneur = next(
-                (item for item in panneau.children if isinstance(item, discord.ui.Container)),
-                None,
-            )
-            if conteneur is not None:
-                conteneur.add_item(galerie)
-                panneau._local_game_animation = ("sentrix_blackjack.gif", animation)
-        except Exception:
-            # Un problème de fonte/Pillow ne doit jamais priver le joueur de ses coups.
-            logger.exception("Impossible de dessiner les cartes du blackjack.")
-        return panneau
+        """Affichage textuel rapide ; cartes et scores restent dans l'embed."""
+        return panels.depuis_embed(embed)
 
     @commands.hybrid_command(name="blackjack", description="Jouer au blackjack contre le croupier.", with_app_command=False)
     async def blackjack(self, ctx: commands.Context):

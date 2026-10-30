@@ -102,15 +102,16 @@ def test_invalid_command_does_not_show_a_heavy_gif():
     assert not embed.image.url
 
 
-def test_game_modules_use_same_single_visual_resolver():
+def test_game_modules_no_longer_attach_media_to_live_panels():
     economy = (ROOT / "cogs/games_economy.py").read_text(encoding="utf-8")
     mini = (ROOT / "cogs/minigames.py").read_text(encoding="utf-8")
     arcade = (ROOT / "cogs/games_arcade.py").read_text(encoding="utf-8")
     for name, source in (("economy", economy), ("mini", mini)):
-        assert "game_visuals.decorate_embed_checked(" in source, name
+        assert "game_visuals.decorate_embed_checked(" not in source, name
+        assert "game_visuals.verified_image_for(" not in source, name
     assert "from cogs.games_economy import _embed" in arcade
-    assert 'if "gagne la partie" in status.casefold() else None' in economy
-    assert "verified_image_for" in economy
+    assert "_victory_gif" not in economy
+    assert "render_table_gif(" not in mini
 
 
 def test_verified_media_skips_broken_html_and_never_creates_blank_gallery(monkeypatch):

@@ -36,24 +36,17 @@ def test_blackjack_hidden_card_differs_from_revealed_card():
         assert a.convert("RGB").tobytes() != b.convert("RGB").tobytes()
 
 
-def test_blackjack_panel_attaches_local_cards_not_coinflip_gif():
+def test_blackjack_panel_no_longer_attaches_any_gif():
     embed = discord.Embed(title="Blackjack", description="À vous de jouer")
     panneau = Minigames._panneau_blackjack(
         embed, PLAYER, DEALER, devoile=False, phase="deal",
     )
     components = repr(panneau.to_components())
-    assert "attachment://sentrix_blackjack.gif" in components
+    assert "sentrix_blackjack.gif" not in components
     assert "sentrix_game_coin.gif" not in components
-    # La bande fine de la carte (7aea328) est jointe à côté de la table.
     files = panneau.fichiers()
-    tables = [f for f in files if f.filename == "sentrix_blackjack.gif"]
-    assert len(tables) == 1
-    assert not any(f.filename == "sentrix_game_coin.gif" for f in files)
-    assert tables[0].fp.read(6) in (b"GIF87a", b"GIF89a")
-    another = panneau.fichiers()
-    autre_table = next(f for f in another if f.filename == "sentrix_blackjack.gif")
-    assert autre_table.fp is not tables[0].fp
-    for f in [*files, *another]:
+    assert not any(f.filename.lower().endswith(".gif") for f in files)
+    for f in files:
         f.close()
 
 

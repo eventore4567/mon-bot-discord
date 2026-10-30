@@ -595,59 +595,59 @@ class FunSocial(commands.Cog, name="FunSocial"):
                   membre: discord.Member | None = None, autre: discord.Member | None = None):
         await self.run_action(ctx, action, membre, autre)
 
-    @commands.command(name="hug")
+    @commands.command(name="hug", help="Faire un câlin à un membre.")
     async def hug(self, ctx: commands.Context, membre: discord.Member | None = None):
         await self.run_action(ctx, "hug", membre)
 
-    @commands.command(name="kiss")
+    @commands.command(name="kiss", help="Envoyer un bisou amical à un membre.")
     async def kiss(self, ctx: commands.Context, membre: discord.Member | None = None):
         await self.run_action(ctx, "kiss", membre)
 
-    @commands.command(name="pat")
+    @commands.command(name="pat", help="Féliciter gentiment un membre.")
     async def pat(self, ctx: commands.Context, membre: discord.Member | None = None):
         await self.run_action(ctx, "pat", membre)
 
-    @commands.command(name="slap")
+    @commands.command(name="slap", help="Donner une tape fictive et humoristique.")
     async def slap(self, ctx: commands.Context, membre: discord.Member | None = None):
         await self.run_action(ctx, "slap", membre)
 
-    @commands.command(name="cuddle")
+    @commands.command(name="cuddle", help="Faire un câlin virtuel à un membre.")
     async def cuddle(self, ctx: commands.Context, membre: discord.Member | None = None):
         await self.run_action(ctx, "cuddle", membre)
 
-    @commands.command(name="highfive")
+    @commands.command(name="highfive", help="Faire un check amical à un membre.")
     async def highfive(self, ctx: commands.Context, membre: discord.Member | None = None):
         await self.run_action(ctx, "highfive", membre)
 
-    @commands.command(name="poke")
+    @commands.command(name="poke", help="Taquiner gentiment un membre.")
     async def poke(self, ctx: commands.Context, membre: discord.Member | None = None):
         await self.run_action(ctx, "poke", membre)
 
-    @commands.command(name="tickle")
+    @commands.command(name="tickle", help="Chatouiller virtuellement un membre.")
     async def tickle(self, ctx: commands.Context, membre: discord.Member | None = None):
         await self.run_action(ctx, "tickle", membre)
 
-    @commands.command(name="wave")
+    @commands.command(name="wave", help="Saluer un membre.")
     async def wave(self, ctx: commands.Context, membre: discord.Member | None = None):
         await self.run_action(ctx, "wave", membre)
 
-    @commands.command(name="dance")
+    @commands.command(name="dance", help="Lancer une danse virtuelle.")
     async def dance(self, ctx: commands.Context):
         await self.run_action(ctx, "dance")
 
-    @commands.command(name="aura")
+    @commands.command(name="aura", help="Afficher une aura humoristique de membre.")
     async def aura(self, ctx: commands.Context, membre: discord.Member | None = None):
         await self.run_action(ctx, "aura", membre)
 
-    @commands.command(name="hack")
+    @commands.command(name="hack", help="Simuler un piratage fictif et sans danger.")
     async def hack(self, ctx: commands.Context, membre: discord.Member | None = None):
         await self.run_action(ctx, "hack", membre)
 
-    @commands.command(name="scan")
+    @commands.command(name="scan", help="Faire un scan humoristique d'un membre.")
     async def scan(self, ctx: commands.Context, membre: discord.Member | None = None):
         await self.run_action(ctx, "scan", membre)
 
-    @commands.command(name="ship")
+    @commands.command(name="ship", help="Calculer un duo fictif entre deux membres.")
     async def ship(self, ctx: commands.Context, membre: discord.Member | None = None,
                    autre: discord.Member | None = None):
         # +ship @A @B ou +ship @A => compatibilité entre auteur et @A
@@ -655,11 +655,11 @@ class FunSocial(commands.Cog, name="FunSocial"):
         second = autre or (ctx.author if membre else first)
         await self.run_action(ctx, "ship", first, second)
 
-    @commands.command(name="roast")
+    @commands.command(name="roast", help="Lancer une pique humoristique adaptée au serveur.")
     async def roast(self, ctx: commands.Context, membre: discord.Member | None = None):
         await self.run_action(ctx, "roast", membre)
 
-    @commands.command(name="compliment")
+    @commands.command(name="compliment", help="Faire un compliment amical à un membre.")
     async def compliment(self, ctx: commands.Context, membre: discord.Member | None = None):
         await self.run_action(ctx, "compliment", membre)
 
