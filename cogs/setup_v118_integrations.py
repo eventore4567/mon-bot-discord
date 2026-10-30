@@ -358,7 +358,9 @@ class VerificationSetupView(discord.ui.View):
                 "UPDATE honeypot_verification SET sanction=? WHERE guild_id=?",
                 (sanction, interaction.guild.id),
             )
-            result, error = await honeypot.refresh_existing_panels(interaction.guild)
+            result, error = await honeypot.refresh_existing_panels(
+                interaction.guild, honeypot_enabled=(mode == "both"),
+            )
             if not error:
                 message = (
                     f"Panel web mis à jour dans {result['verify'].mention}. "
@@ -370,7 +372,8 @@ class VerificationSetupView(discord.ui.View):
             # supprimés : sinon « Activer » refusait, le panneau ne s'affichait plus
             # et rien ne permettait de le republier (signalé le 15/10/2026).
             result, error = await honeypot.create_or_refresh_system(
-                interaction.guild, sanction=sanction
+                interaction.guild, sanction=sanction,
+                honeypot_enabled=(mode == "both"),
             )
             if error:
                 return await interaction.followup.send(error, ephemeral=True)
@@ -389,7 +392,9 @@ class VerificationSetupView(discord.ui.View):
         # Le moteur historique conserve le salon piège comme ressource technique
         # de repli ; il doit être inaccessible aux non vérifiés en mode simple.
         # ensure_verified_panel_hidden utilise le choix réel du serveur.
-        await honeypot.ensure_verified_panel_hidden(interaction.guild)
+        await honeypot.ensure_verified_panel_hidden(
+            interaction.guild, honeypot_enabled=(mode == "both"),
+        )
         self.mode, self.sanction = None, None
         await self._render(interaction)
         await interaction.followup.send(message, ephemeral=True,
@@ -455,6 +460,8 @@ class VerificationSetupView(discord.ui.View):
                     for option in item.options:
                         option.default = option.value == selected
                 elif item.row == 1:
+                    # Aucune sanction n'est configurable ni applicable en mode 1.
+                    item.disabled = selected != "both"
                     for option in item.options:
                         option.default = option.value == planned_sanction
 
@@ -464,8 +471,10 @@ class VerificationSetupView(discord.ui.View):
         ) if active else "Désactivé"
         desired = "Vérification + Honeypot" if selected == "both" else "Vérification seule"
         pending = (
-            f"**Choix non appliqué :** {desired} · {planned_sanction}. Cliquez sur **Activer / mettre à jour**.\n\n"
-            if (selected != existing_mode or planned_sanction != sanction) else ""
+            f"**Choix non appliqué :** {desired}"
+            + (f" · {planned_sanction}" if selected == "both" else "")
+            + ". Cliquez sur **Activer / mettre à jour**.\n\n"
+            if (selected != existing_mode or (selected == "both" and planned_sanction != sanction)) else ""
         )
         resources_ok = isinstance(verify, discord.TextChannel) and (
             selected != "both" or isinstance(trap, discord.TextChannel)
