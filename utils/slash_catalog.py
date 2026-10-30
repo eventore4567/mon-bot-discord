@@ -127,6 +127,9 @@ GROUP_DESCRIPTIONS: dict[str, str] = {
     "duel": "Challenge another member.",
     "race": "First to answer wins.",
     "staff": "Staff collaboration and moderation follow-up.",
+    "snippet": "Saved staff messages.",
+    "wordreact": "Word-triggered reactions.",
+    "recurring": "Scheduled recurring posts.",
     "invites": "Invitation tracking and reward management.",
 }
 
@@ -137,6 +140,18 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("help", "help", "Browse SentriX commands and how to use them."),
     _e("ping", "ping", "Check SentriX latency."),
     _e("presentation", "presentation", "Post the SentriX intro and invite button."),
+    _e("snippet create", "snippet create", "Save a reusable message for staff."),
+    _e("snippet send", "snippet send", "Post a saved staff message."),
+    _e("snippet list", "snippet list", "List saved staff messages."),
+    _e("snippet delete", "snippet delete", "Delete a saved staff message."),
+    _e("wordreact add", "wordreact add", "Add an automatic word reaction."),
+    _e("wordreact remove", "wordreact remove", "Remove a word reaction."),
+    _e("wordreact list", "wordreact list", "List configured word reactions."),
+    _e("recurring create", "recurring create", "Prepare a recurring message, initially paused."),
+    _e("recurring list", "recurring list", "List recurring messages."),
+    _e("recurring pause", "recurring pause", "Pause a recurring message."),
+    _e("recurring resume", "recurring resume", "Enable a recurring message."),
+    _e("recurring delete", "recurring delete", "Delete a recurring message."),
 
     # ---------------------------------------------------------------- Modération
     # Les gestes quotidiens restent à la racine, comme sur la plupart des bots :
