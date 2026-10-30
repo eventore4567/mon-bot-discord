@@ -63,6 +63,15 @@ def prefixe_actif() -> bool:
     return os.environ.get("SENTRIX_PREFIXE_ACTIF", "0") == "1"
 
 
+def _auditbot_allowed(ctx: commands.Context) -> bool:
+    """Seule exception préfixe, strictement pour le diagnostic non destructif."""
+    return bool(
+        ctx.interaction is None
+        and ctx.command is not None
+        and getattr(ctx.command, "qualified_name", "") == "auditbot"
+    )
+
+
 def commande_slash(texte: str) -> str | None:
     """« +clear 10 » -> mention cliquable de /clear (catalogue), ou None."""
     from utils import sentrix_panels as panels, slash_ids
@@ -205,7 +214,7 @@ class PrefixDeprecation(commands.Cog):
         bot = self.bot
 
         async def invoke(ctx: commands.Context, /):
-            if ctx.interaction is None and not prefixe_actif():
+            if ctx.interaction is None and not prefixe_actif() and not _auditbot_allowed(ctx):
                 # « + » retiré : rien n'est exécuté ; on dit quelle commande « / » utiliser.
                 try:
                     await repondre_retire(ctx)
@@ -215,7 +224,7 @@ class PrefixDeprecation(commands.Cog):
             try:
                 return await original(ctx)
             finally:
-                if ctx.interaction is None:
+                if ctx.interaction is None and not _auditbot_allowed(ctx):
                     try:
                         await avertir(bot, ctx)
                     except Exception:
