@@ -402,6 +402,10 @@ def compact_fields(embed: discord.Embed, *, limit: int = 2200) -> str:
         ignored.add("📝 motif")
     # La mémoire d'arrivée est déjà narrée par narrative_body.
     ignored |= {"mémoire", "memoire", "memory"}
+    # Supprimé par est rendu explicitement dans message_delete, pas une
+    # deuxième fois comme champ avec l'ID recopié sous la citation.
+    if (embed.title or "").casefold().startswith("message supprimé"):
+        ignored |= {"supprimé par", "supprime par"}
     for name, value in _field_map(embed):
         low = name.casefold().strip(" :")
         if any(token == low for token in ignored):
@@ -509,10 +513,20 @@ def narrative_body(
         if reference:
             lines.append(f"**Référence :** {reference}")
     elif event_type == "message_delete":
+        # L'auteur est déjà dans l'en-tête avec sa photo, et le salon est
+        # cliquable. Afficher les deux informations vraiment importantes ici :
+        # contenu d'origine et exécuteur, sans répéter des identifiants bruts.
         if content:
             lines.append(_message_quote(content))
         else:
             lines.append("Le contenu du message supprimé n’était pas disponible.")
+        delete_actor = _field_value(embed, "supprimé par", "supprime par")
+        if delete_actor:
+            actor_mention = _first_user_ref(delete_actor)
+            if actor_mention:
+                lines.append(f"**Supprimé par :** {actor_mention}")
+            else:
+                lines.append("**Supprimé par :** Non identifié (Discord ne confirme pas toujours l’exécuteur).")
     elif event_type == "message_edit":
         # Auteur + salon sont déjà dans l'en-tête compact : ne pas les répéter
         # dans une phrase supplémentaire.
