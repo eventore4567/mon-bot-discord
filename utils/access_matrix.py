@@ -234,6 +234,7 @@ DISCORD_PERMISSION_COMMANDS: dict[str, str] = {
     "protectmember": "manage_roles",
     "addemoji": "manage_emojis_and_stickers",
     "deleteemoji": "manage_emojis_and_stickers",
+    "presentation": "manage_guild",
     "server-health": "manage_guild",
     "systemstatus": "manage_guild",
     "starboard-setup": "manage_guild",
