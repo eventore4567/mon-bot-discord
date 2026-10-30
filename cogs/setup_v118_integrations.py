@@ -268,6 +268,59 @@ class VerificationSetupView(discord.ui.View):
         disable_btn.callback = disable_cb
         self.add_item(disable_btn)
 
+        diagnostics_btn = discord.ui.Button(
+            label="Diagnostic", style=discord.ButtonStyle.secondary, row=2
+        )
+
+        async def diagnostic_cb(interaction: discord.Interaction):
+            await self._diagnostic(interaction)
+
+        diagnostics_btn.callback = diagnostic_cb
+        self.add_item(diagnostics_btn)
+
+    async def _diagnostic(self, interaction: discord.Interaction) -> None:
+        """Contrôles en lecture seule, sans créer de rôles ni salons."""
+        guild = interaction.guild
+        honeypot = self.bot.get_cog("HoneypotVerification")
+        if guild is None or honeypot is None:
+            return await interaction.response.send_message(
+                "Vérification indisponible sur ce serveur.", ephemeral=True
+            )
+        conf = await honeypot.config(guild.id, enabled_only=False)
+        if not conf or not conf["enabled"]:
+            return await interaction.response.send_message(
+                "Vérification non installée. Choisissez un mode et cliquez sur Activer.",
+                ephemeral=True,
+            )
+        from . import security_verification_v71 as security_v71
+        security = await security_v71.settings(self.bot, guild.id)
+        verify = guild.get_channel(int(conf["verify_channel_id"] or 0))
+        trap = guild.get_channel(int(conf["trap_channel_id"] or 0))
+        unverified = guild.get_role(int(conf["unverified_role_id"] or 0))
+        me = guild.me
+        errors = []
+        if not isinstance(verify, discord.TextChannel):
+            errors.append("Salon de vérification introuvable")
+        if security["honeypot_enabled"] and not isinstance(trap, discord.TextChannel):
+            errors.append("Salon Honeypot introuvable")
+        if unverified is None:
+            errors.append("Rôle Non vérifié introuvable")
+        if me is None or not me.guild_permissions.manage_roles:
+            errors.append("Permission Gérer les rôles absente")
+        if me is not None and unverified is not None and unverified >= me.top_role:
+            errors.append("Rôle Non vérifié au-dessus de SentriX")
+        if isinstance(verify, discord.TextChannel) and me is not None:
+            permissions = verify.permissions_for(me)
+            if not (permissions.view_channel and permissions.send_messages):
+                errors.append("SentriX ne peut pas écrire dans #vérification")
+            if unverified is not None and not verify.permissions_for(unverified).view_channel:
+                errors.append("Salon de vérification invisible pour le rôle Non vérifié")
+        result = (
+            "**Diagnostic :** " + ("À corriger\n- " + "\n- ".join(errors) if errors else "Aucun problème évident détecté.")
+            + "\n-# Ce contrôle ne publie rien et ne modifie aucune permission."
+        )
+        await interaction.response.send_message(result, ephemeral=True, allowed_mentions=_SANS_PING)
+
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
             await interaction.response.send_message(
@@ -414,8 +467,14 @@ class VerificationSetupView(discord.ui.View):
             f"**Choix non appliqué :** {desired} · {planned_sanction}. Cliquez sur **Activer / mettre à jour**.\n\n"
             if (selected != existing_mode or planned_sanction != sanction) else ""
         )
+        resources_ok = isinstance(verify, discord.TextChannel) and (
+            selected != "both" or isinstance(trap, discord.TextChannel)
+        )
+        state = "ACTIF" if active and resources_ok else (
+            "À RÉPARER" if active else "INACTIF"
+        )
         description = (
-            f"**État :** {'ACTIF' if active else 'INACTIF'}\n"
+            f"**État :** {state}\n"
             f"**Mode actif :** {mode_label}\n"
             f"**Portail :** {verify.mention if verify else 'non publié'}\n"
             f"**Salon piège :** "
