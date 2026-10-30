@@ -1,4 +1,5 @@
 """Discord AutoMod native blocking is visible to staff without content leaks."""
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -107,3 +108,17 @@ def test_missing_channel_warning_throttled_by_category():
     assert delivery._should_warn_missing_channel(123, "resources", 1010.0)
     assert delivery._should_warn_missing_channel(123, "voice", 4601.0)
     delivery._MISSING_CHANNEL_WARNED_AT.clear()
+
+
+def test_setup_automod_diagnostic_is_read_only_and_reports_actual_route():
+    source = Path("cogs/setup_security_choice_v75.py").read_text("utf-8")
+    block = source.split("    async def diagnostic_automod(", 1)[1].split(
+        "    diagnostic.callback = diagnostic_automod", 1
+    )[0]
+    assert "protection_requirements.diagnostic(perms, active)" in block
+    assert 'get_log_setting(self.bot, self.guild.id, "automod")' in block
+    assert "validate_channel(" in block
+    assert "set_automod(" not in block
+    assert "create_text_channel(" not in block
+    assert "set_log_enabled(" not in block
+    assert "Diagnostic AutoMod" in block
