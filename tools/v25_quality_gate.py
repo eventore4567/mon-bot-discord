@@ -27,8 +27,9 @@ CRITICAL_CONTRACTS = {
     "deposit": ("montant",),
     "withdraw": ("montant",),
     "rps": ("choix",),
-    # supprimer_messages : option ajoutée pour purger les messages du banni.
-    "ban": ("membre", "raison", "supprimer_messages"),
+    # 30/10/2026 : les messages se suppriment via le panneau Oui/Non ;
+    # envoyer_mp est le paramètre slash explicite du bannissement.
+    "ban": ("membre", "raison", "envoyer_mp"),
     "kick": ("membre", "raison"),
     "mute": ("membre", "duree", "raison"),
     "tempban": ("membre", "duree", "raison"),
