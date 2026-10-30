@@ -450,6 +450,9 @@ async def test_native_block_diagnostic_identifies_rule_and_user_without_message_
         get_guild=Mock(return_value=member.guild),
     )
     cog = AutoMod(bot)
+    # Ce test vérifie l'audit natif sans démarrer la DB/Discord réelle.
+    # Le log staff a ses propres tests de contenu et de destination.
+    cog.log_action = AsyncMock()
     execution = SimpleNamespace(
         guild_id=1, user_id=member.id, rule_id=55, channel_id=66,
         content="mot de passe qui ne doit pas apparaître dans les logs",
@@ -461,6 +464,8 @@ async def test_native_block_diagnostic_identifies_rule_and_user_without_message_
         await cog.on_automod_action(execution)
 
     member.guild.fetch_automod_rule.assert_awaited_once()
+    cog.log_action.assert_awaited_once()
+    assert "mot de passe" not in str(cog.log_action.await_args)
     assert "SENTRIX_BLOCK_SOURCE=discord_native" in caplog.text
     assert "rule_name=Règle manuelle du serveur" in caplog.text
     assert "privileged=True" in caplog.text
