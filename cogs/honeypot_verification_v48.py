@@ -708,10 +708,13 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
 
         if isinstance(trap_channel, discord.TextChannel):
             try:
+                from . import security_verification_v71 as security_v71
+                advanced = await security_v71.settings(self.bot, guild.id)
+                trap_active = bool(advanced.get("honeypot_enabled"))
                 await trap_channel.set_permissions(
                     unverified,
-                    view_channel=True,
-                    send_messages=True,
+                    view_channel=trap_active,
+                    send_messages=trap_active,
                     read_message_history=True,
                     add_reactions=False,
                     reason="SentriX : honeypot visible uniquement avant vérification",
@@ -1222,6 +1225,12 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
 
         conf = await self.config(message.guild.id)
         if not conf or message.channel.id != conf["trap_channel_id"]:
+            return
+        # Vérification seule : le salon piège hérité reste inaccessible et
+        # un éventuel message ne doit JAMAIS déclencher de sanction.
+        from . import security_verification_v71 as security_v71
+        advanced = await security_v71.settings(self.bot, message.guild.id)
+        if not advanced["honeypot_enabled"]:
             return
 
         member = message.author
