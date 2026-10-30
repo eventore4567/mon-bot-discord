@@ -208,7 +208,7 @@ async def _save_protections(
         "INSERT INTO honeypot_verification(guild_id,enabled,created_at) "
         "VALUES(?,?,strftime('%s','now')) "
         "ON CONFLICT(guild_id) DO UPDATE SET enabled=excluded.enabled",
-        (view.guild.id, honeypot_enabled),
+        (view.guild.id, int(bool(honeypot_enabled or verification_enabled))),
     )
 
     await core.set_module_enabled(
@@ -222,7 +222,7 @@ async def _save_protections(
     # Aucune création de ressource ici. Si Honeypot est déjà configuré avec des
     # ressources existantes, on active simplement son état ; sinon il reste off.
     honeypot = view.bot.get_cog("HoneypotVerification")
-    if honeypot is not None and "honeypot" not in chosen:
+    if honeypot is not None and not (chosen & {"honeypot", "verification"}):
         try:
             conf = await honeypot.config(view.guild.id, enabled_only=False)
             if conf and conf["enabled"]:
@@ -230,6 +230,13 @@ async def _save_protections(
         except Exception:
             logger.exception("Setup sécurité : désactivation Honeypot impossible guild=%s", view.guild.id)
 
+    # Si l'admin conserve la vérification mais coupe le piège, le salon
+    # technique doit devenir invisible pour les nouveaux arrivants.
+    if honeypot is not None and chosen & {"honeypot", "verification"}:
+        try:
+            await honeypot.ensure_verified_panel_hidden(view.guild)
+        except Exception:
+            logger.exception("Impossible de synchroniser les permissions du Honeypot.")
     await _refresh_security_runtime(view)
     return notice
 
