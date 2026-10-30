@@ -291,24 +291,32 @@ class AutomaticVerification(commands.Cog, name=_COG_NAME):
         verify = guild.get_channel(old["verify_channel_id"]) if old and old["verify_channel_id"] else None
         if not isinstance(verify, discord.TextChannel):
             verify = await guild.create_text_channel("verification-auto", category=category, reason="SentriX : vérification automatique")
+        # Vérification seule = UN seul salon créé. Le Honeypot ne fait
+        # partie de l'installation que si l'admin choisit explicitement le mode 2.
         trap = guild.get_channel(old["trap_channel_id"]) if old and old["trap_channel_id"] else None
-        if not isinstance(trap, discord.TextChannel):
-            trap = await guild.create_text_channel("stay-muted", category=category, reason="SentriX : honeypot")
+        if honeypot_enabled and not isinstance(trap, discord.TextChannel):
+            trap = await guild.create_text_channel(
+                "stay-muted", category=category, reason="SentriX : Honeypot activé",
+            )
 
         # Visibilité : les nouveaux voient uniquement l'information et le honeypot jusqu'au verdict.
         try:
             await verify.set_permissions(guild.default_role, view_channel=False)
             await verify.set_permissions(unverified, view_channel=True, send_messages=False, read_message_history=True)
-            await trap.set_permissions(guild.default_role, view_channel=False)
-            await trap.set_permissions(
-                unverified, view_channel=honeypot_enabled,
-                send_messages=honeypot_enabled, read_message_history=True,
-            )
+            if isinstance(trap, discord.TextChannel):
+                await trap.set_permissions(guild.default_role, view_channel=False)
+                await trap.set_permissions(
+                    unverified, view_channel=honeypot_enabled,
+                    send_messages=honeypot_enabled, read_message_history=True,
+                )
+                await trap.set_permissions(verified, view_channel=False)
             await verify.set_permissions(verified, view_channel=False)
-            await trap.set_permissions(verified, view_channel=False)
         except (discord.Forbidden, discord.HTTPException):
             pass
-        await self._lock_channels(guild, unverified, {category.id, verify.id, trap.id})
+        excluded_channels = {category.id, verify.id}
+        if isinstance(trap, discord.TextChannel):
+            excluded_channels.add(trap.id)
+        await self._lock_channels(guild, unverified, excluded_channels)
 
         settings = await self.settings(guild.id)
         # Le moteur V5 gère les panneaux persistants lui-même.
@@ -332,7 +340,7 @@ class AutomaticVerification(commands.Cog, name=_COG_NAME):
             except discord.HTTPException:
                 pass
 
-        if publish_panels:
+        if publish_panels and isinstance(trap, discord.TextChannel):
             try:
                 await trap.purge(limit=20, check=lambda m: self.bot.user is not None and m.author.id == self.bot.user.id)
             except (discord.Forbidden, discord.HTTPException):
@@ -345,7 +353,7 @@ class AutomaticVerification(commands.Cog, name=_COG_NAME):
             ),
             colour=discord.Color.red(),
         )
-        if publish_panels and honeypot_enabled:
+        if publish_panels and honeypot_enabled and isinstance(trap, discord.TextChannel):
             try:
                 await panels.envoyer(trap, panels.depuis_embed(trap_embed))
             except discord.HTTPException:
@@ -356,7 +364,8 @@ class AutomaticVerification(commands.Cog, name=_COG_NAME):
             "VALUES(?,1,?,?,?,?,?,?,?) ON CONFLICT(guild_id) DO UPDATE SET enabled=1,category_id=excluded.category_id,"
             "trap_channel_id=excluded.trap_channel_id,verify_channel_id=excluded.verify_channel_id,unverified_role_id=excluded.unverified_role_id,"
             "verified_role_id=excluded.verified_role_id,sanction=excluded.sanction",
-            (guild.id, category.id, trap.id, verify.id, unverified.id, verified.id, sanction, int(time.time())),
+            (guild.id, category.id, trap.id if isinstance(trap, discord.TextChannel) else None,
+             verify.id, unverified.id, verified.id, sanction, int(time.time())),
         )
         await self.update_settings(guild.id)
         return {"category": category, "verify": verify, "trap": trap, "unverified": unverified, "verified": verified, "sanction": sanction}, None
