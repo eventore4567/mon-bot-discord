@@ -174,6 +174,8 @@ EXTENSIONS = [
     "cogs.embed_builder",
     # Message privé à un membre (+dm). La diffusion à tout le serveur a été retirée.
     "cogs.direct_message",
+    "cogs.presentation",
+    "cogs.sentrix_name_style",
     # Suite staff : fiches membres, dossiers, incidents, surveillance, absences,
     # handover, rapports et rappels. Doit être chargée AVANT la finalisation visuelle.
     "cogs.staff_suite",
