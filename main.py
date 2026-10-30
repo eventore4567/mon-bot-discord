@@ -85,6 +85,7 @@ EXTENSIONS = [
     "cogs.embed_builder",
     # Message privé à un membre (+dm). La diffusion à tout le serveur a été retirée.
     "cogs.direct_message",
+    "cogs.presentation",
     # cogs.visual_experience_v5 declenche finalize_runtime() et doit rester
     # DERNIERE : une extension chargee apres elle echappe a toute la pile de
     # style.
@@ -256,6 +257,7 @@ DISCORD_PERMISSION_COMMANDS = {
     "clear": "manage_messages",
     "say": "manage_messages",
     "embed-create": "manage_messages",
+    "presentation": "manage_guild",
     "slowmode": "manage_channels",
     "lock": "manage_channels",
     "unlock": "manage_channels",

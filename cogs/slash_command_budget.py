@@ -70,6 +70,7 @@ def _required_names() -> set[str]:
         _v110_public_root_names()
         | _canonical_group_root_names()
         | set(PROOF_SLASH_PREFERRED)
+        | {"presentation"}  # panneau d’installation public, demandé comme slash stable
     )
 
 
