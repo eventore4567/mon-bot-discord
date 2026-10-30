@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import logging
+import time
 
 import discord
 from discord.ext import commands
@@ -20,6 +21,7 @@ CREATE TABLE IF NOT EXISTS word_reactions (
 )
 """
 WORD_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{1,31}$")
+_CACHE: dict[int, tuple[float, list]] = {}
 
 
 def matches(text: str, word: str) -> bool:
@@ -31,10 +33,15 @@ def matches(text: str, word: str) -> bool:
 async def react_for_message(bot, message: discord.Message) -> bool:
     if message.guild is None or message.author.bot or not message.content:
         return False
-    rows = await bot.db.fetchall(
-        "SELECT word,emoji FROM word_reactions WHERE guild_id=? ORDER BY word",
-        (message.guild.id,),
-    )
+    cached = _CACHE.get(message.guild.id)
+    if cached is None or time.monotonic() - cached[0] >= 60:
+        rows = list(await bot.db.fetchall(
+            "SELECT word,emoji FROM word_reactions WHERE guild_id=? ORDER BY word",
+            (message.guild.id,),
+        ))
+        _CACHE[message.guild.id] = (time.monotonic(), rows)
+    else:
+        rows = cached[1]
     for row in rows:
         if not matches(message.content, row["word"]):
             continue
@@ -83,12 +90,14 @@ class WordReactions(commands.Cog):
             "ON CONFLICT(guild_id,word) DO UPDATE SET emoji=excluded.emoji",
             (ctx.guild.id, word, emoji),
         )
+        _CACHE.pop(ctx.guild.id, None)
         await panels.envoyer(ctx, panel("Réaction enregistrée", f"Le mot {word} déclenchera désormais une réaction.", "success"))
 
     @wordreact.command(name="remove", help="Retirer une réaction de mot.")
     async def wordreact_remove(self, ctx, mot: str):
         word = normaliser(mot)
         await self.bot.db.execute("DELETE FROM word_reactions WHERE guild_id=? AND word=?", (ctx.guild.id, word))
+        _CACHE.pop(ctx.guild.id, None)
         await panels.envoyer(ctx, panel("Réaction retirée", f"La règle {word} a été supprimée.", "success"))
 
     @wordreact.command(name="list", help="Lister les mots avec réactions.")
