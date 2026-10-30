@@ -318,9 +318,9 @@ async def _send_welcome(bot, member: discord.Member, *, test: bool = False) -> t
         colour=discord.Colour(0x4E5058),
     )
     panel.set_footer(text="SentriX")
-    background_preset = str(_conf_value(conf, "welcome_image_url", "preset:gray") or "preset:gray")
+    background_preset = str(_conf_value(conf, "welcome_image_url", "preset:sentrix") or "preset:sentrix")
     if background_preset not in EVENT_BACKGROUND_PRESETS:
-        background_preset = "preset:gray"
+        background_preset = "preset:sentrix"
     card_file = None
     try:
         avatar_bytes = await read_member_avatar(member) if presentation["show_avatar"] else None
@@ -398,9 +398,9 @@ async def _send_goodbye(bot, member: discord.Member, *, test: bool = False) -> d
     panel.set_footer(text="SentriX")
     card_file = None
     try:
-        background_preset = str(_conf_value(conf, "goodbye_image_url", "preset:gray") or "preset:gray")
+        background_preset = str(_conf_value(conf, "goodbye_image_url", "preset:sentrix") or "preset:sentrix")
         if background_preset not in EVENT_BACKGROUND_PRESETS:
-            background_preset = "preset:gray"
+            background_preset = "preset:sentrix"
         avatar_bytes = await read_member_avatar(member) if presentation["show_avatar"] else None
         perms = channel.permissions_for(member.guild.me) if member.guild.me else None
         if perms is not None and perms.attach_files:
