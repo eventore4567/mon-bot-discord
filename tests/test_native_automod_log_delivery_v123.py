@@ -51,6 +51,10 @@ async def test_native_block_creates_one_staff_log_with_rule_channel_and_member()
     assert fields["Source"] == "Discord AutoMod"
     assert "bloqué" in fields["Statut"]
     assert not any("content" in field.name.casefold() for field in args[1].fields)
+    buttons = audit.await_args.kwargs["suites"].children
+    assert len(buttons) == 1
+    assert buttons[0].label == "Accéder au salon"
+    assert buttons[0].url == "https://discord.com/channels/123/321"
 
     # The same user/rule event repeated within the debounce window is ignored.
     await AutoMod.on_automod_action(cog, RestrictedExecution())
