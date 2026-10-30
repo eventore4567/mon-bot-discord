@@ -421,21 +421,22 @@ def test_chaque_permission_a_sa_propre_ligne_dans_un_cadre():
     assert texte.count("```diff") == 1 and texte.count("```") == 2
     lignes = texte.splitlines()
     assert lignes[0] == "<@&950> · 3 permissions"
-    assert any(l.startswith("+ " + permission_label("view_channel")) and l.endswith("autorisée") for l in lignes)
-    assert any(l.startswith("- " + permission_label("attach_files")) and l.endswith("refusée") for l in lignes)
+    # 30/10/2026 : ligne courte, le signe + (vert) / - (rouge) dit l'état.
+    assert any(l.startswith("+ " + permission_label("view_channel")) and "autorisée" not in l for l in lignes)
+    assert any(l.startswith("- " + permission_label("attach_files")) and "refusée" not in l for l in lignes)
     assert any(l.startswith("  " + permission_label("send_messages")) and l.endswith("par défaut") for l in lignes)
 
 
-def test_les_etats_sont_alignes_en_colonne():
+def test_les_lignes_sont_courtes_le_signe_dit_l_etat():
+    """30/10/2026 : « autorisée / refusée » et l'alignement doublaient la
+    longueur et coupaient la liste ; le signe + / - (coloré) suffit."""
     role = _RoleFactice(951)
     change = _diff_derogations(
         {}, {role: discord.PermissionOverwrite(view_channel=True, manage_webhooks=False)}
     )
     lignes = [l for l in _texte_derogations(change).splitlines() if l[:2] in {"+ ", "- "}]
     assert len(lignes) == 2
-    positions = {l.rstrip().rfind("  ") for l in lignes}
-    assert len(positions) == 1, "les mots d'état doivent tomber dans la même colonne"
-
+    assert all("autorisée" not in l and "refusée" not in l for l in lignes)
 
 def test_un_cadre_nest_jamais_coupe_par_le_budget():
     roles = [_RoleFactice(960 + i) for i in range(30)]
@@ -445,3 +446,21 @@ def test_un_cadre_nest_jamais_coupe_par_le_budget():
     assert texte.count("```") % 2 == 0, "un ``` orphelin casserait la carte"
     assert "et " in texte and "autre(s)" in texte
     assert len(texte) < 1000
+
+
+def test_la_carte_montre_toutes_les_permissions():
+    """30/10/2026 : plus de « … et 15 autres » — toutes les permissions d'une
+    cible, en un ou plusieurs champs de moins de 1024 caractères, chaque cadre
+    complet ; au-delà du budget de la carte, les cibles restantes sont annoncées."""
+    from cogs.logs import _champs_derogations
+
+    tout = discord.PermissionOverwrite(**{nom: True for nom, _ in discord.PermissionOverwrite()})
+    champs = _champs_derogations(_diff_derogations({}, {_RoleFactice(980): tout}))
+    for _nom, valeur, _inline in champs:
+        assert len(valeur) <= 1024 and valeur.count("```") == 2
+    assert sum(v.count("\n+ ") for _n, v, _i in champs) == 52
+    assert not any("autre(s)" in v for _n, v, _i in champs)
+
+    gros = _champs_derogations(_diff_derogations({}, {_RoleFactice(990 + i): tout for i in range(4)}))
+    assert gros[-1][0] == "Autres cibles" and "autre(s) cible(s)" in gros[-1][1]
+    assert sum(len(v) for _n, v, _i in gros[:-1]) <= 3000
