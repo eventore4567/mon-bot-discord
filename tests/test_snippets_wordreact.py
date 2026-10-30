@@ -4,6 +4,9 @@ from cogs.word_reactions import matches
 from utils import access_matrix, slash_catalog
 from cogs.recurring_messages import parse_interval, is_logs_channel
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
+import pytest
+from cogs.recurring_messages import is_reserved_channel
 
 
 def test_snippet_names_are_strict():
@@ -49,3 +52,19 @@ def test_recurring_rejects_log_channels():
     general = SimpleNamespace(name="général", category=SimpleNamespace(name="Discussion"))
     assert is_logs_channel(logs)
     assert not is_logs_channel(general)
+
+
+@pytest.mark.asyncio
+async def test_recurring_rejects_configured_logs_even_with_generic_name():
+    channel = SimpleNamespace(
+        name="informations", id=123, category=None,
+        guild=SimpleNamespace(id=777),
+    )
+    db = SimpleNamespace(fetchone=AsyncMock(return_value={"configured": 1}))
+    bot = SimpleNamespace(db=db)
+    assert await is_reserved_channel(bot, channel)
+    db.fetchone.assert_awaited_once_with(
+        "SELECT 1 AS configured FROM log_config "
+        "WHERE guild_id=? AND channel_id=? AND enabled=1 LIMIT 1",
+        (777, 123),
+    )
