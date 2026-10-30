@@ -521,6 +521,12 @@ class PlatformV4(commands.Cog):
     async def on_message(self, message: discord.Message):
         if not message.guild or message.author.bot or not message.content:
             return
+        # Réactions de mots dans cet écouteur déjà existant : zéro listener ajouté.
+        try:
+            from cogs.word_reactions import react_for_message
+            await react_for_message(self.bot, message)
+        except Exception:
+            logger.exception("Réaction automatique impossible guild=%s", message.guild.id)
         conf = await self.bot.db.get_guild_config(message.guild.id)
         prefix = str(conf["prefix"] if conf and conf["prefix"] else "+")
         if not message.content.startswith(prefix):
