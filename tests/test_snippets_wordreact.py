@@ -22,20 +22,23 @@ def test_word_reactions_only_match_whole_words_and_ignore_accents():
     assert not matches("superbonjour", "bonjour")
 
 
-def test_all_slash_entries_are_in_catalog():
+def test_30_oct_decision_only_operational_snippet_is_slash():
+    """Configuration dans /setup ; seul l'envoi opérationnel reste en /."""
     paths = {e.path: e.source for e in slash_catalog.CATALOG}
-    for source in ("snippet create", "snippet send", "snippet list", "snippet delete",
-                   "wordreact add", "wordreact remove", "wordreact list",
-                   "recurring create", "recurring list", "recurring pause",
-                   "recurring resume", "recurring delete"):
-        assert paths[source] == source
+    assert paths["snippet send"] == "snippet send"
+    assert not any(p.startswith("wordreact ") or p.startswith("recurring ") for p in paths)
+    assert not any(p in paths for p in ("snippet create","snippet delete","snippet list"))
+    from pathlib import Path
+    view = (Path(__file__).resolve().parents[1] / "cogs/setup_experience_v74.py").read_text(encoding="utf-8")
+    for page in ("snippets", "word_reactions", "recurring_messages"):
+        assert ('"' + page + '"') in view
 
 
 def test_staff_can_send_but_only_admin_can_create():
     assert access_matrix.access_tier("snippet") == "discord:manage_messages"
     assert access_matrix.access_tier("snippet create") == "categorie:configuration"
     assert access_matrix.access_tier("snippet delete") == "categorie:configuration"
-    assert access_matrix.access_tier("wordreact") == "categorie:configuration"
+    assert access_matrix.access_tier("wordreact") == "categorie:configuration"  # legacy internal source, no slash route
 
 
 
