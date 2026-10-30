@@ -533,6 +533,10 @@ class Logs(commands.Cog, name="Logs"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self._cache_writes = 0
+        # Un log d'audit Discord ne porte pas l'ID du message supprimé.
+        # Ne jamais réutiliser la même preuve pour attribuer plusieurs messages
+        # différents à un membre du staff (cas très fréquent en rafale).
+        self._delete_audit_seen: dict[tuple[int, int], float] = {}
 
     async def _send(
         self,
@@ -671,6 +675,10 @@ class Logs(commands.Cog, name="Logs"):
             if delay:
                 await asyncio.sleep(delay)
             now = discord.utils.utcnow()
+            now_mono = time.monotonic()
+            for key, seen_at in list(self._delete_audit_seen.items()):
+                if now_mono - seen_at > 30:
+                    self._delete_audit_seen.pop(key, None)
             try:
                 async for entry in guild.audit_logs(
                     limit=12,
@@ -680,10 +688,23 @@ class Logs(commands.Cog, name="Logs"):
                         continue
                     if abs((now - entry.created_at).total_seconds()) > 4:
                         continue
-                    extra_channel = getattr(getattr(entry, "extra", None), "channel", None)
-                    extra_channel_id = getattr(extra_channel, "id", None)
-                    if extra_channel_id is not None and int(extra_channel_id) != int(channel_id):
+                    extra = getattr(entry, "extra", None)
+                    extra_channel_id = getattr(getattr(extra, "channel", None), "id", None)
+                    if extra_channel_id is None or int(extra_channel_id) != int(channel_id):
                         continue
+                    # Pour les suppressions par lot, une entrée "count=3" ne
+                    # permet PAS d'associer un message précis à un exécuteur :
+                    # éviter toute attribution trompeuse.
+                    count = getattr(extra, "count", None)
+                    if count is not None and int(count) != 1:
+                        continue
+                    entry_id = getattr(entry, "id", None)
+                    if entry_id is None:
+                        continue
+                    key = (int(guild.id), int(entry_id))
+                    if key in self._delete_audit_seen:
+                        continue
+                    self._delete_audit_seen[key] = now_mono
                     return entry.user, entry
             except (discord.Forbidden, discord.HTTPException):
                 return None, None
