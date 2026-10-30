@@ -746,6 +746,13 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
                 continue
             await self.bot.db.execute("DELETE FROM sentrix_scheduled_messages WHERE id=?", (ident,))
 
+        # Réutilise le worker et le bail HA existants : pas de seconde boucle.
+        from cogs import recurring_messages
+        try:
+            await recurring_messages.process_due(self.bot)
+        except Exception:
+            logger.exception("Traitement des annonces récurrentes impossible.")
+
     @scheduled_worker.before_loop
     async def before_scheduled_worker(self):
         await self.bot.wait_until_ready()
