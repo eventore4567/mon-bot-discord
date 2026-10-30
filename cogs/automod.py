@@ -1487,6 +1487,35 @@ class AutoMod(commands.Cog, name="Automod"):
             details[0], details[1], privileged,
         )
 
+        # Discord bloque certains messages AVANT on_message : sans événement
+        # AutoMod natif, le staff ne voit ni la règle ni le salon concernés.
+        # Ne JAMAIS recopier execution.content, matched_content ou les pièces
+        # jointes : ces informations peuvent être privées et ne sont pas
+        # nécessaires à l'audit d'un blocage natif.
+        if guild is None:
+            return
+        channel_id = int(getattr(execution, "channel_id", 0) or 0)
+        rule_name = str(details[0] or "Règle inconnue")[:90]
+        panel = embeds.canonical_log_embed(
+            "Discord AutoMod · message bloqué",
+            fields=[
+                ("Membre", f"<@{user_id}>", False),
+                ("Protection", "AutoMod natif Discord", True),
+                ("Statut", "Message bloqué par Discord", False),
+                ("Règle", f"{rule_name} (ID : {rule_id})", False),
+                ("Salon", f"<#{channel_id}>" if channel_id else "Non communiqué", False),
+                ("Source", "Discord AutoMod", True),
+                ("Action", "Blocage du message (autre sanction non confirmée)", False),
+            ],
+        )
+        try:
+            await self.log_action(guild, panel, "automod")
+        except (discord.HTTPException, OSError):
+            logger.exception(
+                "Log AutoMod Discord indisponible guild=%s rule=%s user=%s",
+                guild_id, rule_id, user_id,
+            )
+
     async def _on_automod_setting_changed(self, guild_id: int, field: str, value: int) -> None:
         self.automod_cache.pop(int(guild_id), None)
         guild = self.bot.get_guild(int(guild_id))
