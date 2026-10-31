@@ -55,6 +55,7 @@ from core.module_gate import (
 )
 from core.module_runtime import ModuleRuntimeController
 from core.module_supervisor import ModuleSupervisor
+from services.usage_presence import usage_presence_text
 from web.dashboard import start_dashboard
 import web.dashboard as dashboard_module
 from web.dashboard_api_forbidden_words import register as register_forbidden_words_routes
@@ -585,6 +586,12 @@ class BotAllInOne(commands.Bot):
 
     async def stop_runtime_module(self, name: str) -> dict:
         return await self.module_runtime.stop(name)
+
+    async def refresh_usage_presence(self) -> None:
+        """Publie le compteur d'utilisation dans le statut natif du bot."""
+        text = usage_presence_text(self.guilds)
+        await self.change_presence(activity=discord.CustomActivity(name=text))
+        logger.info("Statut Discord actualisé : %s", text)
 
     def _prune_redundant_commands(self) -> list[str]:
         removed_names: list[str] = []
@@ -1138,9 +1145,7 @@ class BotAllInOne(commands.Bot):
             except Exception:
                 logger.warning("Vérification de persistance (on_ready) impossible :\n" + traceback.format_exc())
 
-        await self.change_presence(
-            activity=discord.Activity(type=discord.ActivityType.watching, name="/help")
-        )
+        await self.refresh_usage_presence()
         embeds.set_footer_icon(self.user.display_avatar.url)
 
         saved_footer = await self.db.get_setting("footer_text")
@@ -1159,6 +1164,11 @@ class BotAllInOne(commands.Bot):
     async def on_guild_join(self, guild: discord.Guild):
         await self.db.ensure_guild(guild.id)
         logger.info(f"Bot ajouté au serveur : {guild.name} ({guild.id})")
+        await self.refresh_usage_presence()
+
+    async def on_guild_remove(self, guild: discord.Guild):
+        logger.info(f"Bot retiré du serveur : {guild.name} ({guild.id})")
+        await self.refresh_usage_presence()
 
     async def on_command_completion(self, ctx: commands.Context):
         if ctx.guild:
