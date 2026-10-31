@@ -438,7 +438,8 @@ class SentriXSetupV74(v73.SentriXSetupV73):
 
             bouton.callback = ouvrir_rapide
             raccourcis.append(bouton)
-        container.add_item(discord.ui.ActionRow(*raccourcis))
+        # Insérés plus bas dans les rangées existantes pour rester sous le
+        # budget des composants Discord (aucune rangée supplémentaire).
 
         interrupteurs = setup_ui.ModuleSwitchSelect(self, switch_states)
         # « Sécurité » sans protection ne s'active pas automatiquement :
@@ -499,7 +500,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             await self.refresh(interaction)
 
         soundboard_button.callback = open_soundboard
-        container.add_item(discord.ui.ActionRow(music_button, soundboard_button))
+        container.add_item(discord.ui.ActionRow(*raccourcis[:3], music_button, soundboard_button))
 
         # Le PROFIL DE SERVEUR de SentriX (guild.me.edit) : avatar et bannière
         # visibles sur CE serveur seulement. Les autres gardent l'original,
@@ -528,7 +529,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             await self._guide_aller(interaction, sauvegarde or 0)
 
         guide.callback = ouvrir_guide
-        container.add_item(discord.ui.ActionRow(guide, identite))
+        container.add_item(discord.ui.ActionRow(guide, identite, raccourcis[3]))
 
         # Ouvrir la page détaillée d'une catégorie (salons, rôles, options).
         options = [
