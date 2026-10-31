@@ -471,14 +471,17 @@ def install_for_bot(bot) -> None:
         if (in_economy or home) and len(view.children) < 25:
             button = discord.ui.Button(
                 label="Importer des données" if in_economy else "Importer l'économie",
-                style=discord.ButtonStyle.secondary, row=2,
+                style=discord.ButtonStyle.secondary,
                 custom_id="sentrix:economy:import:open",
             )
 
             async def callback(interaction: discord.Interaction):
                 await open_import_panel(view.bot, interaction, view.guild_id)
             button.callback = callback
-            view.add_item(button)
+            try:
+                view.add_item(button)
+            except ValueError:
+                logger.warning("Panneau /setup plein : bouton d'import non ajouté.")
         return result
 
     SetupView.render_page = render_with_import
