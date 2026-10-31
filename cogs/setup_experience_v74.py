@@ -1350,17 +1350,9 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             style=discord.ButtonStyle.primary,
             emoji="🛠️",
         )
-        if enabled:
-            toggle = discord.ui.Button(
-                label="Désactiver",
-                style=discord.ButtonStyle.danger,
-            )
-        else:
-            toggle = discord.ui.Button(
-                label="Activer",
-                style=discord.ButtonStyle.success,
-            )
-
+        toggle = discord.ui.Button(
+            label="Désactiver", style=discord.ButtonStyle.danger,
+        ) if enabled else None
 
         async def full_config(interaction: discord.Interaction):
             ticket_cog = self.bot.get_cog("Tickets")
@@ -1388,8 +1380,11 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             await self.refresh(interaction)
 
         full.callback = full_config
-        toggle.callback = toggle_tickets
-        container.add_item(discord.ui.ActionRow(full, toggle))
+        if toggle is not None:
+            toggle.callback = toggle_tickets
+            container.add_item(discord.ui.ActionRow(full, toggle))
+        else:
+            container.add_item(discord.ui.ActionRow(full))
         self._add_navigation(container)
         self.add_item(container)
 
