@@ -34,7 +34,7 @@ async def _language():
     return "en"  # Simule un ancien serveur configuré en anglais.
 
 
-class TicketPanelFrenchOnly(unittest.TestCase):
+class TicketPanelLocalized(unittest.TestCase):
     def test_no_auto_sections_even_with_multiple_categories(self):
         panel = {
             "guild_id": 123, "title": "Centre d'assistance",
@@ -49,17 +49,16 @@ class TicketPanelFrenchOnly(unittest.TestCase):
         self.assertEqual(public["titre"], panel["title"])
         self.assertEqual(view[1], types)
 
-    def test_empty_description_uses_short_french_fallback(self):
+    def test_empty_description_is_preserved_exactly(self):
         panel = {
             "guild_id": 123, "title": "Tickets",
             "description": "", "thumbnail_url": None, "image_url": None, "footer_text": None,
         }
         public, _view = asyncio.run(_renderer()(SimpleNamespace(bot=object()), panel, []))
-        self.assertIn("Choisissez une catégorie", public["sous_titre"])
-        self.assertNotIn("Choose", public["sous_titre"])
+        self.assertEqual(public["sous_titre"], "")
         self.assertEqual(public["sections"], [])
 
-    def test_select_placeholder_not_english(self):
+    def test_select_placeholder_follows_configured_language(self):
         tree = ast.parse(SOURCE.read_text(encoding="utf-8"))
         select_class = next(n for n in tree.body if isinstance(n, ast.ClassDef)
                             and n.name == "TicketOpenSelect")
@@ -70,9 +69,10 @@ class TicketPanelFrenchOnly(unittest.TestCase):
             if isinstance(node, ast.keyword) and node.arg == "placeholder":
                 placeholders.append(node.value)
         self.assertEqual(len(placeholders), 1)
-        self.assertIsInstance(placeholders[0], ast.Constant)
-        self.assertIn("Choisissez une catégorie", placeholders[0].value)
-        self.assertNotIn("Choose a category", placeholders[0].value)
+        source = ast.unparse(placeholders[0])
+        self.assertIn("Choose a category", source)
+        self.assertIn("Choisissez une catégorie", source)
+        self.assertIn("LANG_EN", source)
 
 
 if __name__ == "__main__":
