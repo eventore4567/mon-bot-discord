@@ -294,7 +294,7 @@ class ImportPreviewView(discord.ui.View):
         verb = "ajouter" if mode == "add" else "remplacer"
         await interaction.response.edit_message(
             embed=_embed("Confirmation requise",
-                         f"Tu vas **{verb}** les montants de **{len(self.balances)} membres**.\n"
+                         f"Vous allez **{verb}** les montants de **{len(self.balances)} membres**.\n"
                          "Cette action modifie des soldes réels. Confirmer ?",
                          0xF0B232), view=view)
 
@@ -400,7 +400,7 @@ class ImportEntryView(discord.ui.View):
     async def file(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(
             "Envoie maintenant en **message privé à SentriX** un fichier .csv ou .json "
-            "(512 Ko maximum). Tu as trois minutes pour l'envoyer.\n"
+            "(512 Ko maximum). Vous avez trois minutes pour l'envoyer.\n"
             "Exemple CSV : user_id,cash,bank", ephemeral=True
         )
         await self._receive_file(interaction)
@@ -426,7 +426,7 @@ class ImportEntryView(discord.ui.View):
             preview = ImportPreviewView(self.bot, self.guild_id, self.author_id, balances, attachment.filename)
             await interaction.followup.send(embed=preview.preview(), view=preview, ephemeral=True)
         except asyncio.TimeoutError:
-            await interaction.followup.send("Temps écoulé. Recommence depuis /setup.", ephemeral=True)
+            await interaction.followup.send("Temps écoulé. Recommencez depuis /setup.", ephemeral=True)
         except ImportErrorData as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
         except (discord.HTTPException, OSError):
@@ -441,9 +441,9 @@ async def open_import_panel(bot, interaction: discord.Interaction, guild_id: int
     view = ImportEntryView(bot, guild_id, interaction.user.id)
     embed = _embed(
         "Importer les données d'un autre bot",
-        "Utilise un export autorisé au format **CSV ou JSON** contenant les identifiants Discord.\n"
+        "Utilisez un export autorisé au format **CSV ou JSON** contenant les identifiants Discord.\n"
         "**Colonnes :** user_id, cash, bank (ou balance pour l'argent).\n\n"
-        "Tu pourras voir les soldes avant de choisir **Ajouter** ou **Remplacer**.\n"
+        "Vous pourrez voir les soldes avant de choisir **Ajouter** ou **Remplacer**.\n"
         "Aucun accès direct à la base d'un autre bot.",
     )
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
