@@ -113,6 +113,8 @@ async def set_profile(bot, guild_id: int, category: str, *,
 
 def is_noninteractive(view: discord.ui.View) -> bool:
     """Safe for incoming webhooks: no custom-ID actions, dropdowns or callbacks."""
+    if getattr(view, "is_dispatchable", lambda: False)():
+        return False
     queue = list(getattr(view, "children", ()))
     while queue:
         item = queue.pop()
