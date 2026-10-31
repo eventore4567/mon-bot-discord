@@ -2275,6 +2275,17 @@ class Tickets(commands.Cog):
                 row["id"],
             )
 
+        # Une fermeture automatique archive elle aussi la conversation,
+        # même lorsque l'envoi des transcriptions en MP est désactivé.
+        try:
+            await ticket_transcript_links.store_archive(
+                self.bot, ticket_id=int(row["id"]), guild_id=guild.id,
+                channel_id=int(channel.id), channel_name=channel.name,
+                transcript_text=transcript_text,
+            )
+        except Exception:
+            logger.exception("Archive web d'auto-fermeture ticket #%s indisponible.", row["id"])
+
         try:
             # Même interface que les fermetures manuelles, sans ancienne carte
             # verte "Vérification nécessaire" ni boutons de copie inutiles.
