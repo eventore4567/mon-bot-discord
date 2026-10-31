@@ -4508,7 +4508,7 @@ class AutoMod(commands.Cog, name="Automod"):
         # Immunité globale : aucune protection automatique (anti-bot, comptes
         # récents, join gate ou anti-raid) ne sanctionne un propriétaire ou un
         # compte — humain comme bot — doté d'un accès total au serveur.
-        if member.id == member.guild.owner_id or can_bypass_message_filters(member):
+        if member.id == getattr(member.guild, "owner_id", None) or can_bypass_message_filters(member):
             return
 
         if conf["antibot"] and member.bot:
