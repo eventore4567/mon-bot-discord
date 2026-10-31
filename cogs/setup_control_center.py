@@ -571,6 +571,12 @@ class FieldRoleSelect(discord.ui.RoleSelect):
             return await _refuse(interaction, reason)
         value = role.id if role else None
         await self.owner.bot.db.set_guild_config(self.owner.guild.id, self.field, value)
+        if value is not None and self.field in {"autorole", "member_role", "verify_role", "verification_role"}:
+            from cogs import setup_v2_core as core
+            await core.set_module_enabled(
+                self.owner.bot, self.owner.guild.id, "roles", True,
+                actor_id=interaction.user.id,
+            )
         await self.owner.audit(interaction.user.id, self.field, value)
         await self.owner.refresh(interaction)
 
@@ -618,6 +624,17 @@ class FieldChannelSelect(discord.ui.ChannelSelect):
             return await _refuse(interaction, reason)
         value = chosen.id if chosen else None
         await self.owner.bot.db.set_guild_config(self.owner.guild.id, self.field, value)
+        if value is not None:
+            from cogs import setup_v2_core as core
+            module = {
+                "welcome_channel": "welcome", "goodbye_channel": "goodbye",
+                "level_channel": "levels", "log_channel": "logs",
+            }.get(self.field)
+            if module:
+                await core.set_module_enabled(
+                    self.owner.bot, self.owner.guild.id, module, True,
+                    actor_id=interaction.user.id,
+                )
         await self.owner.audit(interaction.user.id, self.field, value)
         await self.owner.refresh(interaction)
 
