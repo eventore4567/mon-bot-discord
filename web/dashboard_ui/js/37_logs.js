@@ -87,6 +87,15 @@ const routes = (data.routes || []).map(route => ({ ...route }));
         <input class="switch" type="checkbox" data-log-enabled="${esc(route.key)}" ${route.enabled ? 'checked' : ''} aria-label="Activer les logs ${esc(route.label)}">
       </label>
     </div>
+    <details class="log-mini-profile" data-log-profile="${esc(route.key)}">
+      <summary>Mini-profil du message</summary>
+      <p class="muted" style="font-size:12px;margin:8px 0">Personnalisez le nom et l’avatar affichés au clic sur les logs compatibles. Les boutons interactifs restent envoyés par SentriX.</p>
+      <label class="switch-row"><span>Utiliser un mini-profil</span><input class="switch" type="checkbox" data-profile-enabled="${esc(route.key)}" ${route.profile?.enabled ? "checked" : ""}></label>
+      <label>Nom affiché<input class="input" type="text" maxlength="70" placeholder="Ex. Joins & Leaves" data-profile-name="${esc(route.key)}" value="${esc(route.profile?.display_name || "")}"></label>
+      <label>Avatar (URL HTTPS)<input class="input" type="url" maxlength="450" placeholder="https://…" data-profile-avatar="${esc(route.key)}" value="${esc(route.profile?.avatar_url || "")}"></label>
+      <button class="btn sm" type="button" data-profile-save="${esc(route.key)}">Enregistrer le mini-profil</button>
+      <small role="status" data-profile-status="${esc(route.key)}"></small>
+    </details>
     <div class="log-route-foot">
       <button class="btn ghost sm" type="button" data-log-preview="${esc(route.key)}" aria-label="Voir un exemple de log ${esc(route.label)}">Voir un exemple</button>
       <small class="log-route-feedback" data-log-feedback="${esc(route.key)}" role="status" aria-live="polite"></small>
@@ -263,4 +272,26 @@ const routes = (data.routes || []).map(route => ({ ...route }));
 
   root.querySelectorAll('[data-log-channel]').forEach(select => select.addEventListener('change', () => saveRoute(select.dataset.logChannel)));
   root.querySelectorAll('[data-log-enabled]').forEach(toggle => toggle.addEventListener('change', () => saveRoute(toggle.dataset.logEnabled)));
+  root.querySelectorAll('[data-profile-save]').forEach(button => button.addEventListener('click', async () => {
+    const key = button.dataset.profileSave;
+    const card = root.querySelector(`[data-log-card="${CSS.escape(key)}"]`);
+    const enabled = card.querySelector('[data-profile-enabled]').checked;
+    const display_name = card.querySelector('[data-profile-name]').value.trim();
+    const avatar_url = card.querySelector('[data-profile-avatar]').value.trim();
+    const feedback = card.querySelector('[data-profile-status]');
+    button.disabled = true;
+    feedback.textContent = 'Enregistrement…';
+    try {
+      const result = await gpost('/logs/sender-profile', { category: key, enabled, display_name, avatar_url }, 'PUT');
+      const route = byKey.get(key);
+      if (route) route.profile = result.profile;
+      feedback.textContent = 'Enregistré';
+      invalidate('log-config-v2');
+      toast(result.message);
+    } catch (error) {
+      feedback.textContent = 'Non enregistré';
+      toast(error.message || 'Impossible de modifier le mini-profil.', true);
+    } finally { button.disabled = false; }
+  }));
+
 };
