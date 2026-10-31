@@ -139,13 +139,21 @@ async def _exercise_application_owned_interactive_webhooks(monkeypatch):
     class FakeTextChannel:
         def __init__(self):
             self.id = 888
-            self.guild = SimpleNamespace(
-                id=777, me=SimpleNamespace(id=999)
+            self.guild = SimpleNamespace(id=777, me=SimpleNamespace(id=999))
+            self.owner_id = 999
+            self.calls = 0
+
+            async def fetch_webhook(webhook_id):
+                self.calls += 1
+                return {"application_id": self.owner_id}
+
+            self._state = SimpleNamespace(
+                http=SimpleNamespace(get_webhook=fetch_webhook)
             )
 
     class Hook:
-        def __init__(self, application_id):
-            self.application_id = application_id
+        def __init__(self, webhook_id):
+            self.id = webhook_id
             self.sent = []
 
         async def send(self, **kwargs):
@@ -161,7 +169,8 @@ async def _exercise_application_owned_interactive_webhooks(monkeypatch):
     ))
     view.add_item(container)
     monkeypatch.setattr(profiles.discord, "TextChannel", FakeTextChannel)
-    hook = Hook(application_id=999)
+    monkeypatch.setattr(profiles, "_application_ownership", {})
+    hook = Hook(webhook_id=9991)
     async def _hook(_channel):
         return hook
     monkeypatch.setattr(profiles, "_webhook", _hook)
@@ -173,9 +182,13 @@ async def _exercise_application_owned_interactive_webhooks(monkeypatch):
     assert sent.id == 555
     assert hook.sent and hook.sent[0]["view"] is view
     assert hook.sent[0]["username"] == "Messages"
+    assert channel.calls == 1
+    await profiles.application_webhook_owned_by_bot(channel, hook)
+    assert channel.calls == 1  # ownership cached, no extra HTTP request
 
     # Incoming webhook without app ownership cannot receive interactive buttons.
-    non_owned = Hook(application_id=None)
+    channel.owner_id = None
+    non_owned = Hook(webhook_id=9992)
     async def _other(_channel):
         return non_owned
     monkeypatch.setattr(profiles, "_webhook", _other)
@@ -186,6 +199,7 @@ async def _exercise_application_owned_interactive_webhooks(monkeypatch):
     )
     assert returned is None
     assert not non_owned.sent
+    assert channel.calls == 2
 
     # A non-interactive log can still use an incoming webhook.
     simple = discord.ui.LayoutView()
