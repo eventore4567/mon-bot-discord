@@ -106,3 +106,94 @@ async def _test_atomic_add_replace_idempotent():
 
 def test_import_atomicity_and_duplicate_protection():
     asyncio.run(_test_atomic_add_replace_idempotent())
+
+
+
+async def _test_postgres_backend_transaction(monkeypatch):
+    """Le chemin Railway doit cibler PostgreSQL, pas créer un SQLite vide."""
+    import asyncpg
+    from database import db as db_module
+
+    class FakePostgres:
+        def __init__(self):
+            self.closed = False
+            self.in_transaction = False
+            self.rolled_back = False
+            self.balance = {USER_A: (1000, 500)}
+            self.audit_rows = []
+            self.transactions = []
+            self.batch_digest = None
+
+        def transaction(self):
+            owner = self
+
+            class _Transaction:
+                async def __aenter__(self):
+                    owner.in_transaction = True
+
+                async def __aexit__(self, exc_type, exc, tb):
+                    owner.rolled_back = bool(exc_type)
+                    owner.in_transaction = False
+            return _Transaction()
+
+        async def execute(self, query, *args):
+            assert self.in_transaction, "Toutes les écritures doivent rester atomiques"
+            if query.startswith("INSERT INTO economy ("):
+                self.balance[args[1]] = (args[2], args[3])
+            elif query.startswith("INSERT INTO economy_import_rows"):
+                self.audit_rows.append(args)
+            elif query.startswith("INSERT INTO economy_transactions"):
+                self.transactions.append(args)
+            return "INSERT 0 1"
+
+        async def fetchval(self, query, *args):
+            assert self.in_transaction
+            if query.startswith("SELECT id FROM economy_import_batches"):
+                return 1 if self.batch_digest == args[1] else None
+            if query.startswith("INSERT INTO economy_import_batches"):
+                self.batch_digest = args[1]
+                return 1
+            raise AssertionError(query)
+
+        async def fetchrow(self, query, *args):
+            assert self.in_transaction
+            assert "FOR UPDATE" in query
+            value = self.balance.get(args[1])
+            return {"cash": value[0], "bank": value[1]} if value else None
+
+        async def close(self):
+            self.closed = True
+
+    pg = FakePostgres()
+    connections = []
+
+    async def fake_connect(url, *, server_settings):
+        assert url == "postgresql://test-only"
+        assert server_settings["search_path"] == '"sentrix"'
+        connections.append(pg)
+        return pg
+
+    monkeypatch.setattr(asyncpg, "connect", fake_connect)
+    monkeypatch.setattr(db_module, "_postgres_url", lambda: "postgresql://test-only")
+    monkeypatch.setattr(db_module, "_postgres_schema", lambda path: "sentrix")
+    bot = SimpleNamespace(
+        db=SimpleNamespace(backend="postgres", path="/data/bot.db", _economy_lock=asyncio.Lock())
+    )
+    incoming = [module.MemberBalance(USER_A, 100000, 5000), module.MemberBalance(USER_B, 25000, 0)]
+    batch, delta = await module.apply_import(bot, 1, USER_A, incoming, "add", "source.csv")
+    assert batch == 1
+    assert delta == 130000
+    assert pg.balance[USER_A] == (101000, 5500)
+    assert pg.balance[USER_B] == (25000, 0)
+    assert len(pg.audit_rows) == 2
+    assert len(pg.transactions) == 2
+    assert pg.closed and not pg.in_transaction
+    assert len(connections) == 1
+
+    with pytest.raises(module.ImportErrorData, match="déjà été importé"):
+        await module.apply_import(bot, 1, USER_A, incoming, "add", "source.csv")
+    assert pg.rolled_back and len(pg.audit_rows) == 2
+
+
+def test_postgres_backend_is_used_when_active(monkeypatch):
+    asyncio.run(_test_postgres_backend_transaction(monkeypatch))
