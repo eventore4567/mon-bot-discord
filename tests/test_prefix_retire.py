@@ -16,6 +16,10 @@ def test_le_prefixe_est_coupe_par_defaut(monkeypatch):
     assert "ont été supprimées" in avis.texte_retire(SimpleNamespace(mention="<@1>"))
 
 
+def test_le_rappel_disparait_rapidement():
+    assert avis.PREFIX_REMOVAL_NOTICE_TTL_SECONDS == 8
+
+
 def test_l_aide_ne_montre_plus_le_plus(monkeypatch):
     monkeypatch.setenv("SENTRIX_PREFIXE_ACTIF", "0")
     entree = SimpleNamespace(slash_name="ban", prefix_command=SimpleNamespace(qualified_name="ban", aliases=[]),
