@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import logging
+import time
 from urllib.parse import urlsplit
 
 import discord
@@ -28,6 +29,16 @@ SCHEMA = """CREATE TABLE IF NOT EXISTS log_sender_profiles (
 # Shared per-process webhook objects. No token is stored in the database.
 _webhooks: dict[tuple[int, int], discord.Webhook] = {}
 _locks: dict[tuple[int, int], asyncio.Lock] = {}
+_schema_ready: set[int] = set()
+_profile_cache: dict[tuple[int, str], tuple[float, dict]] = {}
+
+
+async def ensure_schema(bot) -> None:
+    # One DDL call per bot process, not one per log event.
+    key = id(bot)
+    if key not in _schema_ready:
+        await bot.db.execute(SCHEMA)
+        _schema_ready.add(key)
 
 
 def validate_profile(display_name: str, avatar_url: str) -> tuple[str, str]:
@@ -55,18 +66,22 @@ def validate_profile(display_name: str, avatar_url: str) -> tuple[str, str]:
 
 
 async def get_profile(bot, guild_id: int, category: str) -> dict:
-    await bot.db.execute(SCHEMA)
+    await ensure_schema(bot)
+    key = (int(guild_id), str(category))
+    cached = _profile_cache.get(key)
+    if cached is not None and time.monotonic() - cached[0] < 30:
+        return dict(cached[1])
     row = await bot.db.fetchone(
         "SELECT enabled, display_name, avatar_url FROM log_sender_profiles "
         "WHERE guild_id=? AND category=?", (int(guild_id), str(category)),
     )
-    if not row:
-        return {"enabled": False, "display_name": "", "avatar_url": ""}
-    return {
-        "enabled": bool(row["enabled"]),
-        "display_name": str(row["display_name"] or ""),
-        "avatar_url": str(row["avatar_url"] or ""),
+    profile = {
+        "enabled": bool(row["enabled"]) if row else False,
+        "display_name": str(row["display_name"] or "") if row else "",
+        "avatar_url": str(row["avatar_url"] or "") if row else "",
     }
+    _profile_cache[key] = (time.monotonic(), profile)
+    return profile
 
 
 async def set_profile(bot, guild_id: int, category: str, *,
@@ -82,8 +97,7 @@ async def set_profile(bot, guild_id: int, category: str, *,
         avatar = str(avatar_url or "").strip()[:450]
         if name and avatar:
             name, avatar = validate_profile(name, avatar)
-    await bot.db.execute(SCHEMA)
-    import time
+    await ensure_schema(bot)
     await bot.db.execute(
         "INSERT INTO log_sender_profiles "
         "(guild_id,category,enabled,display_name,avatar_url,updated_at) VALUES (?,?,?,?,?,?) "
@@ -92,7 +106,9 @@ async def set_profile(bot, guild_id: int, category: str, *,
         "avatar_url=excluded.avatar_url,updated_at=excluded.updated_at",
         (int(guild_id), category, int(enabled), name, avatar, int(time.time())),
     )
-    return {"enabled": bool(enabled), "display_name": name, "avatar_url": avatar}
+    profile = {"enabled": bool(enabled), "display_name": name, "avatar_url": avatar}
+    _profile_cache.pop((int(guild_id), str(category)), None)
+    return profile
 
 
 def is_noninteractive(view: discord.ui.View) -> bool:
