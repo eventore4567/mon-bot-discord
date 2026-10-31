@@ -2975,4 +2975,10 @@ class TicketFormModal(discord.ui.Modal):
 
 
 async def setup(bot: commands.Bot):
+    from services.ticket_transcript_staff_button import StaffTranscriptButton
+
+    # Les boutons des anciens logs survivent aux redémarrages ; Discord
+    # reconstruit le callback depuis le custom_id sans garder la vue en RAM.
+    if hasattr(bot, "add_dynamic_items"):
+        bot.add_dynamic_items(StaffTranscriptButton)
     await bot.add_cog(Tickets(bot))
