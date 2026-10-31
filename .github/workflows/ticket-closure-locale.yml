@@ -20,6 +20,8 @@ on:
 jobs:
   ticket-locale:
     runs-on: ubuntu-latest
+    env:
+      DISCORD_TOKEN: ci.fake.token
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
