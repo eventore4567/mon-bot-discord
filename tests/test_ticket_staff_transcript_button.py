@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -39,9 +40,7 @@ def test_stable_dynamic_custom_id_contains_no_transcript_token():
     assert button.item.custom_id == "sentrix:ticket:transcript:81"
     assert button.item.style == discord.ButtonStyle.secondary
     assert "https://" not in button.item.custom_id
-    assert StaffTranscriptButton.__discord_ui_compiled_template__.fullmatch(
-        button.item.custom_id
-    )
+    assert re.fullmatch(r"sentrix:ticket:transcript:[0-9]{1,19}", button.item.custom_id)
 
 
 def test_archive_saved_without_issuing_public_link(monkeypatch):
