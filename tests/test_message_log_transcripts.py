@@ -64,11 +64,26 @@ async def test_persistent_cache_recovery_also_attaches_full_transcript():
 
 
 @pytest.mark.asyncio
-async def test_short_message_also_has_a_complete_transcript():
+async def test_short_message_does_not_create_an_unnecessary_transcript():
     cog, message = _setup()
-    message.content = "Salut !"
+    message.content = ";;"
     await cog.on_message_delete(message)
-    assert "Salut !" in _text(cog)
+    sent = cog._send.await_args
+    assert sent.kwargs["media_files"] == []
+    assert sent.kwargs["media_items"] == []
+    panel = sent.args[2]
+    assert any(field.name == "Contenu" and field.value == ";;" for field in panel.fields)
+    assert not any(field.name == "Transcript" for field in panel.fields)
+
+
+@pytest.mark.asyncio
+async def test_short_edit_does_not_create_a_transcript():
+    cog, before = _setup()
+    before.content = "Avant"
+    after = SimpleNamespace(**vars(before))
+    after.content = "Après"
+    await cog.on_message_edit(before, after)
+    assert cog._send.await_args.kwargs["media_files"] == []
 
 
 @pytest.mark.asyncio
@@ -140,7 +155,7 @@ async def test_message_log_keeps_downloadable_file_without_duplicate_transcript_
     embed = discord.Embed(title="Message supprimé")
     media, files = _attach_message_transcript(
         embed, guild_id=100000000000000100, channel_id=400, message_id=300, author_id=200,
-        sections=[("Contenu", "Salut")],
+        sections=[("Contenu", "long " * 300)],
     )
     view = wide_logs.WideLogView(
         embed, banner_filename="", log_type="message_delete", guild_id=100000000000000100,
@@ -153,3 +168,18 @@ async def test_message_log_keeps_downloadable_file_without_duplicate_transcript_
     children = list(walk(view.children))
     assert any(isinstance(item, discord.ui.File) for item in children)
     assert not any(isinstance(item, PremiumLogAction) and item.action == "transcript" for item in children)
+
+
+@pytest.mark.asyncio
+async def test_short_message_preserves_image_attachment_when_no_transcript():
+    cog, message = _setup()
+    message.content = "Photo"
+    media_url = "https://cdn.discordapp.com/attachments/100/300/img.png"
+    message.attachments = [SimpleNamespace(
+        url=media_url, filename="img.png", content_type="image/png",
+        size=8, read=AsyncMock(return_value=b"PNG data")
+    )]
+    await cog.on_message_delete(message)
+    files = cog._send.await_args.kwargs["media_files"]
+    assert files and all("transcript" not in file.filename for file in files)
+    assert cog._send.await_args.kwargs["media_items"][0][1] == "img.png"
