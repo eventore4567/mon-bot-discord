@@ -1447,6 +1447,25 @@ class Tickets(commands.Cog):
                     ephemere=True,
                 )
 
+        # Un panneau publié et enregistré est une configuration complète :
+        # il devient disponible sans seconde étape « Activer les tickets ».
+        from cogs import setup_v2_core as setup_core
+        try:
+            await setup_core.set_module_enabled(
+                self.bot, interaction.guild.id, "tickets", True,
+                actor_id=interaction.user.id,
+            )
+        except setup_core.ModuleSetupRequired as exc:
+            logger.warning(
+                "Panneau publié, activation Tickets impossible guild=%s : %s",
+                interaction.guild.id, exc,
+            )
+            return await sx_panels.texte_court(
+                interaction,
+                f"Panneau publié dans {channel.mention}, mais Tickets n'est pas actif : {exc}",
+                ephemere=True,
+            )
+
         confirmation = (
             f"Ticket panel refreshed in {channel.mention}."
             if language == language_runtime.LANG_EN
