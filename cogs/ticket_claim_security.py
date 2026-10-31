@@ -22,6 +22,7 @@ from services import ticket_log_report
 from services import ticket_transcript_html
 from services import ticket_transcript_links
 from services import ticket_panels_v3
+from cogs import language_runtime
 from utils import log_service
 from utils import sentrix_panels as panels
 
@@ -343,6 +344,8 @@ def install(bot: commands.Bot) -> None:
                 interaction,
                 tickets.embeds.error("Un ticket ne peut être fermé que depuis son serveur."),
             )
+        lang = await language_runtime.get_language(self.bot, guild.id)
+        tr = lambda fr, en: language_runtime.text_for_language(lang, fr, en)
         ticket = await self.bot.db.fetchone("SELECT * FROM tickets WHERE id = ?", (ticket_id,))
         if not ticket:
             # Trois `return` nus vivaient ici. Le membre cliquait « Fermer »,
@@ -460,7 +463,7 @@ def install(bot: commands.Bot) -> None:
         # - Supprimer détruit le salon uniquement sur action staff explicite.
         # Aucun ticket fermé manuellement n'est donc programmé pour auto-delete.
         duree = tickets_service.duree_du_ticket(ticket, fin=closed_at)
-        reason_text = (reason or "Non précisée").strip()[:1200]
+        reason_text = (reason or tr("Non précisée", "Not specified")).strip()[:1200]
         # Le lien est remis uniquement au demandeur en MP, sans fichier dans le salon.
         transcript_url = None
         if owner and (not conf or conf["ticket_transcript_dm"]):
@@ -489,6 +492,7 @@ def install(bot: commands.Bot) -> None:
                 avatar_url=str(owner.display_avatar.url) if owner else None,
                 claimed_by_id=int(ticket["claimed_by"]) if ticket["claimed_by"] else None,
                 closed_at=closed_at,
+                language=lang,
             ),
             vue_fermeture,
         )
@@ -520,7 +524,7 @@ def install(bot: commands.Bot) -> None:
             for member in channel.members
             if not member.bot
         ][:30]
-        participant_text = "\n".join(participants) or "Aucun participant disponible."
+        participant_text = "\n".join(participants) or tr("Aucun participant disponible.", "No participants available.")
         # L'audit de fermeture est persistant. Le rapport relit aussi l'historique
         # des claims/transferts/réouvertures et préserve l'identité du membre.
         ligne_id = await tickets_service.enregistrer_evenement(
@@ -536,15 +540,18 @@ def install(bot: commands.Bot) -> None:
             reason=reason_text,
         )
         log_embed = discord.Embed(
-            title="🔒 Fermeture du ticket",
+            title=tr("🔒 Fermeture du ticket", "🔒 Ticket closed"),
             description=(
-                f"Dossier du ticket **#{ticket_id}** · fermeture enregistrée. "
-                "Le récapitulatif est enregistré. La transcription reste privée."
+                (f"Dossier du ticket **#{ticket_id}** · fermeture enregistrée. "
+                 "Le récapitulatif est enregistré. La transcription reste privée."
+                 if lang != "en" else
+                 f"Ticket **#{ticket_id}** closed. The closure report is saved. "
+                 "The transcript remains private.")
             ),
             colour=discord.Colour(0x4385DF),
             timestamp=discord.utils.utcnow(),
         )
-        log_embed.set_footer(text="SentriX · Historique du ticket")
+        log_embed.set_footer(text=tr("SentriX · Historique du ticket", "SentriX · Ticket history"))
         ticket_log_report.add_fields(
             log_embed, report, channel_name=channel.name,
             participant_text=participant_text, reference=reference,
@@ -562,7 +569,7 @@ def install(bot: commands.Bot) -> None:
         if log_view is not None:
             log_view.add_item(discord.ui.Button(
                 style=discord.ButtonStyle.secondary,
-                label="Transcription privée",
+                label=tr("Transcription privée", "Private transcript"),
                 custom_id=f"sentrix:ticket:transcript:{int(ticket_id)}",
             ))
         await _safe_ticket_log(
