@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from aiohttp import web
 
-from utils import log_service, log_sender_profiles
+from utils import log_service
 from utils.log_categories import CATEGORIES, CATEGORY_ORDER
 
 
@@ -45,9 +45,7 @@ def register(app: web.Application, dashboard) -> None:
             item = settings.get(key) or {}
             channel_id = item.get("channel_id")
             ok, problem = log_service.validate_channel(guild, channel_id, needs_file=True) if channel_id else (False, "aucun salon configuré")
-            profile = await log_sender_profiles.get_profile(bot, guild.id, key)
             routes.append({
-                "profile": profile,
                 "key": key,
                 "label": CATEGORIES[key],
                 "channel_id": str(channel_id) if channel_id else None,
@@ -179,38 +177,8 @@ def register(app: web.Application, dashboard) -> None:
             "message": f"{EVENT_LABELS[key]} : {'activé' if enabled else 'désactivé'}.",
         })
 
-    async def sender_profile_put(request: web.Request):
-        _session, guild, error = await _guard(request, write=True)
-        if error:
-            return error
-        payload = await _payload(request)
-        category = str(payload.get("category") or "").strip()
-        if category not in CATEGORIES:
-            return dashboard._json_error("Catégorie de logs inconnue.", 400)
-        enabled = payload.get("enabled", False)
-        if not isinstance(enabled, bool):
-            return dashboard._json_error("Activation invalide.", 400)
-        try:
-            profile = await log_sender_profiles.set_profile(
-                bot, guild.id, category, enabled=enabled,
-                display_name=str(payload.get("display_name") or ""),
-                avatar_url=str(payload.get("avatar_url") or ""),
-            )
-        except ValueError as exc:
-            return dashboard._json_error(str(exc), 400)
-        return web.json_response({
-            "ok": True,
-            "message": (
-                "Mini-profil enregistré. Les logs avec boutons interactifs "
-                "restent envoyés par SentriX pour préserver leurs actions."
-                if enabled else "Mini-profil désactivé pour cette catégorie."
-            ),
-            "profile": profile,
-        })
-
     app.router.add_get("/api/guilds/{guild_id}/logs/config", config_get)
     app.router.add_put("/api/guilds/{guild_id}/logs/config", config_put)
-    app.router.add_put("/api/guilds/{guild_id}/logs/sender-profile", sender_profile_put)
     app.router.add_put("/api/guilds/{guild_id}/logs/events", event_put)
 
 

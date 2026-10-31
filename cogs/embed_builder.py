@@ -148,6 +148,8 @@ class EmbedDraft:
         self.colour: int | None = 0x5865F2
         self.author_name: str | None = None
         self.author_icon_url: str | None = None
+        self.sender_name: str | None = None
+        self.sender_avatar_url: str | None = None
         self.thumbnail_url: str | None = None
         self.image_url: str | None = None
         self.footer_text: str | None = None
@@ -185,6 +187,12 @@ class EmbedDraft:
             errors.append(f"Le footer dépasse la limite Discord ({len(self.footer_text)}/{MAX_FOOTER}).")
         if self.author_name and len(self.author_name) > MAX_AUTHOR_NAME:
             errors.append(f"Le nom d'auteur dépasse la limite Discord ({len(self.author_name)}/{MAX_AUTHOR_NAME}).")
+        if self.sender_name or self.sender_avatar_url:
+            from utils.log_sender_profiles import validate_profile
+            try:
+                validate_profile(self.sender_name or "", self.sender_avatar_url or "")
+            except ValueError as exc:
+                errors.append(str(exc))
         if self.content and len(self.content) > MAX_CONTENT:
             errors.append(f"Le texte au-dessus de l'embed dépasse la limite Discord ({len(self.content)}/{MAX_CONTENT}).")
         if len(self.fields) > MAX_FIELDS:
@@ -265,6 +273,7 @@ class EmbedDraft:
             f"📋 **Champs** · `{len(self.fields)}/{MAX_FIELDS}` · 🔘 **Boutons** · `{len(self.buttons)}/{MAX_BUTTONS}`",
             f"🖼️ **Image** · {'✅' if self.image_url else '▫️'} · **Miniature** · {'✅' if self.thumbnail_url else '▫️'}",
             f"🧮 **Total** · `{self.total_chars()}/{MAX_TOTAL}` caractères",
+            f"**Mini-profil** · {self.sender_name or 'SentriX (par défaut)'}",
         ]
         if self.template_name:
             lines.append(f"💾 **Modèle** · 🟢 `{self.template_name}` enregistré" if not self.dirty
@@ -278,6 +287,7 @@ class EmbedDraft:
     def to_dict(self) -> dict:
         return {
             "content": self.content, "title": self.title, "description": self.description,
+            "sender_name": self.sender_name, "sender_avatar_url": self.sender_avatar_url,
             "colour": self.colour, "author_name": self.author_name, "author_icon_url": self.author_icon_url,
             "thumbnail_url": self.thumbnail_url, "image_url": self.image_url, "footer_text": self.footer_text,
             "footer_icon_url": self.footer_icon_url, "timestamp_enabled": self.timestamp_enabled,
@@ -287,6 +297,8 @@ class EmbedDraft:
     @classmethod
     def from_dict(cls, data: dict) -> "EmbedDraft":
         d = cls()
+        d.sender_name = data.get("sender_name")
+        d.sender_avatar_url = data.get("sender_avatar_url")
         d.content = data.get("content")
         d.title = data.get("title")
         d.description = data.get("description")
@@ -448,6 +460,42 @@ class EmbedIdentityModal(discord.ui.Modal, title="Identité affichée dans l'emb
 
     async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
         await _report_ui_error(interaction, error, "modal Identité de l'embed")
+
+
+class EmbedMiniProfileModal(discord.ui.Modal, title="Petit profil du message"):
+    """Personnalise la fiche miniature au clic sur l'auteur de l'embed."""
+
+    def __init__(self, view: "EmbedAppearanceView"):
+        super().__init__()
+        self.view_ref = view
+        self.name_input = discord.ui.TextInput(
+            label="Nom du mini-profil (vide = SentriX)",
+            required=False, max_length=70,
+            default=view.draft.sender_name or "",
+            placeholder="Annonces du serveur",
+        )
+        self.avatar_input = discord.ui.TextInput(
+            label="Photo HTTPS du mini-profil",
+            required=False, max_length=450,
+            default=view.draft.sender_avatar_url or "",
+            placeholder="https://...",
+        )
+        self.add_item(self.name_input)
+        self.add_item(self.avatar_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        name = str(self.name_input.value or "").strip()
+        avatar = str(self.avatar_input.value or "").strip()
+        if name or avatar:
+            from utils.log_sender_profiles import validate_profile
+            try:
+                name, avatar = validate_profile(name, avatar)
+            except ValueError as exc:
+                return await interaction.response.send_message(str(exc), ephemeral=True)
+        self.view_ref.draft.sender_name = name or None
+        self.view_ref.draft.sender_avatar_url = avatar or None
+        self.view_ref.draft.dirty = True
+        await self.view_ref.refresh(interaction)
 
 
 class EmbedColourModal(discord.ui.Modal, title="🎨 Couleur personnalisée"):
@@ -649,6 +697,10 @@ class EmbedAppearanceView(discord.ui.View):
                 ephemere=True,
             )
         await self.refresh(interaction)
+
+    @discord.ui.button(label="Mini-profil du message", style=discord.ButtonStyle.secondary, row=3)
+    async def mini_profile(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(EmbedMiniProfileModal(self))
 
     @discord.ui.button(label="Date automatique : activer/désactiver", style=discord.ButtonStyle.secondary, emoji="🕒", row=2)
     async def toggle_timestamp(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1120,9 +1172,20 @@ class EmbedBuilder(commands.Cog, name="EmbedBuilder"):
             allowed = discord.AllowedMentions(everyone=allow_mentions, roles=allow_mentions, users=True)
             embed = draft.to_embed()
             view = draft.build_link_view()
-            msg = await channel.send(content=draft.content or None, embed=embed, view=view or discord.utils.MISSING, allowed_mentions=allowed)
+            if draft.sender_name:
+                from utils.log_sender_profiles import send_embed_with_identity
+                msg = await send_embed_with_identity(
+                    channel, sender_name=draft.sender_name,
+                    sender_avatar_url=draft.sender_avatar_url or "",
+                    content=draft.content or None, embed=embed, view=view,
+                    allowed_mentions=allowed,
+                )
+            else:
+                msg = await channel.send(content=draft.content or None, embed=embed, view=view or discord.utils.MISSING, allowed_mentions=allowed)
             await interaction.response.edit_message(embed=embeds.success(f"📨 Embed envoyé dans {channel.mention}."), view=None)
             logger.info("Embed envoyé par %s dans #%s (guild=%s) en %.2fs.", interaction.user.id, channel.id, interaction.guild.id, time.monotonic() - started)
+        except ValueError as exc:
+            await self._safe_edit_error(interaction, str(exc))
         except discord.Forbidden:
             await self._safe_edit_error(interaction, "Permission refusée par Discord au moment de l'envoi.")
         except discord.NotFound:
