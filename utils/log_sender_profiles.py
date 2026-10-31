@@ -191,3 +191,31 @@ async def send_with_profile(channel, view: discord.ui.View, files: list[discord.
         logger.warning("Webhook profil indisponible channel=%s, envoi par bot", channel.id)
         _webhooks.pop((int(channel.guild.id), int(channel.id)), None)
         return None
+
+
+async def send_embed_with_identity(
+    channel: discord.TextChannel, *, sender_name: str,
+    sender_avatar_url: str, content: str | None, embed: discord.Embed | None,
+    view: discord.ui.View | None = None,
+    allowed_mentions: discord.AllowedMentions | None = None,
+):
+    """Envoie un /embed avec un petit profil personnalisable, jamais un faux bot.
+
+    Seuls des boutons URL sont autorisés. Si le webhook n'est pas disponible,
+    l'appelant affiche l'erreur, au lieu de publier sous une autre identité.
+    """
+    name, avatar = validate_profile(sender_name, sender_avatar_url)
+    if view is not None and not is_noninteractive(view):
+        raise ValueError("L'envoi personnalisé accepte uniquement les boutons de lien.")
+    hook = await _webhook(channel)
+    if hook is None:
+        raise ValueError(
+            "Pour personnaliser le mini-profil, accordez à SentriX la permission "
+            "Gérer les webhooks dans ce salon."
+        )
+    return await hook.send(
+        content=content, embed=embed, view=view,
+        username=name, avatar_url=avatar or None,
+        allowed_mentions=allowed_mentions or discord.AllowedMentions.none(),
+        wait=True,
+    )
