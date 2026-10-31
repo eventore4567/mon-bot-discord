@@ -49,7 +49,8 @@ SCHEMA = """CREATE TABLE IF NOT EXISTS feature_comparison_reports (
 
 def normalize(value):
     raw = unicodedata.normalize("NFKD", str(value or "").casefold())
-    return "".join(ch for ch in raw if not unicodedata.combining(ch))
+    clean = "".join(ch for ch in raw if not unicodedata.combining(ch))
+    return " ".join(re.sub(r"[-_]+", " ", clean).split())
 
 
 def compare_features(raw):
