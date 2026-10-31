@@ -131,3 +131,87 @@ def test_custom_embed_sender_uses_webhook(monkeypatch):
         content=None, embed=discord.Embed(title="Exemple"),
     ))
     assert result.id == 1234
+
+
+
+async def _exercise_application_owned_interactive_webhooks(monkeypatch):
+    """Never drop buttons; owned webhooks may send interactive V2 layouts."""
+    class FakeTextChannel:
+        def __init__(self):
+            self.id = 888
+            self.guild = SimpleNamespace(id=777, me=SimpleNamespace(id=999))
+            self.owner_id = 999
+            self.calls = 0
+
+            async def fetch_webhook(webhook_id):
+                self.calls += 1
+                return {"application_id": self.owner_id}
+
+            self._state = SimpleNamespace(
+                http=SimpleNamespace(get_webhook=fetch_webhook)
+            )
+
+    class Hook:
+        def __init__(self, webhook_id):
+            self.id = webhook_id
+            self.sent = []
+
+        async def send(self, **kwargs):
+            self.sent.append(kwargs)
+            return SimpleNamespace(id=555)
+
+    channel = FakeTextChannel()
+    view = discord.ui.LayoutView(timeout=None)
+    container = discord.ui.Container()
+    container.add_item(discord.ui.TextDisplay("Message supprimé"))
+    container.add_item(discord.ui.ActionRow(
+        discord.ui.Button(label="Historique", custom_id="sentrix:history:123")
+    ))
+    view.add_item(container)
+    monkeypatch.setattr(profiles.discord, "TextChannel", FakeTextChannel)
+    monkeypatch.setattr(profiles, "_application_ownership", {})
+    hook = Hook(webhook_id=9991)
+    async def _hook(_channel):
+        return hook
+    monkeypatch.setattr(profiles, "_webhook", _hook)
+    sent = await profiles.send_with_profile(
+        channel, view, [], {"enabled": True, "display_name": "Messages",
+                            "avatar_url": "https://cdn.discordapp.com/avatar.png"},
+        allowed_mentions=discord.AllowedMentions.none()
+    )
+    assert sent.id == 555
+    assert hook.sent and hook.sent[0]["view"] is view
+    assert hook.sent[0]["username"] == "Messages"
+    assert channel.calls == 1
+    await profiles.application_webhook_owned_by_bot(channel, hook)
+    assert channel.calls == 1  # ownership cached, no extra HTTP request
+
+    # Incoming webhook without app ownership cannot receive interactive buttons.
+    channel.owner_id = None
+    non_owned = Hook(webhook_id=9992)
+    async def _other(_channel):
+        return non_owned
+    monkeypatch.setattr(profiles, "_webhook", _other)
+    returned = await profiles.send_with_profile(
+        channel, view, [], {"enabled": True, "display_name": "Messages",
+                            "avatar_url": ""},
+        allowed_mentions=discord.AllowedMentions.none()
+    )
+    assert returned is None
+    assert not non_owned.sent
+    assert channel.calls == 2
+
+    # A non-interactive log can still use an incoming webhook.
+    simple = discord.ui.LayoutView()
+    simple.add_item(discord.ui.TextDisplay("Salon renommé"))
+    delivered = await profiles.send_with_profile(
+        channel, simple, [], {"enabled": True, "display_name": "Salons",
+                              "avatar_url": ""},
+        allowed_mentions=discord.AllowedMentions.none()
+    )
+    assert delivered.id == 555
+    assert len(non_owned.sent) == 1
+
+
+def test_application_owned_webhooks_keep_log_actions(monkeypatch):
+    asyncio.run(_exercise_application_owned_interactive_webhooks(monkeypatch))
