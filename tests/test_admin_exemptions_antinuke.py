@@ -81,11 +81,10 @@ def test_un_moderateur_sans_administrateur_reste_surveille():
     assert _exempt(cog, guild, moderateur) is False
 
 
-def test_un_bot_administrateur_reste_surveille():
-    # Un bot piraté est le scénario de nuke le plus courant.
+def test_un_bot_administrateur_n_est_pas_sanctionne():
     robot = _membre(53, administrateur=True, bot=True)
     cog, guild = _contexte(robot)
-    assert _exempt(cog, guild, robot) is False
+    assert _exempt(cog, guild, robot) is True
 
 
 def test_proprietaire_sentrix_et_liste_blanche_restent_exemptes():
