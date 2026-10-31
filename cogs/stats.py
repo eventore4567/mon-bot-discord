@@ -39,6 +39,30 @@ class Stats(commands.Cog, name="Stats"):
             footer=design.get("footer"),
         )
 
+    async def _global_usage(self) -> tuple[int, int, int | None]:
+        """Portée Discord et comptes distincts ayant utilisé une commande enregistrée.
+
+        Le total des membres cumule les serveurs (un membre présent dans deux
+        serveurs peut donc être compté deux fois). Le total des utilisateurs
+        est dédupliqué par ID Discord à partir des commandes terminées et
+        journalisées, et ne représente pas les installations sur les comptes.
+        """
+        serveurs = len(self.bot.guilds)
+        membres = sum(max(0, int(g.member_count or 0)) for g in self.bot.guilds)
+        cache = getattr(self, "_global_usage_cache", None)
+        if cache is not None and time.monotonic() - cache[0] < 300:
+            return serveurs, membres, cache[1]
+        try:
+            row = await self.bot.db.fetchone(
+                "SELECT COUNT(DISTINCT user_id) AS n FROM command_logs WHERE user_id IS NOT NULL"
+            )
+            utilisateurs = int(row["n"] if row else 0)
+            self._global_usage_cache = (time.monotonic(), utilisateurs)
+        except Exception:
+            logger.warning("Impossible de compter les utilisateurs distincts de SentriX", exc_info=True)
+            utilisateurs = None
+        return serveurs, membres, utilisateurs
+
     def _runtime_snapshot(self) -> dict:
         try:
             from . import runtime_observability_v26
@@ -49,9 +73,15 @@ class Stats(commands.Cog, name="Stats"):
     @commands.hybrid_command(name="bot-status", description="Afficher l'état général du bot.")
     async def system_status(self, ctx: commands.Context):
         e = await self._embed(ctx.guild.id if ctx.guild else None, title="État du bot")
+        serveurs, membres, utilisateurs = await self._global_usage()
         e.add_field(name="Latence", value=f"{helpers.latence_ms(self.bot)}ms", inline=True)
-        e.add_field(name="Serveurs", value=len(self.bot.guilds), inline=True)
-        e.add_field(name="Utilisateurs", value=sum(g.member_count for g in self.bot.guilds), inline=True)
+        e.add_field(name="Serveurs", value=str(serveurs), inline=True)
+        e.add_field(name="Membres cumulés", value=f"{membres:,}".replace(",", " "), inline=True)
+        e.add_field(
+            name="Utilisateurs des commandes",
+            value=f"{utilisateurs:,}".replace(",", " ") if utilisateurs is not None else "Indisponible",
+            inline=True,
+        )
         e.add_field(name="Python", value=platform.python_version(), inline=True)
         e.add_field(name="discord.py", value=discord.__version__, inline=True)
         uptime = int(time.time() - START_TIME)
@@ -302,8 +332,7 @@ class Stats(commands.Cog, name="Stats"):
     @commands.hybrid_command(name="botinfo", description="Afficher des informations générales sur le bot.")
     async def botinfo(self, ctx: commands.Context):
         bot = self.bot
-        serveurs = len(bot.guilds)
-        membres = sum(g.member_count or 0 for g in bot.guilds)
+        serveurs, membres, utilisateurs = await self._global_usage()
         prefixees = sum(1 for _ in bot.walk_commands())
         slash = sum(1 for _ in bot.tree.walk_commands())
         latence = bot.latency
@@ -315,9 +344,14 @@ class Stats(commands.Cog, name="Stats"):
             bot._sentrix_started_at = depuis
 
         ouverture = (
-            f"**{bot.user.name}** veille sur **{serveurs}** serveur"
-            f"{'s' if serveurs > 1 else ''} et **{membres:,}** membres."
+            f"**{bot.user.name}** est présent sur **{serveurs}** serveur"
+            f"{'s' if serveurs > 1 else ''} totalisant **{membres:,}** membres (cumul)."
         ).replace(",", " ")
+        if utilisateurs is not None:
+            ouverture += (
+                f"\n**{utilisateurs:,}** comptes distincts ont utilisé ses commandes "
+                "depuis le début du suivi."
+            ).replace(",", " ")
         ouverture += f"\nEn ligne depuis <t:{depuis}:R>."
 
         e = await self._embed(
@@ -331,7 +365,15 @@ class Stats(commands.Cog, name="Stats"):
             name="Portée",
             value=(
                 f"**{serveurs}** serveur{'s' if serveurs > 1 else ''}\n"
-                f"**{membres:,}** membres".replace(",", " ")
+                f"**{membres:,}** membres cumulés".replace(",", " ")
+            ),
+            inline=True,
+        )
+        e.add_field(
+            name="Utilisateurs de SentriX",
+            value=(
+                f"**{utilisateurs:,}** comptes distincts".replace(",", " ")
+                if utilisateurs is not None else "Statistique indisponible"
             ),
             inline=True,
         )
