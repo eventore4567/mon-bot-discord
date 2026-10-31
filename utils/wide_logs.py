@@ -1475,20 +1475,20 @@ def ticket_close_blocks(embed: discord.Embed, language: str = "fr") -> list[str]
     ]
     if language == "en":
         blocs = [
-            "\\n".join((
+            "\n".join((
                 "**🎫  Ticket record**", f"{ticket}  ·  {salon}", "",
                 f"**Opened by**  {demandeur}", f"**Closed by**  {ferme_par}",
             )),
-            "\\n".join((
+            "\n".join((
                 "**🕒  Times & duration**",
                 f"**Opened:** {ouvert}", f"**Closed:** {ferme}",
                 f"**Total duration:** {duree}", f"**Time to first claim:** {delai}",
             )),
-            "\\n".join((
+            "\n".join((
                 "**👥  Support team**",
                 f"**Handler at closure:** {titulaire}", f"**Staff involved:** {equipe}",
             )),
-            "**📝  Closing reason**\\n" + discord.utils.escape_markdown(motif),
+            "**📝  Closing reason**\n" + discord.utils.escape_markdown(motif),
         ]
     if historique:
         blocs.append(("**🧭  Recent actions**\n" if language == "en" else "**🧭  Dernières actions**\n") + historique)
