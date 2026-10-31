@@ -563,11 +563,8 @@ class TicketOpenSelect(discord.ui.Select):
             for t in types[:25]
         ]
         super().__init__(
-            placeholder=(
-                "🎫 Choose a category to open a ticket..."
-                if language == language_runtime.LANG_EN
-                else "🎫 Choisissez une catégorie pour ouvrir un ticket..."
-            ),
+            # Le menu public reste en français, quelle que soit la langue du runtime.
+            placeholder="🎫 Choisissez une catégorie pour ouvrir un ticket...",
             options=options, custom_id=f"ticket_open_select:{panel_id}", min_values=1, max_values=1,
         )
 
@@ -1285,50 +1282,28 @@ class Tickets(commands.Cog):
     # ---------------------------------------------------------------- OUVERTURE
 
     async def build_public_panel(self, panel, types):
+        """Publier seulement le contenu choisi par les administrateurs.
+
+        Ne pas ajouter automatiquement « How it works » ni la liste des
+        catégories : le menu déroulant (ou les boutons) porte déjà les choix.
+        Même sur les serveurs dont la langue historique est EN, le libellé du
+        menu public SentriX reste en français.
+        """
         language = await language_runtime.get_language(self.bot, int(panel["guild_id"]))
         title = str(panel["title"] or "🎫 Support")
-        description = str(panel["description"] or "")
+        description = str(panel["description"] or "").strip()
         if not description or description == "Choisissez une option ci-dessous pour ouvrir un ticket.":
-            description = (
-                "Choose the category that matches your request. Staff will reply in a private channel."
-                if language == language_runtime.LANG_EN
-                else "Choisissez la catégorie qui correspond à votre demande. Le staff vous répondra dans un salon privé."
-            )
+            description = "Choisissez une catégorie dans le menu pour ouvrir un ticket privé."
 
-        lines = []
-        for ticket_type in list(types)[:12]:
-            emoji = emoji_de_categorie(ticket_type["name"], ticket_type["emoji"])
-            name = str(ticket_type["name"] or "Ticket")
-            detail = str(ticket_type["description"] or "").strip()
-            lines.append(f"{emoji} **{name}**" + (f" — {detail}" if detail else ""))
-
-        section_title = "Available categories" if language == language_runtime.LANG_EN else "Catégories disponibles"
-        how_title = "How it works" if language == language_runtime.LANG_EN else "Comment ça marche"
-        how_text = (
-            "Select a category below. A private channel will be created for you and the relevant staff."
-            if language == language_runtime.LANG_EN
-            else "Sélectionnez une catégorie ci-dessous. Un salon privé sera créé pour vous et le staff concerné."
-        )
         public = sx_panels.Panneau(
             titre=title,
             sous_titre=description,
-            sections=[
-                sx_panels.Section(how_title, texte=how_text),
-                sx_panels.Section(section_title, texte="\n".join(lines)),
-            ],
+            sections=[],  # L'admin contrôle tout le texte visible, sans bloc ajouté.
             kind="tickets",
             vignette=panel["thumbnail_url"] or None,
             image=panel["image_url"] or None,
             pied=panel["footer_text"] or "SentriX",
         )
-        if panel["color"]:
-            try:
-                container = next(x for x in public.children if isinstance(x, discord.ui.Container))
-                # Liseré retiré : il dessinait un trait coloré sur tout le flanc
-                # gauche du message, et répétait en couleur ce que la signature
-                # « SENTRIX CORE · … » dit déjà en toutes lettres.
-            except Exception:
-                pass
         return sx_panels.avec_composants(public, TicketPanelView(panel, types, language))
 
     async def refresh_public_panels(self, guild_id: int) -> int:
