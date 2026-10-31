@@ -959,6 +959,14 @@ async def send_log(
         category,
         channel_id,
     )
+    # La personnalisation visuelle est facultative : jamais bloquer un log
+    # de sécurité si son tableau de réglages est indisponible.
+    sender_profile = None
+    try:
+        from utils import log_sender_profiles
+        sender_profile = await log_sender_profiles.get_profile(bot, guild.id, category)
+    except Exception:
+        logger.exception("Lecture du mini-profil impossible, log normal conservé.")
     envoye = await send_wide_log(
         channel,
         rendered,
@@ -970,6 +978,7 @@ async def send_log(
         identity_icon=identity_icon,
         media_items=media_items,
         extra_files=media_files,
+        sender_profile=sender_profile,
     )
     if not envoye and wide_logs.echecs_permanents(channel_id) >= ECHECS_AVANT_COUPURE:
         await _couper_route_inaccessible(bot, guild, category, channel_id)
