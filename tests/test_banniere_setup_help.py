@@ -168,8 +168,13 @@ def test_les_pages_de_v74_portent_la_banniere():
     conteneurs = source.count("discord.ui.Container()")
     poses = source.count("v73.poser_banniere(")
     assert conteneurs >= 1
-    assert poses >= conteneurs, (
-        f"{conteneurs} page(s) construites mais {poses} bannière(s) posée(s)"
+    # L'accueil /setup éphémère et le mini-choix de langue sont volontairement
+    # sobres : pas de bannière ni de fichier joint. Les autres pages gardent
+    # leur bannière et la règle anti-galerie cassée.
+    assert "async def _build_home(self)" in source
+    assert "discord.ui.TextDisplay(\"## Langue du serveur\")" in source
+    assert poses >= conteneurs - 2, (
+        f"{conteneurs} page(s), {poses} bannière(s) posée(s), 2 vues compactes sans bannière"
     )
 
 
