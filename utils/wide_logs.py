@@ -1434,7 +1434,7 @@ def _ticket_one_line(value: object, *, max_chars: int = 400) -> str:
     return content or "Non renseigné"
 
 
-def ticket_close_blocks(embed: discord.Embed) -> list[str]:
+def ticket_close_blocks(embed: discord.Embed, language: str = "fr") -> list[str]:
     """Blocs Discord épurés : dossier, acteurs, temps, motif, chronologie."""
     exact = lambda *names: _field_value_exact(embed, *names)
     ticket = _ticket_one_line(exact("Ticket"), max_chars=100)
@@ -1473,10 +1473,27 @@ def ticket_close_blocks(embed: discord.Embed) -> list[str]:
         )),
         "**📝  Motif de fermeture**\n" + discord.utils.escape_markdown(motif),
     ]
+    if language == "en":
+        blocs = [
+            "\n".join((
+                "**🎫  Ticket record**", f"{ticket}  ·  {salon}", "",
+                f"**Opened by**  {demandeur}", f"**Closed by**  {ferme_par}",
+            )),
+            "\n".join((
+                "**🕒  Times & duration**",
+                f"**Opened:** {ouvert}", f"**Closed:** {ferme}",
+                f"**Total duration:** {duree}", f"**Time to first claim:** {delai}",
+            )),
+            "\n".join((
+                "**👥  Support team**",
+                f"**Handler at closure:** {titulaire}", f"**Staff involved:** {equipe}",
+            )),
+            "**📝  Closing reason**\n" + discord.utils.escape_markdown(motif),
+        ]
     if historique:
-        blocs.append("**🧭  Dernières actions**\n" + historique)
+        blocs.append(("**🧭  Recent actions**\n" if language == "en" else "**🧭  Dernières actions**\n") + historique)
     if reference:
-        blocs.append(f"-# Référence de suivi : {reference}")
+        blocs.append(f"-# {'Tracking reference' if language == 'en' else 'Référence de suivi'} : {reference}")
     return blocs
 
 
@@ -1503,10 +1520,11 @@ def _add_ticket_log_content(
     container: discord.ui.Container, embed: discord.Embed, *,
     event_type: str, identity_name: str | None,
     identity_id: int | None, transcript_filename: str | None,
+    language: str = "fr",
 ) -> None:
     """Un seul conteneur : informations, déroulé et transcript téléchargeable."""
     if event_type == "ticket_close" and _field_value_exact(embed, "Fermeture"):
-        parts = ticket_close_blocks(embed)
+        parts = ticket_close_blocks(embed, language=language)
         # Regrouper l'identité / temps / support, puis motif / historique.
         for index, part in enumerate(parts):
             if index in {1, 3, 4}:
@@ -1528,8 +1546,9 @@ def _add_ticket_log_content(
         if filename.startswith("sentrix-ticket-") and filename.endswith("-transcript.txt"):
             container.add_item(_sep())
             container.add_item(discord.ui.TextDisplay(
-                "**📄  Transcript complet**\n"
-                "-# Messages et actions du ticket · fichier TXT à ouvrir ou télécharger."
+                ("**📄  Full transcript**\n-# Ticket messages and actions · open or download the TXT file."
+                 if language == "en" else
+                 "**📄  Transcript complet**\n-# Messages et actions du ticket · fichier TXT à ouvrir ou télécharger.")
             ))
             file_cls = getattr(discord.ui, "File", None)
             if file_cls is not None:
@@ -1558,6 +1577,7 @@ class WideLogView(discord.ui.LayoutView):
         guild_id: int | None = None,
         available_attachments: set[str] | None = None,
         ticket_attachment_filename: str | None = None,
+        language: str = "fr",
     ) -> None:
         super().__init__(timeout=None)
         # Format neutre : image de 1200x24 presque transparente.
@@ -1576,6 +1596,18 @@ class WideLogView(discord.ui.LayoutView):
             embed.description or "",
         )
         title = _trace_title(event_type, embed.title or "")
+        if language == "en" and event_type.startswith("ticket_"):
+            title = {
+                "ticket_open": "Ticket opened", "ticket_close": "Ticket closed",
+                "ticket_claim": "Ticket claimed", "ticket_unclaim": "Ticket released",
+                "ticket_autoclose": "Ticket automatically closed",
+                "ticket_reopen": "Ticket reopened", "ticket_delete": "Ticket deleted",
+                "ticket_transfer": "Ticket transferred", "ticket_rename": "Ticket renamed",
+                "ticket_member_add": "Member added to ticket",
+                "ticket_member_remove": "Member removed from ticket",
+                "ticket_rating": "Ticket rated", "ticket_note": "Staff note added",
+                "ticket_bump": "Member reminded",
+            }.get(event_type, title)
         if event_type.startswith("ticket_"):
             ticket_number = re.search(r"#(\d+)", _field_value_exact(embed, "Ticket"))
             if ticket_number:
@@ -1660,6 +1692,7 @@ class WideLogView(discord.ui.LayoutView):
             _add_ticket_log_content(
                 container, embed, event_type=event_type,
                 identity_name=identity_name, identity_id=identity_id,
+                language=language,
                 transcript_filename=(
                     ticket_attachment_filename
                     if ticket_attachment_filename in set(available_attachments or ())
@@ -1991,6 +2024,7 @@ async def send_wide_log(
     identity_id: int | None = None,
     identity_icon: str | None = None,
     sender_profile: dict | None = None,
+    language: str = "fr",
 ) -> bool:
     """Envoie un log compact Components V2 avec avatar et actions."""
     if salon_inaccessible(getattr(channel, "id", None)):
@@ -2051,6 +2085,7 @@ async def send_wide_log(
                 for f in ([extra_file] if extra_file is not None else []) + list(extra_files or [])
                 if getattr(f, "filename", None)
             },
+            language=language,
             ticket_attachment_filename=(
                 str(getattr(extra_file, "filename", "") or "")
                 if event_type == "ticket_close" and extra_file is not None

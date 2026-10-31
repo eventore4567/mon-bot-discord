@@ -120,6 +120,56 @@ class ClosureReport:
             )
         return "\n".join(lines)[:1024] or "Historique détaillé indisponible."
 
+    def timeline_for(self, language: str = "fr") -> str:
+        if language != "en":
+            return self.recent_timeline
+        labels = {
+            "ticket_open": "Opened", "ticket_claim": "Claimed",
+            "ticket_unclaim": "Released", "ticket_transfer": "Transferred",
+            "ticket_reopen": "Reopened", "ticket_member_add": "Member added",
+            "ticket_member_remove": "Member removed", "ticket_rename": "Renamed",
+            "ticket_note": "Staff note added", "ticket_bump": "Reminder sent",
+            "ticket_rating": "Rated", "ticket_autoclose": "Automatically closed",
+            "ticket_delete": "Deleted", "ticket_close": "Closed",
+        }
+        last = self.events[-5:]
+        result = []
+        if len(self.events) > len(last):
+            result.append(f"{len(self.events)-len(last)} previous event(s) in the transcript.")
+        for kind, actor, stamp in last:
+            result.append("• " + labels.get(kind, kind.replace("_", " "))
+                          + (f" · {mention(actor)}" if actor else "")
+                          + (f" · <t:{stamp}:f>" if stamp else ""))
+        return "\n".join(result)[:1024] or "Detailed history unavailable."
+
+    def handler_for(self, language: str = "fr") -> str:
+        if language != "en":
+            return self.current_handler
+        if self.current_claimant:
+            return mention(self.current_claimant)
+        if self.claims:
+            return "Released (last claimed by " + mention(self.claims[-1][0]) + ")"
+        return "Not claimed"
+
+    def team_for(self, language: str = "fr") -> str:
+        if language != "en":
+            return self.handler_names
+        if not self.handlers:
+            return "No staff member recorded"
+        people = self.handlers
+        return ", ".join(mention(i) for i in people[:7]) + (
+            f" and {len(people)-7} more" if len(people) > 7 else ""
+        )
+
+    def wait_for(self, language: str = "fr") -> str:
+        if language != "en":
+            return self.first_claim_wait
+        if not self.claims:
+            return "No claim recorded"
+        if self.created_at is None or self.claims[0][1] is None:
+            return "Unavailable"
+        return readable(self.claims[0][1] - self.created_at) or "Unavailable"
+
     def transcript_text(self, messages):
         claims = "\n".join(
             f"- {utcdate(stamp)} : {mention(actor)} (ID {actor})"
@@ -224,7 +274,7 @@ async def load_report(bot, guild_id, ticket, *, closed_at, closed_by, reason):
     )
 
 
-def add_fields(embed, report, *, channel_name, participant_text, reference):
+def add_fields(embed, report, *, channel_name, participant_text, reference, language: str = "fr"):
     """Garde aussi un embed de secours correct hors rendu Components V2."""
     fields = (
         ("🎟️ Ticket", f"#{report.ticket_id} · {report.category}", False),
@@ -233,12 +283,12 @@ def add_fields(embed, report, *, channel_name, participant_text, reference):
         ("🔒 Fermé par", mention(report.closed_by), True),
         ("🕒 Ouverture", timestamp(report.created_at), True),
         ("🕒 Fermeture", timestamp(report.closed_at), True),
-        ("🙋 Pris en charge", report.current_handler, False),
-        ("👥 Équipe ayant pris en charge", report.handler_names, False),
-        ("⏱️ Avant première prise en charge", report.first_claim_wait, True),
-        ("⏳ Durée totale", report.duration or "Indisponible", True),
+        ("🙋 Pris en charge", report.handler_for(language), False),
+        ("👥 Équipe ayant pris en charge", report.team_for(language), False),
+        ("⏱️ Avant première prise en charge", report.wait_for(language), True),
+        ("⏳ Durée totale", report.duration or ("Unavailable" if language == "en" else "Indisponible"), True),
         ("📝 Motif", report.reason, False),
-        ("🧭 Historique", report.recent_timeline, False),
+        ("🧭 Historique", report.timeline_for(language), False),
         ("👥 Participants", participant_text or "Non renseignés", False),
         ("🔖 Référence", chr(96) + reference + chr(96), False),
     )

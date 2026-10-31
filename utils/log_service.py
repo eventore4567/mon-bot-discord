@@ -967,6 +967,13 @@ async def send_log(
         sender_profile = await log_sender_profiles.get_profile(bot, guild.id, category)
     except Exception:
         logger.exception("Lecture du mini-profil impossible, log normal conservé.")
+    ticket_language = "fr"
+    if event_type.startswith("ticket_"):
+        try:
+            from cogs import language_runtime
+            ticket_language = await language_runtime.get_language(bot, guild.id)
+        except Exception:
+            logger.exception("Langue du journal ticket introuvable, français utilisé.")
     envoye = await send_wide_log(
         channel,
         rendered,
@@ -979,6 +986,7 @@ async def send_log(
         media_items=media_items,
         extra_files=media_files,
         sender_profile=sender_profile,
+        language=ticket_language,
     )
     if not envoye and wide_logs.echecs_permanents(channel_id) >= ECHECS_AVANT_COUPURE:
         await _couper_route_inaccessible(bot, guild, category, channel_id)
