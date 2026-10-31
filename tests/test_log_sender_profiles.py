@@ -75,14 +75,15 @@ async def _exercise_profile_storage(monkeypatch):
                                      avatar_url="https://cdn.discordapp.com/avatar.png")
     assert out["enabled"]
     got = await profiles.get_profile(bot, 1234, "members")
-    assert got["display_name"] == "Joins & Leaves"
+    assert got["display_name"] == "Arrivées & Départs"
+    assert got["enabled"] is True
     assert len([q for q, _ in db.queries if "CREATE TABLE" in q]) == 1
     with pytest.raises(ValueError):
         await profiles.set_profile(bot, 1234, "not-a-log", enabled=True,
                                    display_name="Other", avatar_url="")
 
 
-def test_profiles_are_per_guild_and_category(monkeypatch):
+def test_old_profile_settings_do_not_override_automatic_log_identity(monkeypatch):
     asyncio.run(_exercise_profile_storage(monkeypatch))
 
 
@@ -101,3 +102,32 @@ async def _exercise_no_bad_interactions(monkeypatch):
 
 def test_interactive_logs_do_not_use_incoming_webhook(monkeypatch):
     asyncio.run(_exercise_no_bad_interactions(monkeypatch))
+
+
+def test_auto_profile_is_enabled_without_a_database_or_setup():
+    bot = SimpleNamespace(user=SimpleNamespace(
+        display_avatar=SimpleNamespace(url="https://cdn.discordapp.com/icons/sentrix.png")
+    ))
+    m = asyncio.run(profiles.get_profile(bot, 1, "members"))
+    t = asyncio.run(profiles.get_profile(bot, 2, "tickets"))
+    assert m == {"enabled": True, "display_name": "Arrivées & Départs",
+                 "avatar_url": "https://cdn.discordapp.com/icons/sentrix.png"}
+    assert t["enabled"] is True and t["display_name"] == "Tickets"
+
+
+def test_custom_embed_sender_uses_webhook(monkeypatch):
+    class Hook:
+        async def send(self, **kwargs):
+            assert kwargs["username"] == "Annonces"
+            assert kwargs["avatar_url"] == "https://cdn.discordapp.com/announcement.png"
+            assert kwargs["wait"] is True
+            return SimpleNamespace(id=1234)
+    async def get_hook(_channel):
+        return Hook()
+    monkeypatch.setattr(profiles, "_webhook", get_hook)
+    result = asyncio.run(profiles.send_embed_with_identity(
+        SimpleNamespace(), sender_name="Annonces",
+        sender_avatar_url="https://cdn.discordapp.com/announcement.png",
+        content=None, embed=discord.Embed(title="Exemple"),
+    ))
+    assert result.id == 1234
