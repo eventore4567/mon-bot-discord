@@ -144,6 +144,25 @@ async def test_bot_allowlist_prevents_antibot_kick():
 
 
 @pytest.mark.asyncio
+async def test_bot_administrateur_n_est_jamais_expulse_par_antibot():
+    cog = _cog(_base_conf(antibot=1, antiaccount=1, antiraid=1, join_gate=1))
+    guild = SimpleNamespace(id=1, owner_id=999)
+    member = SimpleNamespace(
+        id=42,
+        bot=True,
+        guild=guild,
+        guild_permissions=SimpleNamespace(administrator=True, manage_guild=True),
+        kick=AsyncMock(),
+        timeout=AsyncMock(),
+    )
+
+    await cog.on_member_join(member)
+
+    member.kick.assert_not_awaited()
+    member.timeout.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_permission_guard_restores_role_escalation():
     conf = _base_conf(antinuke=1, security_permissions=1, risk_engine=1)
     cog = _cog(conf)

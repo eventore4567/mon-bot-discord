@@ -15,7 +15,8 @@ def usage_presence_text(guilds: Iterable[Any]) -> str:
     guild_list = list(guilds)
     members = sum(max(0, int(getattr(guild, "member_count", 0) or 0)) for guild in guild_list)
     return (
-        f"Utilisé par {_format_number(members)} membre{'s' if members != 1 else ''} "
-        f"sur {_format_number(len(guild_list))} serveur{'s' if len(guild_list) != 1 else ''}"
+        f"🛡️ {_format_number(members)} membre{'s' if members != 1 else ''} protégé"
+        f"{'s' if members != 1 else ''} • {_format_number(len(guild_list))} "
+        f"serveur{'s' if len(guild_list) != 1 else ''}"
     )
 

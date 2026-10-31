@@ -4505,6 +4505,12 @@ class AutoMod(commands.Cog, name="Automod"):
         if not self._recent_raid_joins.first_join(member.guild.id, member.id):
             return
 
+        # Immunité globale : aucune protection automatique (anti-bot, comptes
+        # récents, join gate ou anti-raid) ne sanctionne un propriétaire ou un
+        # compte — humain comme bot — doté d'un accès total au serveur.
+        if member.id == member.guild.owner_id or can_bypass_message_filters(member):
+            return
+
         if conf["antibot"] and member.bot:
             if await self._bot_is_allowlisted(member.guild.id, member.id):
                 await self.add_risk_signal(member.guild, member.id, "bot_allowlisted_join", 5, reason="Bot allowlisté ajouté au serveur", target=member)
@@ -4522,15 +4528,6 @@ class AutoMod(commands.Cog, name="Automod"):
                 action="Bot expulsé", erreur=erreur,
                 extra={"Ajouté par": f"{ajoute_par.mention} · `{ajoute_par.id}`" if ajoute_par else "inconnu"},
             )
-            return
-
-        # Le propriétaire et les vrais responsables « Gérer le serveur »
-        # ne peuvent être expulsés pour ancienneté ni mutés sur leur arrivée.
-        # Les bots gardent la politique antibot, sans passe-droit automatique.
-        if not member.bot and (
-            member.id == member.guild.owner_id
-            or can_bypass_message_filters(member)
-        ):
             return
 
         account_age = (discord.utils.utcnow() - member.created_at).days
@@ -4817,9 +4814,8 @@ class AutoMod(commands.Cog, name="Automod"):
         if actor.id == PRIMARY_CREATOR_ID or actor.id in set(getattr(config, "OWNER_IDS", [])):
             return True
         # Un administrateur du serveur gère salons et rôles en connaissance de
-        # cause : le bannir pour trois suppressions coupait le serveur de son
-        # propre staff. Un BOT administrateur reste surveillé — un bot piraté
-        # est précisément le scénario de nuke le plus courant.
+        # cause : humain ou bot explicitement doté de l'accès Administrateur,
+        # il ne doit jamais être sanctionné automatiquement par SentriX.
         member = _as_member(actor, guild)
         if not isinstance(member, discord.Member):
             try:
@@ -4828,7 +4824,6 @@ class AutoMod(commands.Cog, name="Automod"):
                 pass
         if (
             isinstance(member, discord.Member)
-            and not member.bot
             and getattr(member.guild_permissions, "administrator", False) is True
         ):
             return True
