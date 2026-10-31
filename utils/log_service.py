@@ -959,6 +959,8 @@ async def send_log(
         category,
         channel_id,
     )
+    from utils import log_sender_profiles
+    sender_profile = await log_sender_profiles.get_profile(bot, guild.id, category)
     envoye = await send_wide_log(
         channel,
         rendered,
@@ -970,6 +972,7 @@ async def send_log(
         identity_icon=identity_icon,
         media_items=media_items,
         extra_files=media_files,
+        sender_profile=sender_profile,
     )
     if not envoye and wide_logs.echecs_permanents(channel_id) >= ECHECS_AVANT_COUPURE:
         await _couper_route_inaccessible(bot, guild, category, channel_id)
