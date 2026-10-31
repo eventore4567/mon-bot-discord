@@ -52,6 +52,20 @@ def _short(value: object, limit: int = 1000) -> str:
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
+def _needs_message_transcript(sections: list[tuple[str, str]]) -> bool:
+    """Une pièce jointe TXT n'est utile que si l'affichage tronque le texte.
+
+    Une courte suppression reste lisible directement dans le log ; les
+    messages longs, le Markdown susceptible de s'étendre et les textes
+    multiligne conservent toujours leur contenu exact en fichier.
+    """
+    texts = [str(text or "") for _label, text in sections]
+    return (
+        any(len(text) >= 750 or len(text.splitlines()) > 18 for text in texts)
+        or sum(len(text) for text in texts) >= 1450
+    )
+
+
 def _attach_message_transcript(
     panel: discord.Embed,
     *,
@@ -70,6 +84,8 @@ def _attach_message_transcript(
     Le TXT ne transforme ni les espaces, ni Unicode, ni les mentions du message.
     """
     items, files = list(media_items or []), list(media_files or [])
+    if not _needs_message_transcript(sections):
+        return items, files
     header = (
         "SentriX — Transcript intégral\n"
         f"Serveur : {guild_id}\nSalon : {channel_id}\n"
@@ -671,7 +687,9 @@ class Logs(commands.Cog, name="Logs"):
         if guild.me is None or not guild.me.guild_permissions.view_audit_log:
             return None, None
 
-        for delay in (0.15, 0.45, 0.85):
+        # Les écritures du journal d'audit arrivent parfois après l'événement
+        # Gateway. Dernière lecture décalée pour éviter les faux "inconnus".
+        for delay in (0.15, 0.45, 0.85, 1.35):
             if delay:
                 await asyncio.sleep(delay)
             now = discord.utils.utcnow()
@@ -681,7 +699,7 @@ class Logs(commands.Cog, name="Logs"):
                     self._delete_audit_seen.pop(key, None)
             try:
                 async for entry in guild.audit_logs(
-                    limit=12,
+                    limit=20,
                     action=discord.AuditLogAction.message_delete,
                 ):
                     if audit_entries.cible_id(entry) != int(author_id):
