@@ -1285,50 +1285,26 @@ class Tickets(commands.Cog):
     # ---------------------------------------------------------------- OUVERTURE
 
     async def build_public_panel(self, panel, types):
+        """Publier seulement le contenu choisi par les administrateurs.
+
+        Ne pas ajouter automatiquement « How it works » ni la liste des
+        catégories : le menu déroulant (ou les boutons) porte déjà les choix.
+        Le texte structurel de SentriX suit la langue configurée du serveur ;
+        le titre et la description restent, eux, exactement ceux de l'admin.
+        """
         language = await language_runtime.get_language(self.bot, int(panel["guild_id"]))
-        title = str(panel["title"] or "🎫 Support")
+        title = str(panel["title"] or "")
         description = str(panel["description"] or "")
-        if not description or description == "Choisissez une option ci-dessous pour ouvrir un ticket.":
-            description = (
-                "Choose the category that matches your request. Staff will reply in a private channel."
-                if language == language_runtime.LANG_EN
-                else "Choisissez la catégorie qui correspond à votre demande. Le staff vous répondra dans un salon privé."
-            )
 
-        lines = []
-        for ticket_type in list(types)[:12]:
-            emoji = emoji_de_categorie(ticket_type["name"], ticket_type["emoji"])
-            name = str(ticket_type["name"] or "Ticket")
-            detail = str(ticket_type["description"] or "").strip()
-            lines.append(f"{emoji} **{name}**" + (f" — {detail}" if detail else ""))
-
-        section_title = "Available categories" if language == language_runtime.LANG_EN else "Catégories disponibles"
-        how_title = "How it works" if language == language_runtime.LANG_EN else "Comment ça marche"
-        how_text = (
-            "Select a category below. A private channel will be created for you and the relevant staff."
-            if language == language_runtime.LANG_EN
-            else "Sélectionnez une catégorie ci-dessous. Un salon privé sera créé pour vous et le staff concerné."
-        )
         public = sx_panels.Panneau(
             titre=title,
             sous_titre=description,
-            sections=[
-                sx_panels.Section(how_title, texte=how_text),
-                sx_panels.Section(section_title, texte="\n".join(lines)),
-            ],
+            sections=[],  # L'admin contrôle tout le texte visible, sans bloc ajouté.
             kind="tickets",
             vignette=panel["thumbnail_url"] or None,
             image=panel["image_url"] or None,
             pied=panel["footer_text"] or "SentriX",
         )
-        if panel["color"]:
-            try:
-                container = next(x for x in public.children if isinstance(x, discord.ui.Container))
-                # Liseré retiré : il dessinait un trait coloré sur tout le flanc
-                # gauche du message, et répétait en couleur ce que la signature
-                # « SENTRIX CORE · … » dit déjà en toutes lettres.
-            except Exception:
-                pass
         return sx_panels.avec_composants(public, TicketPanelView(panel, types, language))
 
     async def refresh_public_panels(self, guild_id: int) -> int:
@@ -1417,12 +1393,23 @@ class Tickets(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         old_message_id = panel["message_id"]
 
-        # Publication transactionnelle : ne JAMAIS supprimer l'ancien panneau
-        # avant que le nouveau soit réellement envoyé ET référencé en base.
-        # Une erreur réseau ou SQLite doit laisser l'ancien panneau intact.
+        # Si le panneau existe encore dans le même salon, le rafraîchir sur
+        # place : même message, même lien et aucun doublon. S'il est absent ou
+        # si la destination a changé, publier d'abord le remplacement ; une
+        # erreur ne doit jamais supprimer l'ancien panneau fonctionnel.
+        old = None
+        if old_message_id:
+            try:
+                old = await channel.fetch_message(int(old_message_id))
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                old = None
         try:
             new_panel = await self.build_public_panel(panel, types)
-            msg = await sx_panels.envoyer(channel, new_panel)
+            if old is not None:
+                await sx_panels.editer(old, new_panel)
+                msg = old
+            else:
+                msg = await sx_panels.envoyer(channel, new_panel)
             if msg is None or getattr(msg, "id", None) is None:
                 raise RuntimeError("Le message du nouveau panneau est introuvable.")
         except Exception:
@@ -1435,43 +1422,35 @@ class Tickets(commands.Cog):
                 ephemere=True,
             )
 
-        try:
-            await self.bot.db.execute(
-                "UPDATE ticket_panels_v2 SET message_id=?, channel_id=? WHERE id=?",
-                (msg.id, channel.id, panel_id),
-            )
-        except Exception:
-            logger.exception(
-                "Enregistrement du panneau ticket #%s impossible ; nouveau message annulé.",
-                panel_id,
-            )
+        # Une édition sur place conserve déjà les identifiants enregistrés.
+        # Seul un vrai message de remplacement nécessite une écriture en base.
+        if old is None:
             try:
-                await msg.delete()
-            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                await self.bot.db.execute(
+                    "UPDATE ticket_panels_v2 SET message_id=?, channel_id=? WHERE id=?",
+                    (msg.id, channel.id, panel_id),
+                )
+            except Exception:
                 logger.exception(
-                    "Nouveau message ticket #%s non supprimé après échec DB.",
-                    getattr(msg, "id", None),
+                    "Enregistrement du panneau ticket #%s impossible ; nouveau message annulé.",
+                    panel_id,
                 )
-            return await sx_panels.texte_court(
-                interaction, "Impossible d'enregistrer le panneau. L'ancien reste disponible.",
-                ephemere=True,
-            )
+                try:
+                    await msg.delete()
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    logger.exception(
+                        "Nouveau message ticket #%s non supprimé après échec DB.",
+                        getattr(msg, "id", None),
+                    )
+                return await sx_panels.texte_court(
+                    interaction, "Impossible d'enregistrer le panneau. L'ancien reste disponible.",
+                    ephemere=True,
+                )
 
-        if old_message_id and int(old_message_id) != int(msg.id):
-            try:
-                old = await channel.fetch_message(old_message_id)
-                await old.delete()
-            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                # Le nouveau panneau est déjà fonctionnel : ne pas annuler
-                # l'opération à cause d'un ancien message inaccessible.
-                logger.warning(
-                    "Ancien panneau ticket #%s non supprimé ; nouveau panneau #%s conservé.",
-                    old_message_id, msg.id,
-                )
         confirmation = (
-            f"Ticket panel published in {channel.mention}."
+            f"Ticket panel refreshed in {channel.mention}."
             if language == language_runtime.LANG_EN
-            else f"Panel ticket publié dans {channel.mention}."
+            else f"Panneau de tickets actualisé dans {channel.mention}."
         )
         await sx_panels.texte_court(interaction, confirmation, ephemere=True)
 
