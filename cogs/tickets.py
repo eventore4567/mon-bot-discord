@@ -2275,6 +2275,17 @@ class Tickets(commands.Cog):
                 row["id"],
             )
 
+        # Une fermeture automatique archive elle aussi la conversation,
+        # même lorsque l'envoi des transcriptions en MP est désactivé.
+        try:
+            await ticket_transcript_links.store_archive(
+                self.bot, ticket_id=int(row["id"]), guild_id=guild.id,
+                channel_id=int(channel.id), channel_name=channel.name,
+                transcript_text=transcript_text,
+            )
+        except Exception:
+            logger.exception("Archive web d'auto-fermeture ticket #%s indisponible.", row["id"])
+
         try:
             # Même interface que les fermetures manuelles, sans ancienne carte
             # verte "Vérification nécessaire" ni boutons de copie inutiles.
@@ -2975,4 +2986,10 @@ class TicketFormModal(discord.ui.Modal):
 
 
 async def setup(bot: commands.Bot):
+    from services.ticket_transcript_staff_button import StaffTranscriptButton
+
+    # Les boutons des anciens logs survivent aux redémarrages ; Discord
+    # reconstruit le callback depuis le custom_id sans garder la vue en RAM.
+    if hasattr(bot, "add_dynamic_items"):
+        bot.add_dynamic_items(StaffTranscriptButton)
     await bot.add_cog(Tickets(bot))

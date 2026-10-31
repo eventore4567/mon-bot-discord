@@ -430,6 +430,18 @@ def install(bot: commands.Bot) -> None:
         except discord.HTTPException:
             transcript_text = "Transcription indisponible (erreur lors de la lecture du salon)."
 
+        # L'archive web est sauvegardée même si les MP de fermeture sont
+        # désactivés : un staff autorisé pourra ouvrir un lien personnel depuis
+        # le log, sans jamais exposer un jeton privé dans le salon de logs.
+        try:
+            await ticket_transcript_links.store_archive(
+                self.bot, ticket_id=ticket_id, guild_id=guild.id,
+                channel_id=int(channel.id), channel_name=channel.name,
+                transcript_text=transcript_text,
+            )
+        except Exception:
+            logger.exception("Archive web du ticket #%s indisponible.", ticket_id)
+
         # Préserver aussi l'archive durable de l'ancien module Logs V6 :
         # les contrôles d'historique déjà publiés continuent d'y accéder.
         try:
@@ -544,12 +556,21 @@ def install(bot: commands.Bot) -> None:
             executor_id=interaction.user.id,
             discriminator=reference,
         )
+        # Deux actions dans le log : ouvrir le salon ou demander un lien
+        # personnel vers le transcript. Le jeton n'est jamais public.
+        log_view = tickets_service.vue_voir_le_ticket(guild.id, channel.id)
+        if log_view is not None:
+            log_view.add_item(discord.ui.Button(
+                style=discord.ButtonStyle.secondary,
+                label="Transcription privée",
+                custom_id=f"sentrix:ticket:transcript:{int(ticket_id)}",
+            ))
         await _safe_ticket_log(
             self,
             guild,
             "ticket_close",
             log_embed,
-            view=tickets_service.vue_voir_le_ticket(guild.id, channel.id),
+            view=log_view,
             event_key=event_key,
             identity_name=(owner.display_name if owner else f"Membre {ticket['user_id']}"),
             identity_id=int(ticket["user_id"]),
