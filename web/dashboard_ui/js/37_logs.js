@@ -89,7 +89,7 @@ const routes = (data.routes || []).map(route => ({ ...route }));
     </div>
     <details class="log-mini-profile" data-log-profile="${esc(route.key)}">
       <summary>Mini-profil du message</summary>
-      <p class="muted" style="font-size:12px;margin:8px 0">Personnalisez le nom et l’avatar affichés au clic sur les logs compatibles. Les boutons interactifs restent envoyés par SentriX.</p>
+      <p class="muted" style="font-size:12px;margin:8px 0">Choisissez le nom et l’avatar affichés sur les logs compatibles. Nécessite la permission Gérer les webhooks. Les messages avec actions restent envoyés par SentriX.</p>
       <label class="switch-row"><span>Utiliser un mini-profil</span><input class="switch" type="checkbox" data-profile-enabled="${esc(route.key)}" ${route.profile?.enabled ? "checked" : ""}></label>
       <label>Nom affiché<input class="input" type="text" maxlength="70" placeholder="Ex. Joins & Leaves" data-profile-name="${esc(route.key)}" value="${esc(route.profile?.display_name || "")}"></label>
       <label>Avatar (URL HTTPS)<input class="input" type="url" maxlength="450" placeholder="https://…" data-profile-avatar="${esc(route.key)}" value="${esc(route.profile?.avatar_url || "")}"></label>
@@ -173,6 +173,24 @@ const routes = (data.routes || []).map(route => ({ ...route }));
     root.querySelector('[data-log-example-title]').textContent = sample[0];
     root.querySelector('[data-log-example-info]').textContent = sample[1];
     root.querySelector('[data-log-example-detail]').textContent = sample[2];
+    const profile = route.profile || {};
+    const name = profile.enabled ? profile.display_name : 'SentriX';
+    const avatar = root.querySelector('.log-sample-avatar');
+    const author = root.querySelector('.log-sample-author strong');
+    author.textContent = name || 'SentriX';
+    const status = document.createElement('span');
+    status.className = 'log-sample-bot';
+    status.textContent = profile.enabled ? 'WEBHOOK' : 'APP';
+    author.appendChild(document.createTextNode(' '));
+    author.appendChild(status);
+    avatar.textContent = (name || 'S').substring(0, 1).toUpperCase();
+    if (profile.enabled && profile.avatar_url) {
+      const image = document.createElement('img');
+      image.src = profile.avatar_url;
+      image.alt = '';
+      image.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:inherit';
+      avatar.replaceChildren(image);
+    }
     root.querySelectorAll('[data-log-preview]').forEach(button => {
       const selected = button.dataset.logPreview === key;
       button.classList.toggle('log-preview-selected', selected);
@@ -285,6 +303,7 @@ const routes = (data.routes || []).map(route => ({ ...route }));
       const result = await gpost('/logs/sender-profile', { category: key, enabled, display_name, avatar_url }, 'PUT');
       const route = byKey.get(key);
       if (route) route.profile = result.profile;
+      preview(key);
       feedback.textContent = 'Enregistré';
       invalidate('log-config-v2');
       toast(result.message);
