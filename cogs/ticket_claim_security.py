@@ -555,6 +555,7 @@ def install(bot: commands.Bot) -> None:
         ticket_log_report.add_fields(
             log_embed, report, channel_name=channel.name,
             participant_text=participant_text, reference=reference,
+            language=lang,
         )
         event_key = log_service.make_event_key(
             guild.id,
