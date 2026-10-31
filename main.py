@@ -723,6 +723,14 @@ class BotAllInOne(commands.Bot):
                 len(EXTENSIONS),
             )
 
+        # Le bouton d'import doit etre ajoute apres les dernieres couches /setup,
+        # pour ne pas etre ecrase par les installateurs de rendu existants.
+        try:
+            from cogs.economy_import import install_for_bot as install_economy_import
+            install_economy_import(self)
+        except Exception:
+            logger.error("Installation import economie impossible :\n%s", traceback.format_exc())
+
         self._prune_redundant_commands()
         self._audit_command_permissions()
 
