@@ -383,9 +383,10 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
-                    "# ⚙️ Configuration\n"
+                    "# Configuration de SentriX\n"
                     f"**{self.guild.name}** · **{actifs}/{len(setup_ui.MODULE_SWITCHES)}** modules activés\n"
-                    "Choisissez un module pour ses réglages. L’activation reste un choix séparé."
+                    "**Pour commencer :** 1. Sécurité, 2. Logs, 3. Tickets ou Bienvenue.\n"
+                    "Choisis un bouton ci-dessous ou utilise le menu pour les autres réglages."
                 ),
                 accessory=v73._thumbnail(self.bot),
             )
@@ -399,9 +400,18 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         inactifs_noms = []
         for key, label in setup_ui.MODULE_SWITCHES:
             (actifs_noms if switch_states.get(key) == "enabled" else inactifs_noms).append(label)
+        # Une page d'accueil courte : les détails complets restent dans le menu.
+        def apercu(noms):
+            if not noms:
+                return "Aucun"
+            limite = 4
+            affiches = " · ".join(noms[:limite])
+            reste = len(noms) - limite
+            return affiches + (f" · +{reste} autre(s)" if reste else "")
+
         resume = (
-            "**Activés**\n" + (" · ".join(actifs_noms) or "Aucun module activé")
-            + "\n\n**Désactivés**\n" + (" · ".join(inactifs_noms) or "Aucun")
+            "**Actifs :** " + apercu(actifs_noms)
+            + "\n**Désactivés :** " + apercu(inactifs_noms)
         )
         if switch_states.get("security") == "empty":
             resume += (
@@ -409,18 +419,41 @@ class SentriXSetupV74(v73.SentriXSetupV73):
                 "sont coupés. Choisissez « Sécurité » dans le menu pour les activer."
             )
         container.add_item(discord.ui.TextDisplay(resume))
+
+        # Les trois priorités sont accessibles directement, sans chercher dans
+        # quinze catégories. Chaque bouton navigue : aucune option n'est activée.
+        raccourcis = []
+        for cle, libelle in (
+            ("security", "1. Sécurité"),
+            ("logs", "2. Logs"),
+            ("tickets", "3. Tickets"),
+            ("welcome", "Bienvenue"),
+        ):
+            bouton = discord.ui.Button(label=libelle, style=discord.ButtonStyle.secondary)
+
+            async def ouvrir_rapide(interaction: discord.Interaction, category=cle):
+                self.page = category
+                self.backend = self._new_backend(category)
+                await self.refresh(interaction)
+
+            bouton.callback = ouvrir_rapide
+            raccourcis.append(bouton)
+        container.add_item(discord.ui.ActionRow(*raccourcis))
+
         interrupteurs = setup_ui.ModuleSwitchSelect(self, switch_states)
+        # « Sécurité » sans protection ne s'active pas automatiquement :
+        # l'utilisateur doit choisir individuellement ses protections.
+        for option in interrupteurs.options:
+            if option.value == "security" and switch_states.get("security") == "empty":
+                option.description = "Choisir les protections dans la page Sécurité"
 
         async def basculer(interaction: discord.Interaction):
             module = interrupteurs.values[0]
-            # « Sécurité » sans aucune protection : allumer le module seul ne
-            # change rien, le même profil que le bouton de la page Sécurité.
+            # Pas d'activation implicite de protections au premier clic :
+            # ouvre la page, où l'administrateur choisit chaque filtre.
             if module == "security" and switch_states.get(module) == "empty":
-                await self._set_security_profile(True, interaction.user.id)
-                try:
-                    await self.backend.audit(interaction.user.id, "module:security", "profil")
-                except Exception:
-                    logger.debug("Audit setup indisponible.", exc_info=True)
+                self.page = "security"
+                self.backend = self._new_backend("security")
                 return await self.refresh(interaction)
             try:
                 nouveau = await setup_ui.toggle_module_switch(self.bot, self.guild.id, module, interaction.user.id)
