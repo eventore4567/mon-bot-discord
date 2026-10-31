@@ -10,8 +10,13 @@ from cogs import help_complete_v79 as aide  # noqa: E402
 from cogs import prefix_deprecation as avis  # noqa: E402
 
 
-def test_le_prefixe_est_coupe_par_defaut(monkeypatch):
+def test_le_prefixe_est_actif_par_defaut(monkeypatch):
     monkeypatch.delenv("SENTRIX_PREFIXE_ACTIF", raising=False)
+    assert avis.prefixe_actif() is True
+
+
+def test_le_prefixe_peut_rester_coupe_par_variable(monkeypatch):
+    monkeypatch.setenv("SENTRIX_PREFIXE_ACTIF", "0")
     assert avis.prefixe_actif() is False
     assert "ont été supprimées" in avis.texte_retire(SimpleNamespace(mention="<@1>"))
 

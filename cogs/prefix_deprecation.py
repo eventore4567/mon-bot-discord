@@ -50,17 +50,18 @@ def actif() -> bool:
     tools/prefix_deprecation_e2e.py le teste explicitement, allumé."""
     import os
 
-    return os.environ.get("SENTRIX_AVIS_PREFIXE", "1") != "0"
+    return os.environ.get("SENTRIX_AVIS_PREFIXE", "0") != "0"
 
 
 def prefixe_actif() -> bool:
-    """30/10/2026 (Jayden) : « personne n'utilise le +, supprime maintenant ».
-    En production, un message « +commande » n'exécute plus rien. Les commandes
-    restent chargées : elles sont la source des routes « / ». Le harnais de test
-    rallume le « + » (SENTRIX_PREFIXE_ACTIF=1) pour les parcours existants."""
+    """Les commandes ``+`` et ``/`` sont toutes les deux actives par défaut.
+
+    Le drapeau reste disponible comme coupe-circuit de secours, mais l'expérience
+    normale de SentriX accepte à nouveau les noms courts ``+help``, ``+setup``, etc.
+    """
     import os
 
-    return os.environ.get("SENTRIX_PREFIXE_ACTIF", "0") == "1"
+    return os.environ.get("SENTRIX_PREFIXE_ACTIF", "1") == "1"
 
 
 def commande_slash(texte: str) -> str | None:
@@ -168,7 +169,7 @@ def _concerne(ctx: commands.Context) -> bool:
 
 
 async def avertir(bot: commands.Bot, ctx: commands.Context) -> None:
-    if not actif() or not _concerne(ctx):
+    if prefixe_actif() or not actif() or not _concerne(ctx):
         return
     db = getattr(bot, "db", None)
     if db is None or not await reserver(db, ctx.author.id):

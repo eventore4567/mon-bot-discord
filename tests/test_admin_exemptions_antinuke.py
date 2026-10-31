@@ -34,12 +34,14 @@ def _membre(user_id: int, *, administrateur=False, gerer=False, bot=False, guild
     return membre
 
 
-def _contexte(*membres, whitelist=()):
+def _contexte(*membres, whitelist=(), fetched=()):
     guild = Mock(spec=discord.Guild)
     guild.id = 10
     guild.owner_id = GUILD_OWNER
     par_id = {m.id: m for m in membres}
     guild.get_member = lambda user_id: par_id.get(user_id)
+    fetched_by_id = {m.id: m for m in fetched}
+    guild.fetch_member = AsyncMock(side_effect=lambda user_id: fetched_by_id[user_id])
     for m in membres:
         m.guild = guild
 
@@ -64,6 +66,13 @@ def test_un_administrateur_transmis_comme_simple_user_est_reconnu():
     admin = _membre(51, administrateur=True)
     cog, guild = _contexte(admin)
     assert _exempt(cog, guild, SimpleNamespace(id=51)) is True
+
+
+def test_un_administrateur_absent_du_cache_est_recherche_avant_toute_sanction():
+    admin = _membre(56, administrateur=True)
+    cog, guild = _contexte(fetched=(admin,))
+    assert _exempt(cog, guild, SimpleNamespace(id=56)) is True
+    guild.fetch_member.assert_awaited_once_with(56)
 
 
 def test_un_moderateur_sans_administrateur_reste_surveille():
