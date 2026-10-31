@@ -731,6 +731,13 @@ class BotAllInOne(commands.Bot):
         except Exception:
             logger.error("Installation import economie impossible :\n%s", traceback.format_exc())
 
+        # Inventaire comparatif sans accès au code ni aux données de bots tiers.
+        try:
+            from cogs.feature_comparison import install_for_bot as install_feature_comparison
+            install_feature_comparison(self)
+        except Exception:
+            logger.error("Installation du comparateur de bots impossible :\\n%s", traceback.format_exc())
+
         self._prune_redundant_commands()
         self._audit_command_permissions()
 
