@@ -13,6 +13,14 @@ os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 from cogs.tickets import Tickets
 
 
+@pytest.fixture(autouse=True)
+def isoler_activation():
+    # Cette suite mesure l'atomicité de publication. L'activation réelle
+    # est contrôlée dans test_setup_private_compact_v121.py.
+    with patch("cogs.setup_v2_core.set_module_enabled", new_callable=AsyncMock) as activate:
+        yield activate
+
+
 def context():
     events = []
     old = SimpleNamespace(id=44, delete=AsyncMock(side_effect=lambda: events.append("delete_old")))

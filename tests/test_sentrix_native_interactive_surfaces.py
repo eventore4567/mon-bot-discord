@@ -59,9 +59,12 @@ def test_ticket_setup_activation_does_not_create_default_configuration():
     assert "Configuration rapide / réparer" not in block
     assert "Activer avec les réglages par défaut" not in block
     assert "ensure_ticket_configuration(" not in block
-    assert 'label="Activer"' in block
-    assert "core.set_module_enabled(" in block
+    # Le panneau s'active à sa publication, pas via un bouton redondant.
+    assert 'label="Activer"' not in block
     assert "Tout personnaliser" in block
+    publish = _source("cogs/tickets.py")
+    assert 'setup_core.set_module_enabled(' in publish
+    assert '"tickets", True' in publish
 
 
 def test_rolepanel_uses_only_existing_roles():

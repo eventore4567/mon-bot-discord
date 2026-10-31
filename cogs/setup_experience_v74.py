@@ -363,268 +363,87 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         await cog.open_builder_from_interaction(interaction)
 
     async def _build_home(self) -> None:
-        """Premier écran : les modules et leur interrupteur, rien d'autre.
-
-        Avant, l'accueil listait neuf catégories avec un bouton « Configurer » chacune,
-        et activer les niveaux demandait plusieurs écrans. Maintenant : une ligne par
-        module (Niveaux, Économie, Bienvenue, Départs, Anti-spam, Tickets, Logs,
-        Notifications) avec un bouton ON/OFF direct, un menu pour ouvrir la page détaillée
-        d'une catégorie. Plus de second ecran de parametres avances.
-        """
+        """Accueil privé compact : un seul menu, aucune activation involontaire."""
         self.backend.category = None
-        # Toutes les categories utiles sont accessibles directement ici.
         self.avance = False
 
-        switch_states = await setup_ui.module_switch_states(self.bot, self.guild.id)
-        actifs = sum(1 for etat in switch_states.values() if etat == "enabled")
-
+        states = await setup_ui.module_switch_states(self.bot, self.guild.id)
+        actifs = sum(state == "enabled" for state in states.values())
         container = discord.ui.Container()
-        v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
-                    "# Configuration de SentriX\n"
-                    f"**{self.guild.name}** · **{actifs}/{len(setup_ui.MODULE_SWITCHES)}** modules activés\n"
-                    "**Pour commencer :** 1. Sécurité, 2. Logs, 3. Tickets ou Bienvenue.\n"
-                    "Choisis un bouton ci-dessous ou utilise le menu pour les autres réglages."
+                    "# Configuration SentriX\n"
+                    f"**{self.guild.name}** · **{actifs}/{len(setup_ui.MODULE_SWITCHES)}** modules actifs\n"
+                    "Choisis un module, puis configure-le. Les réglages sont conservés."
                 ),
                 accessory=v73._thumbnail(self.bot),
             )
         )
-        container.add_item(discord.ui.Separator())
 
-        # Les sections avec bouton comptent trois composants chacune. Un état
-        # compact et un menu gardent tous les interrupteurs accessibles sous
-        # la limite globale de 40 composants, même avec les modules ajoutés.
-        actifs_noms = []
-        inactifs_noms = []
-        for key, label in setup_ui.MODULE_SWITCHES:
-            (actifs_noms if switch_states.get(key) == "enabled" else inactifs_noms).append(label)
-        # Une page d'accueil courte : les détails complets restent dans le menu.
-        def apercu(noms):
-            if not noms:
-                return "Aucun"
-            limite = 4
-            affiches = " · ".join(noms[:limite])
-            reste = len(noms) - limite
-            return affiches + (f" · +{reste} autre(s)" if reste else "")
-
-        resume = (
-            "**Actifs :** " + apercu(actifs_noms)
-            + "\n**Désactivés :** " + apercu(inactifs_noms)
-        )
-        if switch_states.get("security") == "empty":
-            resume += (
-                "\n\n> ⚠️ **Aucune protection ne tourne** : anti-spam, anti-raid et anti-nuke "
-                "sont coupés. Choisissez « Sécurité » dans le menu pour les activer."
+        modules = [
+            discord.SelectOption(
+                label=CATEGORY_META[key][1][:100],
+                value=key,
+                description=(
+                    "Actif" if states.get(key) == "enabled"
+                    else "À configurer" if states.get(key) in {"not_configured", "empty"}
+                    else "Désactivé"
+                ),
+                emoji=CATEGORY_META[key][0],
             )
-        container.add_item(discord.ui.TextDisplay(resume))
-
-        # Les trois priorités sont accessibles directement, sans chercher dans
-        # quinze catégories. Chaque bouton navigue : aucune option n'est activée.
-        raccourcis = []
-        for cle, libelle in (
-            ("security", "1. Sécurité"),
-            ("logs", "2. Logs"),
-            ("tickets", "3. Tickets"),
-            ("welcome", "Bienvenue"),
-        ):
-            bouton = discord.ui.Button(label=libelle, style=discord.ButtonStyle.secondary)
-
-            async def ouvrir_rapide(interaction: discord.Interaction, category=cle):
-                self.page = category
-                self.backend = self._new_backend(category)
-                await self.refresh(interaction)
-
-            bouton.callback = ouvrir_rapide
-            raccourcis.append(bouton)
-        # Insérés plus bas dans les rangées existantes pour rester sous le
-        # budget des composants Discord (aucune rangée supplémentaire).
-
-        interrupteurs = setup_ui.ModuleSwitchSelect(self, switch_states)
-        # « Sécurité » sans protection ne s'active pas automatiquement :
-        # l'utilisateur doit choisir individuellement ses protections.
-        for option in interrupteurs.options:
-            if option.value == "security" and switch_states.get("security") == "empty":
-                option.description = "Choisir les protections dans la page Sécurité"
-
-        async def basculer(interaction: discord.Interaction):
-            module = interrupteurs.values[0]
-            # Pas d'activation implicite de protections au premier clic :
-            # ouvre la page, où l'administrateur choisit chaque filtre.
-            if module == "security" and switch_states.get(module) == "empty":
-                self.page = "security"
-                self.backend = self._new_backend("security")
-                return await self.refresh(interaction)
-            try:
-                nouveau = await setup_ui.toggle_module_switch(self.bot, self.guild.id, module, interaction.user.id)
-            except core.ModuleSetupRequired as exc:
-                return await panels.envoyer(
-                    interaction.response,
-                    panels.depuis_embed(embeds.warning(str(exc))),
-                    ephemere=True,
-                )
-            try:
-                await self.backend.audit(interaction.user.id, f"module:{module}", "on" if nouveau else "off")
-            except Exception:
-                logger.debug("Audit setup indisponible.", exc_info=True)
-            await self.refresh(interaction)
-
-        interrupteurs.callback = basculer
-        container.add_item(discord.ui.ActionRow(interrupteurs))
-
-        music = self.bot.get_cog("Music")
-        music_settings = await music.get_system_settings(self.guild.id) if music else {}
-        music_state = (
-            "**ON**"
-            if music_settings.get("enabled")
-            else "OFF · vocal configuré"
-            if music_settings.get("voice_channel_id")
-            else "OFF · non configuré"
-        )
-        music_button = discord.ui.Button(label="Configurer", style=discord.ButtonStyle.primary)
-
-        async def open_music(interaction: discord.Interaction):
-            self.page = "music"
-            self.backend = self._new_backend("music")
-            await self.refresh(interaction)
-
-        music_button.callback = open_music
-        music_button.label = "🎵 Musique"
-        soundboard_button = discord.ui.Button(label="Soundboard", emoji="🔊", style=discord.ButtonStyle.secondary)
-
-        async def open_soundboard(interaction: discord.Interaction):
-            self.page = "logs"
-            self.backend = self._new_backend("logs")
-            self.backend.selected_log = "soundboard"
-            await self.refresh(interaction)
-
-        soundboard_button.callback = open_soundboard
-        container.add_item(discord.ui.ActionRow(*raccourcis[:3], music_button, soundboard_button))
-
-        # Le PROFIL DE SERVEUR de SentriX (guild.me.edit) : avatar et bannière
-        # visibles sur CE serveur seulement. Les autres gardent l'original,
-        # donc l'administrateur du serveur y a légitimement droit — il ne décide
-        # que de ce qu'il voit chez lui.
-        # L'identité GLOBALE (bot.user.edit) reste, elle, réservée au
-        # propriétaire via `+set-bot` : la changer toucherait les 37 serveurs.
-        identite = discord.ui.Button(
-            label="SentriX sur ce serveur", emoji="🪪", style=discord.ButtonStyle.secondary,
-        )
-
-        async def ouvrir_identite(interaction: discord.Interaction):
-            await interaction.response.send_modal(IdentiteBotModal(self))
-
-        identite.callback = ouvrir_identite
-        sauvegarde = await guide_step_saved(self.bot, self.guild.id)
-        guide = discord.ui.Button(
-            label=(
-                f"Reprendre la configuration guidée ({sauvegarde + 1}/{len(GUIDE)})"
-                if sauvegarde is not None else "Configuration guidée"
-            ),
-            emoji="🧭", style=discord.ButtonStyle.primary,
-        )
-
-        async def ouvrir_guide(interaction: discord.Interaction):
-            await self._guide_aller(interaction, sauvegarde or 0)
-
-        guide.callback = ouvrir_guide
-        container.add_item(discord.ui.ActionRow(guide, identite, raccourcis[3]))
-
-        # Ouvrir la page détaillée d'une catégorie (salons, rôles, options).
-        options = [
-            discord.SelectOption(label=CATEGORY_META[key][1], value=key, emoji=CATEGORY_META[key][0],
-                                 description=CATEGORY_META[key][2][:100])
-            for key in CATEGORY_ORDER
-            if key in CATEGORY_META
+            for key in CATEGORY_ORDER if key in CATEGORY_META
         ]
-        options.append(
-            discord.SelectOption(
-                label="Règlement & accès",
-                value="rules_access",
-                emoji="📜",
-                description="Salon du règlement, rôle Vérifié, CAPTCHA et publication du panneau.",
-            )
-        )
-        options.append(
-            discord.SelectOption(
-                label="Suggestions",
-                value="suggestions",
-                emoji="💡",
-                description="Salon, délai, auteur masqué et boîte à idées publiée.",
-            )
-        )
-        options.append(
-            discord.SelectOption(
-                label="Embeds",
-                value="embeds",
-                emoji="📨",
-                description="Créer et envoyer un embed personnalisé (titre, couleur, images, boutons).",
-            )
-        )
-        options.append(
-            discord.SelectOption(
-                label="Commandes personnalisées",
-                value="custom_commands",
-                description="Créer, modifier, supprimer et gérer les actions des commandes du serveur.",
-            )
-        )
-        options.append(
-            discord.SelectOption(
-                label="Messages enregistrés",
-                value="snippets",
-                description="Créer et gérer les textes réutilisables du staff.",
-            )
-        )
-        options.append(
-            discord.SelectOption(
-                label="Messages récurrents",
-                value="recurring_messages",
-                description="Publications périodiques, en pause tant que non activées.",
-            )
-        )
-        options.append(
-            discord.SelectOption(
-                label="Automatisations",
-                value="automation",
-                emoji="⚙️",
-                description="Réactions automatiques et règles de contenu par salon.",
-            )
-        )
-        selecteur = discord.ui.Select(placeholder="Configurer un module en détail…", options=options[:25])
+        modules.extend([
+            discord.SelectOption(label="Règlement et accès", value="rules_access", emoji="📜"),
+            discord.SelectOption(label="Suggestions", value="suggestions", emoji="💡"),
+            discord.SelectOption(label="Embeds personnalisés", value="embeds", emoji="📨"),
+            discord.SelectOption(label="Commandes personnalisées", value="custom_commands"),
+            discord.SelectOption(label="Messages enregistrés", value="snippets"),
+            discord.SelectOption(label="Messages récurrents", value="recurring_messages"),
+            discord.SelectOption(label="Automatisations", value="automation"),
+            discord.SelectOption(label="Logs Soundboard", value="soundboard"),
+            discord.SelectOption(label="Identité sur ce serveur", value="identity"),
+            discord.SelectOption(label="Assistant guidé", value="guided"),
+            discord.SelectOption(label="Langue du serveur", value="language"),
+        ])
+        assert len(modules) <= 25, "Discord autorise 25 choix par menu."
+        choice = discord.ui.Select(placeholder="Configurer une fonctionnalité…", options=modules)
 
         async def ouvrir(interaction: discord.Interaction):
-            if selecteur.values[0] == "embeds":
+            selected = choice.values[0]
+            if selected == "embeds":
                 return await self._open_embed_builder(interaction)
-            self.page = selecteur.values[0]
+            if selected == "identity":
+                return await interaction.response.send_modal(IdentiteBotModal(self))
+            if selected == "guided":
+                return await self._guide_aller(
+                    interaction, (await guide_step_saved(self.bot, self.guild.id)) or 0
+                )
+            if selected == "language":
+                from .language_official_bridge import OfficialLanguageSelect
+                panneau = discord.ui.LayoutView(timeout=180)
+                bloc = discord.ui.Container()
+                bloc.add_item(discord.ui.TextDisplay("## Langue du serveur"))
+                bloc.add_item(discord.ui.ActionRow(OfficialLanguageSelect(self.backend)))
+                panneau.add_item(bloc)
+                return await interaction.response.send_message(view=panneau, ephemeral=True)
+            self.page = "logs" if selected == "soundboard" else selected
             self.backend = self._new_backend(self.page)
+            if selected == "soundboard":
+                self.backend.selected_log = "soundboard"
             await self.refresh(interaction)
 
-        selecteur.callback = ouvrir
-        container.add_item(discord.ui.Separator())
-        container.add_item(discord.ui.ActionRow(selecteur))
-        # Langue du serveur : réglage de premier niveau, même sélecteur que le centre officiel.
-        try:
-            from .language_official_bridge import OfficialLanguageSelect
+        choice.callback = ouvrir
+        container.add_item(discord.ui.ActionRow(choice))
 
-            langue = OfficialLanguageSelect(self.backend)
-            langue.row = None
-            container.add_item(discord.ui.ActionRow(langue))
-        except Exception:
-            logger.debug("Sélecteur de langue indisponible sur l'accueil V74.", exc_info=True)
+        close = discord.ui.Button(label="Fermer", style=discord.ButtonStyle.secondary)
 
-        refresh = discord.ui.Button(label="Actualiser", style=discord.ButtonStyle.secondary, emoji="🔄")
-        close = discord.ui.Button(label="Fermer", style=discord.ButtonStyle.danger)
-
-        async def do_refresh(interaction: discord.Interaction):
-            await self.refresh(interaction)
-
-        async def do_close(interaction: discord.Interaction):
+        async def fermer(interaction: discord.Interaction):
             await self._close(interaction)
 
-        refresh.callback = do_refresh
-        close.callback = do_close
-        container.add_item(discord.ui.ActionRow(refresh, close))
+        close.callback = fermer
+        container.add_item(discord.ui.ActionRow(close))
         self.add_item(container)
 
     async def _build_home_complet(self) -> None:
@@ -1531,17 +1350,9 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             style=discord.ButtonStyle.primary,
             emoji="🛠️",
         )
-        if enabled:
-            toggle = discord.ui.Button(
-                label="Désactiver",
-                style=discord.ButtonStyle.danger,
-            )
-        else:
-            toggle = discord.ui.Button(
-                label="Activer",
-                style=discord.ButtonStyle.success,
-            )
-
+        toggle = discord.ui.Button(
+            label="Désactiver", style=discord.ButtonStyle.danger,
+        ) if enabled else None
 
         async def full_config(interaction: discord.Interaction):
             ticket_cog = self.bot.get_cog("Tickets")
@@ -1569,8 +1380,11 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             await self.refresh(interaction)
 
         full.callback = full_config
-        toggle.callback = toggle_tickets
-        container.add_item(discord.ui.ActionRow(full, toggle))
+        if toggle is not None:
+            toggle.callback = toggle_tickets
+            container.add_item(discord.ui.ActionRow(full, toggle))
+        else:
+            container.add_item(discord.ui.ActionRow(full))
         self._add_navigation(container)
         self.add_item(container)
 
@@ -1777,13 +1591,19 @@ async def _send_setup_v74(self, target):
     await view.prepare()
 
     if isinstance(target, commands.Context):
-        return await target.send(**v73.joindre_banniere({"view": view}))
+        # Discord ne fournit pas d'éphémère pour une commande préfixée.
+        # Ne pas publier la configuration complète devant tout le serveur.
+        return await target.send(
+            "Ouvre **/setup** pour configurer SentriX en privé (visible uniquement par toi).",
+            delete_after=15,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
     if target.response.is_done():
-        return await target.followup.send(**v73.joindre_banniere({"view": view}))
+        return await target.followup.send(**v73.joindre_banniere({"view": view}), ephemeral=True)
     # joindre_banniere consulte la MÊME condition que poser_banniere : la
     # galerie et la pièce jointe ne peuvent plus diverger. Les éditions de
     # navigation passent par le refresh hérité de V73.
-    return await target.response.send_message(**v73.joindre_banniere({"view": view}))
+    return await target.response.send_message(**v73.joindre_banniere({"view": view}), ephemeral=True)
 
 
 def install(bot: commands.Bot) -> None:

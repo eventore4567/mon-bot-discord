@@ -273,7 +273,6 @@ class EmbedDraft:
             f"📋 **Champs** · `{len(self.fields)}/{MAX_FIELDS}` · 🔘 **Boutons** · `{len(self.buttons)}/{MAX_BUTTONS}`",
             f"🖼️ **Image** · {'✅' if self.image_url else '▫️'} · **Miniature** · {'✅' if self.thumbnail_url else '▫️'}",
             f"🧮 **Total** · `{self.total_chars()}/{MAX_TOTAL}` caractères",
-            f"**Mini-profil** · {self.sender_name or 'SentriX (par défaut)'}",
         ]
         if self.template_name:
             lines.append(f"💾 **Modèle** · 🟢 `{self.template_name}` enregistré" if not self.dirty
@@ -698,10 +697,6 @@ class EmbedAppearanceView(discord.ui.View):
             )
         await self.refresh(interaction)
 
-    @discord.ui.button(label="Mini-profil du message", style=discord.ButtonStyle.secondary, row=3)
-    async def mini_profile(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(EmbedMiniProfileModal(self))
-
     @discord.ui.button(label="Date automatique : activer/désactiver", style=discord.ButtonStyle.secondary, emoji="🕒", row=2)
     async def toggle_timestamp(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.draft.timestamp_enabled = not self.draft.timestamp_enabled
@@ -965,7 +960,7 @@ class EmbedBuilderView(discord.ui.View):
     def build_panel_embeds(self) -> list[discord.Embed]:
         status = design_system.create_embed(
             title="Créateur d'embed SentriX",
-            description="Créez et personnalisez votre message professionnel avec les options ci-dessous.\n\n" + self.draft.status_summary(),
+            description="Personnalise ton embed avec le menu ci-dessous.\n\n" + self.draft.status_summary(),
             colour=self.draft.colour if self.draft.colour is not None else design_system.COLORS.primary,
         )
         result = [status]

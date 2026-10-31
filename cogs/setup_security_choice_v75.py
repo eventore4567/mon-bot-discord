@@ -833,6 +833,12 @@ async def _build_logs_v75(self: v74.SentriXSetupV74) -> None:
                 log_type,
                 channel_id is not None,
             )
+            if channel_id is not None:
+                # Choisir un salon autorisé active immédiatement les journaux.
+                await v74.core.set_module_enabled(
+                    self.bot, self.guild.id, "logs", True,
+                    actor_id=interaction.user.id,
+                )
             await _audit_log_choice(
                 self,
                 interaction.user.id,

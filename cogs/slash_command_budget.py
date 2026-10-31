@@ -129,9 +129,48 @@ def _remove_root(tree, name: str) -> None:
         tree.remove_command(name)
 
 
+def _drop_exact_duplicate_group_leaves(tree) -> int:
+    """Retire seulement les alias / dont la logique métier est identique.
+
+    Les mêmes commandes historiques peuvent être publiées deux fois sous une
+    catégorie par différentes couches V95/V110. On ne touche jamais aux
+    sous-commandes d'origines distinctes, même si leurs noms se ressemblent.
+    Les commandes + ne sont pas modifiées.
+    """
+    removed = 0
+    def clean(group):
+        nonlocal removed
+        seen = {}
+        for child in list(group.commands):
+            if isinstance(child, app_commands.Group):
+                clean(child)
+                continue
+            callback = getattr(child, "callback", None)
+            source = getattr(callback, "_sentrix_original_command", None)
+            if not source:
+                continue
+            identity = str(source).casefold().strip()
+            previous = seen.get(identity)
+            if previous is None:
+                seen[identity] = child
+                continue
+            # Le raccourci est plus lisible ; on garde le nom le plus court.
+            keep, extra = sorted((previous, child), key=lambda item: (len(item.name), item.name))
+            group.remove_command(extra.name)
+            seen[identity] = keep
+            removed += 1
+    for root in _global_roots(tree):
+        if isinstance(root, app_commands.Group):
+            clean(root)
+    return removed
+
+
 def finalize(bot: commands.Bot) -> None:
-    """Écarte les racines legacy puis applique le budget par niveaux de priorité."""
+    """Écarte les racines legacy, leurs vrais doublons, puis le budget."""
     tree = bot.tree
+    deleted = _drop_exact_duplicate_group_leaves(tree)
+    if deleted:
+        logger.info("Menu slash SentriX : %s doublon(s) métier retiré(s).", deleted)
     required = _required_names()
     preferred = _preferred_names()
     excluded = _excluded_names()
