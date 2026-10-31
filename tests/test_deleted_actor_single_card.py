@@ -121,3 +121,52 @@ async def test_separate_files_channel_keeps_archive(monkeypatch):
         return {"channel_id": 123 if category == "messages" else 456, "enabled": True}
     monkeypatch.setattr(logs_unified_v6.log_service, "get_log_setting", settings)
     assert not await _deleted_message_already_logged_here(None, 1)
+
+
+@pytest.mark.asyncio
+async def test_delayed_audit_entry_is_still_attributed_without_guessing(monkeypatch):
+    """Discord peut publier le journal d'audit après les premières lectures."""
+    actor = SimpleNamespace(id=444)
+    entry = SimpleNamespace(
+        id=9101, user=actor, created_at=discord.utils.utcnow(),
+        target=SimpleNamespace(id=222),
+        extra=SimpleNamespace(count=1, channel=SimpleNamespace(id=333)),
+    )
+    calls = 0
+
+    async def audit_logs(**kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 4:
+            yield entry
+
+    guild = SimpleNamespace(
+        id=11,
+        me=SimpleNamespace(guild_permissions=SimpleNamespace(view_audit_log=True)),
+        audit_logs=audit_logs,
+    )
+    monkeypatch.setattr("cogs.logs.asyncio.sleep", AsyncMock())
+    cog = Logs(SimpleNamespace(user=SimpleNamespace(id=111)))
+    found, proof = await cog._message_delete_actor(guild, 222, 333, message_id=888)
+    assert found is actor
+    assert proof is entry
+    assert calls == 4
+
+
+@pytest.mark.asyncio
+async def test_unknown_deleter_is_not_assumed_to_be_message_author(monkeypatch):
+    """Sans preuve Discord, ne pas accuser le créateur du message."""
+    async def audit_logs(**kwargs):
+        if False:
+            yield None
+
+    guild = SimpleNamespace(
+        id=11,
+        me=SimpleNamespace(guild_permissions=SimpleNamespace(view_audit_log=True)),
+        audit_logs=audit_logs,
+    )
+    monkeypatch.setattr("cogs.logs.asyncio.sleep", AsyncMock())
+    cog = Logs(SimpleNamespace(user=SimpleNamespace(id=111)))
+    actor, audit = await cog._message_delete_actor(guild, 222, 333, message_id=888)
+    assert actor is None
+    assert audit is None
