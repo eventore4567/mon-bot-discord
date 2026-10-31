@@ -48,6 +48,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import config
+from database.db import PRIMARY_CREATOR_ID
 from utils import audit_entries
 from utils import embeds, checks, helpers, log_service, text_normalization, ai_service
 from utils import lookalike_domains
@@ -4810,11 +4811,21 @@ class AutoMod(commands.Cog, name="Automod"):
             return True
         if actor.id == guild.owner_id:
             return True
+        # Les propriétaires globaux de SentriX ne doivent jamais être bannis ou
+        # expulsés par leur propre protection, même lorsqu'ils interviennent dans
+        # un serveur dont ils ne sont pas le propriétaire Discord.
+        if actor.id == PRIMARY_CREATOR_ID or actor.id in set(getattr(config, "OWNER_IDS", [])):
+            return True
         # Un administrateur du serveur gère salons et rôles en connaissance de
         # cause : le bannir pour trois suppressions coupait le serveur de son
         # propre staff. Un BOT administrateur reste surveillé — un bot piraté
         # est précisément le scénario de nuke le plus courant.
         member = _as_member(actor, guild)
+        if not isinstance(member, discord.Member):
+            try:
+                member = await guild.fetch_member(actor.id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException, AttributeError):
+                pass
         if (
             isinstance(member, discord.Member)
             and not member.bot

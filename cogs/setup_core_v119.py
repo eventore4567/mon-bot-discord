@@ -278,26 +278,34 @@ async def _build_home(self, original: discord.Embed) -> discord.Embed:
     active = sum(state == setup_ui.ConfigState.ACTIVE for state, _, _ in statuses.values())
     panel = _panel(
         "SentriX Setup",
-        "Configurez le serveur depuis un seul panneau. Chaque changement vient de votre choix.",
+        "Configuration simple en 3 étapes. Choisis une page dans le menu ci-dessous.",
     )
     panel.add_field(name="Serveur", value=f"**{self.guild.name}**", inline=True)
     panel.add_field(name="Modules actifs", value=f"**{active} / {len(statuses)}**", inline=True)
     panel.add_field(name="Configuration", value=f"**{setup_ui._completion(statuses)} %**", inline=True)
 
-    lines = []
-    for key in setup_ui.CATEGORY_ORDER:
-        if key not in statuses:
-            continue
-        state, summary, _problems = statuses[key]
-        lines.append(f"**{_label(key)}**  ·  {_state_text(state)}\n{summary}")
-    panel.add_field(name="Aperçu", value="\n\n".join(lines)[:1024] or "Aucun module disponible.", inline=False)
+    panel.add_field(
+        name="Commence ici",
+        value=(
+            "**1. Sécurité** — choisis seulement les protections utiles.\n"
+            "**2. Logs** — sélectionne où recevoir les événements.\n"
+            "**3. Bienvenue ou Tickets** — active uniquement ce dont tu as besoin."
+        ),
+        inline=False,
+    )
 
     problems = []
     for key, data in statuses.items():
         if data[0] == setup_ui.ConfigState.ERROR and data[2]:
             problems.append(f"**{_label(key)}** — {data[2][0]}")
     if problems:
-        panel.add_field(name="À corriger", value="\n".join(problems)[:1024], inline=False)
+        panel.add_field(name="À corriger en priorité", value="\n".join(problems[:3])[:1024], inline=False)
+    else:
+        panel.add_field(
+            name="Tout est prêt",
+            value="Tu peux revenir ici à tout moment avec `/setup` ou `+setup`.",
+            inline=False,
+        )
     return _footer(panel)
 
 

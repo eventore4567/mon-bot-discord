@@ -487,7 +487,7 @@ class SentriXHelpV79(discord.ui.LayoutView):
             discord.ui.Section(
                 discord.ui.TextDisplay(
                     "# Centre d'aide SentriX\n"
-                    "Choisissez une catégorie pour voir ses commandes, ou recherchez une commande.\n"
+                    "Choisis une catégorie ou recherche un nom simple. Chaque fiche montre la version `+` et la version `/`.\n"
                     + (f"**{len(entries)} commandes** · **{prefix_count} en +** · **{slash_count} en /**"
                        + (f" · **{slash_only} uniquement en /**" if slash_only else "")
                        if _prefixe_actif() else f"**{slash_count} commandes** · tapez `/` pour les voir")
