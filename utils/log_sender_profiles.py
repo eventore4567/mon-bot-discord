@@ -173,13 +173,27 @@ async def send_with_profile(channel, view: discord.ui.View, files: list[discord.
     """Returns the message, or None to let the bot send the original V2 card."""
     if not profile.get("enabled") or not isinstance(channel, discord.TextChannel):
         return None
-    if not is_noninteractive(view):
-        return None
     webhook = await _webhook(channel)
     if webhook is None:
+        logger.debug("Mini-profil non disponible : permission webhook absente channel=%s", channel.id)
+        return None
+
+    # Un webhook créé par l'application possède son application_id.
+    # Discord autorise les composants interactifs UNIQUEMENT sur ces
+    # webhooks ; les autres n'acceptent que des composants non interactifs.
+    # Ne jamais retirer les boutons pour forcer un mini-profil.
+    has_actions = not is_noninteractive(view)
+    app_id = getattr(getattr(channel.guild, "me", None), "id", None)
+    owner_id = getattr(webhook, "application_id", None)
+    if has_actions and not (app_id and owner_id and int(app_id) == int(owner_id)):
+        logger.info(
+            "Log conservé sous SentriX (actions requises, webhook non-app-owned) "
+            "channel=%s application_owned=%s",
+            channel.id, bool(owner_id),
+        )
         return None
     try:
-        return await webhook.send(
+        result = await webhook.send(
             view=view,
             files=files,
             wait=True,
@@ -187,8 +201,16 @@ async def send_with_profile(channel, view: discord.ui.View, files: list[discord.
             avatar_url=profile["avatar_url"] or None,
             allowed_mentions=allowed_mentions,
         )
-    except (discord.Forbidden, discord.HTTPException, ValueError, TypeError):
-        logger.warning("Webhook profil indisponible channel=%s, envoi par bot", channel.id)
+        logger.info(
+            "Mini-profil envoyé via webhook channel=%s message=%s actions=%s",
+            channel.id, getattr(result, "id", None), has_actions,
+        )
+        return result
+    except (discord.Forbidden, discord.HTTPException, ValueError, TypeError) as exc:
+        logger.warning(
+            "Webhook mini-profil refusé channel=%s actions=%s erreur=%s; envoi par bot",
+            channel.id, has_actions, type(exc).__name__,
+        )
         _webhooks.pop((int(channel.guild.id), int(channel.id)), None)
         return None
 
