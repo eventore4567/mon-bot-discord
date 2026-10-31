@@ -72,6 +72,27 @@ async def ensure_schema(db) -> None:
     await db.execute(INDEX_SCHEMA)
 
 
+async def store_archive(bot, *, ticket_id: int, guild_id: int, channel_id: int,
+                        channel_name: str, transcript_text: str) -> None:
+    """Persist an archive even when the member opted out of closure DMs.
+
+    Tokens are minted later for each authorized reader; none is posted in logs.
+    """
+    db = bot.db
+    await ensure_schema(db)
+    await db.execute(
+        "INSERT INTO ticket_transcripts "
+        "(ticket_id, guild_id, channel_id, channel_name, transcript_text, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(ticket_id) DO UPDATE SET "
+        "guild_id=excluded.guild_id, channel_id=excluded.channel_id, "
+        "channel_name=excluded.channel_name, transcript_text=excluded.transcript_text, "
+        "created_at=excluded.created_at",
+        (int(ticket_id), int(guild_id), int(channel_id),
+         str(channel_name)[:100], str(transcript_text), int(time.time())),
+    )
+
+
 async def publish_link(
     bot, *,
     ticket_id: int, guild_id: int, channel_id: int, channel_name: str,
@@ -87,19 +108,11 @@ async def publish_link(
     if not origin:
         raise RuntimeError("DASHBOARD_PUBLIC_URL HTTPS absent : lien de transcription impossible")
     db = bot.db
-    await ensure_schema(db)
-    stamp = int(time.time())
-    await db.execute(
-        "INSERT INTO ticket_transcripts "
-        "(ticket_id, guild_id, channel_id, channel_name, transcript_text, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?) "
-        "ON CONFLICT(ticket_id) DO UPDATE SET "
-        "guild_id=excluded.guild_id, channel_id=excluded.channel_id, "
-        "channel_name=excluded.channel_name, transcript_text=excluded.transcript_text, "
-        "created_at=excluded.created_at",
-        (int(ticket_id), int(guild_id), int(channel_id),
-         str(channel_name)[:100], str(transcript_text), stamp),
+    await store_archive(
+        bot, ticket_id=ticket_id, guild_id=guild_id, channel_id=channel_id,
+        channel_name=channel_name, transcript_text=transcript_text,
     )
+    stamp = int(time.time())
     raw = secrets.token_urlsafe(32)
     digest = hashlib.sha256(raw.encode("ascii")).hexdigest()
     await db.execute(
