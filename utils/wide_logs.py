@@ -1990,6 +1990,7 @@ async def send_wide_log(
     identity_name: str | None = None,
     identity_id: int | None = None,
     identity_icon: str | None = None,
+    sender_profile: dict | None = None,
 ) -> bool:
     """Envoie un log compact Components V2 avec avatar et actions."""
     if salon_inaccessible(getattr(channel, "id", None)):
@@ -2089,7 +2090,18 @@ async def send_wide_log(
         getattr(channel, "id", "?"), event_type, len(files), type(view).__name__,
     )
     try:
-        message = await channel.send(view=view, files=files, allowed_mentions=NO_PINGS)
+        message = None
+        if sender_profile and sender_profile.get("enabled"):
+            from utils.log_sender_profiles import send_with_profile
+            message = await send_with_profile(
+                channel, view, files, sender_profile, allowed_mentions=NO_PINGS,
+            )
+            if message is None:
+                # Webhook may have consumed the file handles on failure.
+                for uploaded in files:
+                    _rewind_file(uploaded)
+        if message is None:
+            message = await channel.send(view=view, files=files, allowed_mentions=NO_PINGS)
         logger.debug(
             "SXTRACE 6 TRANSPORT phase=after-send channel=%s event_type=%s message_id=%s",
             getattr(channel, "id", "?"), event_type, getattr(message, "id", "?"),
