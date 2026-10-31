@@ -47,6 +47,7 @@ class TicketCardV3(discord.ui.LayoutView):
         transcript_filename: str | None = None,
         navigation_url: str | None = None,
         navigation_label: str = "Ouvrir mon ticket",
+        language: str = "fr",
     ) -> None:
         super().__init__(timeout=None)
         container = discord.ui.Container()
@@ -63,6 +64,13 @@ class TicketCardV3(discord.ui.LayoutView):
             "non effectué": "Non effectué", "rouvert": "Rouvert",
             "supprimé": "Supprimé",
         }.get(state, str(status or "Ouvert").capitalize())
+        if language == "en":
+            status_text = {
+                "ouvert": "Open", "fermé": "Closed", "ferme": "Closed",
+                "pris en charge": "Claimed", "en attente": "Pending",
+                "non effectué": "Not completed", "rouvert": "Reopened",
+                "supprimé": "Deleted",
+            }.get(state, str(status or "Open").capitalize())
         state_icon = {
             "ouvert": "ticket_open", "fermé": "lock", "ferme": "lock",
             "rouvert": "unlock", "supprimé": "trash",
@@ -95,8 +103,11 @@ class TicketCardV3(discord.ui.LayoutView):
         if transcript_filename:
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.TextDisplay(
-                f"**{_icon('file', 'Transcription du ticket')}**\n"
-                "-# Archive HTML du salon : ouvrez le fichier joint dans un navigateur. Accessible au staff."
+                (f"**{_icon('file', 'Ticket transcript')}**\n"
+                 "-# HTML archive of the channel. Staff access only."
+                 if language == "en" else
+                 f"**{_icon('file', 'Transcription du ticket')}**\n"
+                 "-# Archive HTML du salon : ouvrez le fichier joint dans un navigateur. Accessible au staff.")
             ))
             component = getattr(discord.ui, "File", None)
             if component:
@@ -181,25 +192,28 @@ def opening_card(*, ticket_number: int, ticket_type: str, opener: discord.abc.Us
 def closed_card(*, ticket_id: int, opener_id: int, closer: discord.abc.User,
                 reason: str, duration: str | None, transcript_filename: str | None,
                 avatar_url: str | None = None, claimed_by_id: int | None = None,
-                closed_at: int | None = None) -> TicketCardV3:
-    prise = f" · pris par <@{int(claimed_by_id)}>" if claimed_by_id else ""
+                closed_at: int | None = None, language: str = "fr") -> TicketCardV3:
+    english = language == "en"
+    prise = (f" · claimed by <@{int(claimed_by_id)}>" if english else f" · pris par <@{int(claimed_by_id)}>") if claimed_by_id else ""
     ligne = (
-        f"<@{int(opener_id)}>{prise} · fermé par {closer.mention}"
-        f" · {duration or 'durée inconnue'} · <t:{int(closed_at or discord.utils.utcnow().timestamp())}:F>"
+        f"<@{int(opener_id)}>{prise} · {'closed by' if english else 'fermé par'} {closer.mention}"
+        f" · {duration or ('duration unavailable' if english else 'durée inconnue')} · <t:{int(closed_at or discord.utils.utcnow().timestamp())}:F>"
     )
     reason_display = discord.utils.escape_mentions(
         discord.utils.escape_markdown(_safe(reason, 650))
     )
     return TicketCardV3(
-        title=f"Ticket #{int(ticket_id)} · Fermé",
-        description="Masqué au demandeur, conservé pour le staff.",
+        title=f"Ticket #{int(ticket_id)} · {'Closed' if english else 'Fermé'}",
+        description=("Hidden from the requester; kept for staff." if english
+                     else "Masqué au demandeur, conservé pour le staff."),
         status="fermé",
         avatar_url=avatar_url,
         sections=(
-            ("Clôture", ligne),
-            ("Raison", reason_display),
+            ("Closure" if english else "Clôture", ligne),
+            ("Reason" if english else "Raison", reason_display),
         ),
         transcript_filename=transcript_filename,
+        language=language,
     )
 
 
