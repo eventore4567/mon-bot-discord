@@ -1452,8 +1452,8 @@ class Tickets(commands.Cog):
         from cogs import setup_v2_core as setup_core
         try:
             await setup_core.set_module_enabled(
-                self.bot, interaction.guild.id, "tickets", True,
-                actor_id=interaction.user.id,
+                self.bot, interaction.guild_id, "tickets", True,
+                actor_id=getattr(getattr(interaction, "user", None), "id", None),
             )
         except setup_core.ModuleSetupRequired as exc:
             logger.warning(
