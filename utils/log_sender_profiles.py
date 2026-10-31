@@ -65,23 +65,35 @@ def validate_profile(display_name: str, avatar_url: str) -> tuple[str, str]:
     return name, avatar
 
 
-async def get_profile(bot, guild_id: int, category: str) -> dict:
-    await ensure_schema(bot)
-    key = (int(guild_id), str(category))
-    cached = _profile_cache.get(key)
-    if cached is not None and time.monotonic() - cached[0] < 30:
-        return dict(cached[1])
-    row = await bot.db.fetchone(
-        "SELECT enabled, display_name, avatar_url FROM log_sender_profiles "
-        "WHERE guild_id=? AND category=?", (int(guild_id), str(category)),
-    )
-    profile = {
-        "enabled": bool(row["enabled"]) if row else False,
-        "display_name": str(row["display_name"] or "") if row else "",
-        "avatar_url": str(row["avatar_url"] or "") if row else "",
+def default_profile(bot, category: str) -> dict:
+    """Le mini-profil des logs est actif d'office, sans configuration.
+
+    Le nom ne remplace pas la fiche de l'application : seul le petit profil du
+    message webhook est modifié. Aucun changement des autres réglages de logs.
+    """
+    from utils.log_categories import CATEGORIES
+
+    labels = {
+        "members": "Arrivées & Départs",
+        "tickets": "Tickets",
+        "moderation": "Modération",
+        "messages": "Messages",
+        "voice": "Activité vocale",
+        "automod": "Protection AutoMod",
+        "raid": "Protection Anti-Raid",
+        "spam": "Protection Anti-Spam",
     }
-    _profile_cache[key] = (time.monotonic(), profile)
-    return profile
+    name = labels.get(category, CATEGORIES.get(category, "Journaux"))
+    user = getattr(bot, "user", None)
+    avatar = getattr(user, "display_avatar", None)
+    url = str(getattr(avatar, "url", "") or "")
+    return {"enabled": True, "display_name": name, "avatar_url": url}
+
+
+async def get_profile(bot, guild_id: int, category: str) -> dict:
+    # Aucune option supplémentaire à régler pour les logs : le mini-profil
+    # est désormais automatique. L'éditeur /embed gère ses propres variantes.
+    return default_profile(bot, category)
 
 
 async def set_profile(bot, guild_id: int, category: str, *,
@@ -148,7 +160,7 @@ async def _webhook(channel: discord.TextChannel) -> discord.Webhook | None:
                          and item.token and item.user and item.user.id == member.id), None)
             if hook is None:
                 hook = await channel.create_webhook(name="SentriX · Mini-profils",
-                                                    reason="Mini-profils de logs configurés par un administrateur")
+                                                    reason="Mini-profils automatiques des logs SentriX")
             _webhooks[key] = hook
             return hook
         except (discord.Forbidden, discord.HTTPException):
