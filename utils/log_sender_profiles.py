@@ -29,6 +29,7 @@ SCHEMA = """CREATE TABLE IF NOT EXISTS log_sender_profiles (
 # Shared per-process webhook objects. No token is stored in the database.
 _webhooks: dict[tuple[int, int], discord.Webhook] = {}
 _locks: dict[tuple[int, int], asyncio.Lock] = {}
+_application_ownership: dict[int, bool] = {}
 _schema_ready: set[int] = set()
 _profile_cache: dict[tuple[int, str], tuple[float, dict]] = {}
 
@@ -168,6 +169,37 @@ async def _webhook(channel: discord.TextChannel) -> discord.Webhook | None:
             return None
 
 
+async def application_webhook_owned_by_bot(channel, webhook) -> bool:
+    """Discord.py v2.7 n'expose pas le champ API application_id de Webhook.
+
+    Le retrouver une seule fois depuis l'API authentifiée du bot, puis mettre
+    en cache par ID : ne pas faire une requête pour chaque événement de log.
+    """
+    webhook_id = int(webhook.id)
+    cached = _application_ownership.get(webhook_id)
+    if cached is not None:
+        return cached
+    bot_member = getattr(channel.guild, "me", None)
+    bot_id = getattr(bot_member, "id", None)
+    if not bot_id:
+        return False
+    try:
+        raw = await asyncio.wait_for(
+            channel._state.http.get_webhook(webhook_id), timeout=8
+        )
+        owner = raw.get("application_id")
+        result = bool(owner and int(owner) == int(bot_id))
+        _application_ownership[webhook_id] = result
+        logger.info(
+            "Mini-profil webhook channel=%s application_owned=%s",
+            channel.id, result,
+        )
+        return result
+    except (discord.HTTPException, asyncio.TimeoutError, AttributeError, TypeError, ValueError):
+        logger.warning("Propriétaire du webhook non vérifiable channel=%s", channel.id)
+        return False
+
+
 async def send_with_profile(channel, view: discord.ui.View, files: list[discord.File],
                             profile: dict, *, allowed_mentions: discord.AllowedMentions):
     """Returns the message, or None to let the bot send the original V2 card."""
@@ -183,13 +215,12 @@ async def send_with_profile(channel, view: discord.ui.View, files: list[discord.
     # webhooks ; les autres n'acceptent que des composants non interactifs.
     # Ne jamais retirer les boutons pour forcer un mini-profil.
     has_actions = not is_noninteractive(view)
-    app_id = getattr(getattr(channel.guild, "me", None), "id", None)
-    owner_id = getattr(webhook, "application_id", None)
-    if has_actions and not (app_id and owner_id and int(app_id) == int(owner_id)):
+    app_owned = await application_webhook_owned_by_bot(channel, webhook) if has_actions else False
+    if has_actions and not app_owned:
         logger.info(
             "Log conservé sous SentriX (actions requises, webhook non-app-owned) "
-            "channel=%s application_owned=%s",
-            channel.id, bool(owner_id),
+            "channel=%s",
+            channel.id,
         )
         return None
     try:
