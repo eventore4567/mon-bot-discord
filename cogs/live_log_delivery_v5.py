@@ -81,6 +81,23 @@ _MARKER = "_sentrix_live_log_delivery_v5"
 # pouvait court-circuiter une couche installee entre-temps.
 _CANONICAL_SEND_LOG = None
 
+# Un salon volontairement non configuré ne doit pas provoquer des centaines
+# d'avertissements techniques par heure au moindre message ou mouvement vocal.
+# Les événements continuent à être ignorés tant que le salon est introuvable.
+_MISSING_CHANNEL_WARNED_AT: dict[tuple[int, str], float] = {}
+_MISSING_CHANNEL_WARN_INTERVAL = 3600.0
+
+
+def _should_warn_missing_channel(guild_id: int, category: str, now: float) -> bool:
+    key = (int(guild_id), str(category))
+    last = _MISSING_CHANNEL_WARNED_AT.get(key)
+    if last is not None and now - last < _MISSING_CHANNEL_WARN_INTERVAL:
+        return False
+    if len(_MISSING_CHANNEL_WARNED_AT) > 2048:
+        _MISSING_CHANNEL_WARNED_AT.clear()
+    _MISSING_CHANNEL_WARNED_AT[key] = now
+    return True
+
 
 def _canonical_send_log():
     """Le sender en dessous de V5. Repli sur log_service si rien n'a ete capture."""
@@ -225,13 +242,15 @@ async def send_log_v5(
             state["last_result"] = "normal_send_success" if result else "normal_send_rejected"
             return bool(result)
 
-    # Si une route valide est volontairement désactivée, on respecte le choix admin.
-    if setting and not bool(setting.get("enabled")) and setting.get("channel_id"):
-        valid, _reason = log_service.validate_channel(guild, setting.get("channel_id"))
-        if valid:
-            state["last_channel_id"] = int(setting["channel_id"])
-            state["last_result"] = "explicitly_disabled"
-            return False
+    # Une catégorie désactivée dans /setup reste OFF même si son salon a
+    # été supprimé ou si aucun salon n'a jamais été configuré. La réparation
+    # automatique ne peut pas réactiver le choix de l'administrateur.
+    if setting and not bool(setting.get("enabled")):
+        state["last_channel_id"] = (
+            int(setting["channel_id"]) if setting.get("channel_id") else None
+        )
+        state["last_result"] = "explicitly_disabled"
+        return False
 
     # Route absente/cassée : découverte depuis la structure Discord visible en direct.
     candidate = _discover_channel(guild, log_type)
@@ -239,12 +258,20 @@ async def send_log_v5(
         state["last_result"] = "no_live_channel_found"
         alias = _aliases(log_type)
         if alias:
-            # Des noms à chercher existaient, aucun salon ne correspond : c'est
-            # une vraie lacune de configuration, qui mérite un avertissement.
-            logger.warning(
-                "V5 : aucun salon live reconnu guild=%s type=%s aliases=%s",
-                guild.id, log_type, ",".join(alias),
-            )
+            # Une catégorie absente est un diagnostic de configuration, pas
+            # une erreur à répéter pour chaque message ou mouvement vocal.
+            category = log_service.category_for(log_type)
+            if _should_warn_missing_channel(guild.id, category, time.monotonic()):
+                logger.warning(
+                    "V5 : aucun salon de logs configuré guild=%s catégorie=%s "
+                    "(événement=%s). Choisissez la destination dans /setup > Logs.",
+                    guild.id, category, log_type,
+                )
+            else:
+                logger.debug(
+                    "V5 : route toujours absente guild=%s category=%s",
+                    guild.id, category,
+                )
         else:
             # Aucun nom à chercher pour cette catégorie : la découverte de
             # secours ne la couvre pas, ce n'est pas une panne.

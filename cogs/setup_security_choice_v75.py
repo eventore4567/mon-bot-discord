@@ -489,7 +489,73 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
         )
 
     exceptions.callback = open_exceptions
-    container.add_item(discord.ui.ActionRow(exceptions))
+
+    diagnostic = discord.ui.Button(
+        label="Diagnostic AutoMod", style=discord.ButtonStyle.secondary,
+    )
+
+    async def diagnostic_automod(interaction: discord.Interaction):
+        # Contrôle strictement en lecture seule : aucune activation, aucun
+        # salon créé, aucune sanction et aucun message de membre analysé.
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
+        active = await _selected_protections(self)
+        perms = (
+            self.guild.me.guild_permissions
+            if self.guild.me is not None else discord.Permissions.none()
+        )
+        blocked, degraded = protection_requirements.diagnostic(perms, active)
+        log_route = await log_service.get_log_setting(self.bot, self.guild.id, "automod")
+        log_id = log_route.get("channel_id")
+        valid, detail = log_service.validate_channel(
+            self.guild, log_id, needs_file=True,
+        )
+        logs_ready = bool(log_route.get("enabled")) and valid
+        lines = [
+            f"**Protections activées :** {len(active)}",
+            f"**Protections sans permissions :** {len(blocked)}",
+            f"**Protections dégradées :** {len(degraded)}",
+            f"**Journal AutoMod :** {'Prêt' if logs_ready else 'À corriger'}",
+        ]
+        if blocked:
+            lines.append(
+                "**Inactives faute de permissions :**\n"
+                + "\n".join(
+                    f"- {name} : {', '.join(missing)}"
+                    for name, missing in blocked[:8]
+                )
+            )
+        if degraded:
+            lines.append(
+                "**Sanctions impossibles :**\n"
+                + "\n".join(
+                    f"- {name} : {', '.join(missing)}"
+                    for name, missing in degraded[:8]
+                )
+            )
+        if not logs_ready:
+            status = "catégorie désactivée" if not log_route.get("enabled") else detail
+            lines.append(
+                f"**Logs :** {status}. Choisissez un salon dans `/setup` → Logs."
+            )
+        if not active:
+            lines.append("Aucune protection activée : configurez les filtres dans cette page.")
+        else:
+            lines.append(
+                "Ce diagnostic vérifie la configuration ; il ne garantit pas "
+                "qu'une sanction a été exécutée."
+            )
+        report = discord.Embed(
+            title="Diagnostic AutoMod",
+            description="\n\n".join(lines)[:3900],
+            colour=discord.Color.green() if logs_ready and not blocked else discord.Color.orange(),
+        )
+        await panels.envoyer(
+            interaction.followup, panels.depuis_embed(report), ephemere=True,
+        )
+
+    diagnostic.callback = diagnostic_automod
+    container.add_item(discord.ui.ActionRow(exceptions, diagnostic))
 
     # Accès direct à CHAQUE règle, inspiré des écrans de réglages par filtre :
     # état réel et configuration explicite. Ce menu ne coche rien et n'active
