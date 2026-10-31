@@ -116,6 +116,23 @@ async def handle_send_embed(request: web.Request) -> web.Response:
     except ValueError:
         return dashboard._json_error("La couleur doit être au format #RRGGBB.", 400)
 
+    # Seul le créateur d'embed peut choisir le mini-profil. Les logs ont
+    # une identité automatique, sans paramètre à configurer.
+    sender_name, sender_error = _clean_text(payload, "sender_name", 70)
+    if sender_error:
+        return dashboard._json_error(sender_error, 400)
+    sender_avatar, avatar_error = _clean_text(payload, "sender_avatar_url", 450)
+    if avatar_error:
+        return dashboard._json_error(avatar_error, 400)
+    if sender_avatar and not sender_name:
+        return dashboard._json_error("Indiquez le nom du mini-profil avec l'avatar.", 400)
+    if sender_name:
+        from utils.log_sender_profiles import validate_profile
+        try:
+            sender_name, sender_avatar = validate_profile(sender_name, sender_avatar)
+        except ValueError as exc:
+            return dashboard._json_error(str(exc), 400)
+
     raw_fields = payload.get("fields", [])
     if raw_fields is None:
         raw_fields = []
@@ -173,11 +190,21 @@ async def handle_send_embed(request: web.Request) -> web.Response:
         embed.add_field(name=name, value=value, inline=inline)
 
     try:
-        message = await channel.send(
-            content=clean["content"] or None,
-            embed=embed,
-            allowed_mentions=discord.AllowedMentions.none(),
-        )
+        if sender_name:
+            from utils.log_sender_profiles import send_embed_with_identity
+            message = await send_embed_with_identity(
+                channel, sender_name=sender_name, sender_avatar_url=sender_avatar,
+                content=clean["content"] or None, embed=embed,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        else:
+            message = await channel.send(
+                content=clean["content"] or None,
+                embed=embed,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+    except ValueError as exc:
+        return dashboard._json_error(str(exc), 400)
     except discord.Forbidden:
         return dashboard._json_error("Discord a refusé l'envoi. Vérifiez les permissions de SentriX.", 403)
     except discord.HTTPException:
