@@ -82,7 +82,8 @@ def texte_retire(membre: discord.abc.User, slash: str | None = None) -> str:
 
 
 #: « + » retiré : une réponse à CHAQUE essai (sinon rien ne se passe), 10 s
-#: d'écart par personne contre le spam, effacée après une minute.
+#: d'écart par personne contre le spam, puis suppression rapide du rappel.
+PREFIX_REMOVAL_NOTICE_TTL_SECONDS = 8
 _dernier_essai: dict[int, float] = {}
 
 
@@ -101,7 +102,7 @@ async def repondre_retire(ctx: commands.Context) -> None:
     try:
         await ctx.channel.send(
             texte_retire(ctx.author, commande_slash("+" + ctx.message.content[len(ctx.prefix or ""):])),
-            delete_after=60,
+            delete_after=PREFIX_REMOVAL_NOTICE_TTL_SECONDS,
             allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=[ctx.author],
                                                      replied_user=False),
         )
