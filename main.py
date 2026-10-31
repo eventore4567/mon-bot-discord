@@ -33,6 +33,7 @@ from utils.checks import (
 )
 from utils import access_matrix
 from utils import log_hygiene
+from services.usage_presence import usage_presence_text
 from web.dashboard import start_dashboard
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -384,6 +385,12 @@ class BotAllInOne(commands.Bot):
         self.prefix_cache: dict[int, str] = {}
         self.blacklist_cache: dict[int, str] = {}
 
+    async def refresh_usage_presence(self) -> None:
+        """Publie le compteur d'utilisation dans le statut natif du bot."""
+        text = usage_presence_text(self.guilds)
+        await self.change_presence(activity=discord.CustomActivity(name=text))
+        logger.info("Statut Discord actualisé : %s", text)
+
     def _prune_redundant_commands(self) -> list[str]:
         removed_names: list[str] = []
         for requested_name in sorted(PRUNED_COMMANDS):
@@ -717,9 +724,7 @@ class BotAllInOne(commands.Bot):
             except Exception:
                 logger.warning("Vérification de persistance (on_ready) impossible :\n" + traceback.format_exc())
 
-        await self.change_presence(
-            activity=discord.Activity(type=discord.ActivityType.watching, name=f"{config.DEFAULT_PREFIX}help")
-        )
+        await self.refresh_usage_presence()
         embeds.set_footer_icon(self.user.display_avatar.url)
 
         saved_footer = await self.db.get_setting("footer_text")
@@ -738,6 +743,11 @@ class BotAllInOne(commands.Bot):
     async def on_guild_join(self, guild: discord.Guild):
         await self.db.ensure_guild(guild.id)
         logger.info(f"Bot ajouté au serveur : {guild.name} ({guild.id})")
+        await self.refresh_usage_presence()
+
+    async def on_guild_remove(self, guild: discord.Guild):
+        logger.info(f"Bot retiré du serveur : {guild.name} ({guild.id})")
+        await self.refresh_usage_presence()
 
     async def on_command_completion(self, ctx: commands.Context):
         if ctx.guild:
