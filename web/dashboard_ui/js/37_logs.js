@@ -87,15 +87,6 @@ const routes = (data.routes || []).map(route => ({ ...route }));
         <input class="switch" type="checkbox" data-log-enabled="${esc(route.key)}" ${route.enabled ? 'checked' : ''} aria-label="Activer les logs ${esc(route.label)}">
       </label>
     </div>
-    <details class="log-mini-profile" data-log-profile="${esc(route.key)}">
-      <summary>Mini-profil du message</summary>
-      <p class="muted" style="font-size:12px;margin:8px 0">Choisissez le nom et l’avatar affichés sur les logs compatibles. Nécessite la permission Gérer les webhooks. Les messages avec actions restent envoyés par SentriX.</p>
-      <label class="switch-row"><span>Utiliser un mini-profil</span><input class="switch" type="checkbox" data-profile-enabled="${esc(route.key)}" ${route.profile?.enabled ? "checked" : ""}></label>
-      <label>Nom affiché<input class="input" type="text" maxlength="70" placeholder="Ex. Joins & Leaves" data-profile-name="${esc(route.key)}" value="${esc(route.profile?.display_name || "")}"></label>
-      <label>Avatar (URL HTTPS)<input class="input" type="url" maxlength="450" placeholder="https://…" data-profile-avatar="${esc(route.key)}" value="${esc(route.profile?.avatar_url || "")}"></label>
-      <button class="btn sm" type="button" data-profile-save="${esc(route.key)}">Enregistrer le mini-profil</button>
-      <small role="status" data-profile-status="${esc(route.key)}"></small>
-    </details>
     <div class="log-route-foot">
       <button class="btn ghost sm" type="button" data-log-preview="${esc(route.key)}" aria-label="Voir un exemple de log ${esc(route.label)}">Voir un exemple</button>
       <small class="log-route-feedback" data-log-feedback="${esc(route.key)}" role="status" aria-live="polite"></small>
@@ -173,24 +164,6 @@ const routes = (data.routes || []).map(route => ({ ...route }));
     root.querySelector('[data-log-example-title]').textContent = sample[0];
     root.querySelector('[data-log-example-info]').textContent = sample[1];
     root.querySelector('[data-log-example-detail]').textContent = sample[2];
-    const profile = route.profile || {};
-    const name = profile.enabled ? profile.display_name : 'SentriX';
-    const avatar = root.querySelector('.log-sample-avatar');
-    const author = root.querySelector('.log-sample-author strong');
-    author.textContent = name || 'SentriX';
-    const status = document.createElement('span');
-    status.className = 'log-sample-bot';
-    status.textContent = profile.enabled ? 'WEBHOOK' : 'APP';
-    author.appendChild(document.createTextNode(' '));
-    author.appendChild(status);
-    avatar.textContent = (name || 'S').substring(0, 1).toUpperCase();
-    if (profile.enabled && profile.avatar_url) {
-      const image = document.createElement('img');
-      image.src = profile.avatar_url;
-      image.alt = '';
-      image.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:inherit';
-      avatar.replaceChildren(image);
-    }
     root.querySelectorAll('[data-log-preview]').forEach(button => {
       const selected = button.dataset.logPreview === key;
       button.classList.toggle('log-preview-selected', selected);
@@ -290,27 +263,5 @@ const routes = (data.routes || []).map(route => ({ ...route }));
 
   root.querySelectorAll('[data-log-channel]').forEach(select => select.addEventListener('change', () => saveRoute(select.dataset.logChannel)));
   root.querySelectorAll('[data-log-enabled]').forEach(toggle => toggle.addEventListener('change', () => saveRoute(toggle.dataset.logEnabled)));
-  root.querySelectorAll('[data-profile-save]').forEach(button => button.addEventListener('click', async () => {
-    const key = button.dataset.profileSave;
-    const card = root.querySelector(`[data-log-card="${CSS.escape(key)}"]`);
-    const enabled = card.querySelector('[data-profile-enabled]').checked;
-    const display_name = card.querySelector('[data-profile-name]').value.trim();
-    const avatar_url = card.querySelector('[data-profile-avatar]').value.trim();
-    const feedback = card.querySelector('[data-profile-status]');
-    button.disabled = true;
-    feedback.textContent = 'Enregistrement…';
-    try {
-      const result = await gpost('/logs/sender-profile', { category: key, enabled, display_name, avatar_url }, 'PUT');
-      const route = byKey.get(key);
-      if (route) route.profile = result.profile;
-      preview(key);
-      feedback.textContent = 'Enregistré';
-      invalidate('log-config-v2');
-      toast(result.message);
-    } catch (error) {
-      feedback.textContent = 'Non enregistré';
-      toast(error.message || 'Impossible de modifier le mini-profil.', true);
-    } finally { button.disabled = false; }
-  }));
 
 };
