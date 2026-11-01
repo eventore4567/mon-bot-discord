@@ -144,6 +144,8 @@ EXTENSIONS = [
     "cogs.v17_health",
     "cogs.economy",
     "cogs.levels",
+    "cogs.import_data",
+    "cogs.role_mass_target",
     "cogs.minigames",
     "cogs.fun_social",  # 69 interactions Fun, GIFs pertinents et profils fictifs
     "cogs.command_usage_report",  # usage réel des commandes dans le journal (comptes seuls)
