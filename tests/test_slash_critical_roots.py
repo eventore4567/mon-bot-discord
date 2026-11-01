@@ -4,13 +4,15 @@ from cogs import slash_command_budget
 
 def test_critical_slash_commands_are_reservations():
     required = slash_command_budget._required_names()
-    assert {"presentation", "rps", "help", "ping", "setup"}.issubset(required)
+    assert {"presentation", "play", "help", "ping", "setup"}.issubset(required)
     assert len(required) <= slash_command_budget.GLOBAL_CHAT_INPUT_BUDGET
 
 
-def test_rps_is_preferred_over_optional_legacy_commands():
-    assert "rps" in slash_command_budget._preferred_names()
-    assert "rps" not in slash_command_budget._excluded_names()
+def test_rps_is_preserved_under_play_group():
+    from utils import slash_catalog
+    names = {getattr(entry, "path", None) for entry in getattr(slash_catalog, "ENTRIES", [])}
+    assert "play" in slash_command_budget._required_names()
+    assert "rps" in str(names) or "play rps" in str(names)
 
 def test_role_mass_kept_by_final_slash_group_rebuilder():
     from sentrix_command_surface_v110 import STANDARD_GROUPED_SLASH
