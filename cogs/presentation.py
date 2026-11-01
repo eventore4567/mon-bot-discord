@@ -45,36 +45,47 @@ def invite_url(bot: commands.Bot) -> str | None:
     )
 
 
-def presentation_panel(url: str, *, banner: bool | None = None) -> panels.Panneau:
-    return panels.Panneau(
-        titre="SentriX",
-        sous_titre="Protégez, organisez et animez votre serveur avec un seul bot.",
-        kind="brand",
-        banniere=banner,
-        sections=(
-            panels.Section(
-                "Sécurité et modération",
-                texte="Protection anti-spam, anti-raid et anti-liens. "
-                      "Sanctions, permissions et outils de gestion du staff.",
-            ),
-            panels.Section(
-                "Gestion du serveur",
-                texte="Tickets interactifs, logs détaillés, accueil des membres, "
-                      "vérification et automatisations.",
-            ),
-            panels.Section(
-                "Communauté",
-                texte="Niveaux, économie, mini-jeux, événements, musique et assistant IA.",
-            ),
-            panels.Section(
-                "Installation",
-                texte="Appuyez sur **Ajouter SentriX**, choisissez votre serveur, "
-                      "puis lancez /setup pour le configurer.",
-            ),
-        ),
-        boutons=(panels.Bouton(libelle="Ajouter SentriX", url=url),),
-        pied="SentriX • Votre serveur, votre configuration",
+def presentation_panel(url: str, *, banner: bool | None = None,
+                       english: bool = False, bot: commands.Bot | None = None) -> panels.Panneau:
+    from .presentation_feedback import FeedbackButton
+    sections = (
+        (panels.Section("Security & moderation", texte="Anti-spam, anti-raid, sanctions and staff tools."),
+         panels.Section("Server management", texte="Tickets, logs, welcome, verification and automation."),
+         panels.Section("Community", texte="Levels, economy, games, events, music and AI."))
+        if english else
+        (panels.Section("Sécurité et modération", texte="Anti-spam, anti-raid, sanctions et outils du staff."),
+         panels.Section("Gestion du serveur", texte="Tickets, logs, bienvenue, vérification et automatisations."),
+         panels.Section("Communauté", texte="Niveaux, économie, jeux, événements, musique et IA."))
     )
+    view = panels.Panneau(
+        titre="SentriX",
+        sous_titre=("Secure and manage your Discord server." if english
+                    else "Protégez et organisez votre serveur avec un seul bot."),
+        kind="brand", banniere=banner, sections=sections,
+        boutons=(panels.Bouton(libelle="Add SentriX" if english else "Ajouter SentriX", url=url),),
+        pied=("Add SentriX, then run /setup." if english
+              else "Ajoutez SentriX, puis lancez /setup."),
+    )
+    if bot is not None:
+        container = next((item for item in view.children if isinstance(item, discord.ui.Container)), None)
+        if container is not None:
+            rows = [item for item in container.children if isinstance(item, discord.ui.ActionRow)]
+            if rows and len(rows[-1].children) < 5:
+                rows[-1].add_item(FeedbackButton(bot, english))
+            else:
+                container.add_item(discord.ui.ActionRow(FeedbackButton(bot, english)))
+    return view
+
+
+def _old_panel(message: discord.Message, bot_id: int) -> bool:
+    if getattr(getattr(message, "author", None), "id", None) != bot_id:
+        return False
+    try:
+        serialized = "\n".join(str(component.to_dict()) for component in message.components)
+    except (TypeError, AttributeError):
+        return False
+    return (("Add SentriX" in serialized or "Ajouter SentriX" in serialized)
+            and "/setup" in serialized)
 
 
 @app_commands.guild_only()
@@ -126,12 +137,46 @@ async def _publish(interaction: discord.Interaction, channel: discord.TextChanne
         )
         return
 
+    from . import language_runtime
+    english = (await language_runtime.get_language(interaction.client, guild.id)
+               == language_runtime.LANG_EN)
     await interaction.response.defer(ephemeral=True, thinking=True)
+    panel = presentation_panel(url, banner=False, english=english, bot=interaction.client)
+    previous = None
     try:
-        await panels.envoyer(
-            destination,
-            presentation_panel(url, banner=None if perms.attach_files else False),
+        tracked = await interaction.client.db.fetchone(
+            "SELECT message_id FROM sentrix_presentation_posts WHERE guild_id=? AND channel_id=?",
+            (guild.id, destination.id),
         )
+        if tracked:
+            candidate = await destination.fetch_message(int(tracked["message_id"]))
+            if candidate.author.id == interaction.client.user.id:
+                previous = candidate
+    except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+        pass
+    except Exception:
+        logger.exception("Unable to fetch saved presentation")
+
+    if previous is None and perms.read_message_history:
+        try:
+            async for candidate in destination.history(limit=75):
+                if _old_panel(candidate, interaction.client.user.id):
+                    previous = candidate
+                    break
+        except discord.HTTPException:
+            pass
+
+    updated = False
+    try:
+        if previous is not None:
+            try:
+                sent = await previous.edit(view=panel, attachments=[])
+                updated = True
+            except discord.HTTPException:
+                logger.warning("Could not update prior presentation; posting a new one")
+                sent = await panels.envoyer(destination, panel)
+        else:
+            sent = await panels.envoyer(destination, panel)
     except discord.HTTPException:
         logger.exception("Impossible de publier /presentation dans le salon %s", destination.id)
         await interaction.followup.send(
@@ -140,10 +185,20 @@ async def _publish(interaction: discord.Interaction, channel: discord.TextChanne
         )
         return
 
+    try:
+        await interaction.client.db.execute(
+            "INSERT INTO sentrix_presentation_posts(guild_id,channel_id,message_id) VALUES(?,?,?) "
+            "ON CONFLICT(guild_id,channel_id) DO UPDATE SET message_id=excluded.message_id",
+            (guild.id, destination.id, sent.id),
+        )
+    except Exception:
+        logger.exception("Could not persist presentation id")
+    result = ("Presentation updated" if updated else "Presentation posted") if english else (
+        "Présentation mise à jour" if updated else "Présentation publiée"
+    )
     await interaction.followup.send(
-        f"Présentation publiée dans {destination.mention}.",
-        ephemeral=True,
-        allowed_mentions=discord.AllowedMentions.none(),
+        f"{result} : {destination.mention}.",
+        ephemeral=True, allowed_mentions=discord.AllowedMentions.none(),
     )
 
 
@@ -159,4 +214,7 @@ def _native_presentation(_bot: commands.Bot) -> app_commands.Command:
 
 async def setup(bot: commands.Bot) -> None:
     from utils import slash_catalog
+    from .presentation_feedback import ensure_schema, FeedbackPersistentView
+    await ensure_schema(bot)
+    bot.add_view(FeedbackPersistentView(bot))
     slash_catalog.register_native("presentation", _native_presentation)
