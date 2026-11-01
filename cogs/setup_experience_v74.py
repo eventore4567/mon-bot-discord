@@ -364,27 +364,50 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         await cog.open_builder_from_interaction(interaction)
 
     async def _build_home(self) -> None:
-        """Accueil privé lisible : un aperçu bref, un seul menu, zéro action destructive."""
+        """Accueil compact dans la langue canonique du serveur."""
         from utils import sentrix_emojis as icons
+
+        english = (
+            await language_runtime.get_language(self.bot, self.guild.id)
+            == language_runtime.LANG_EN
+        )
+        name_en = {
+            "security": "Security", "moderation": "Moderation",
+            "roles": "Roles", "ai": "AI", "levels": "Levels",
+            "economy": "Economy", "welcome": "Welcome",
+            "goodbye": "Goodbye", "antispam": "Anti-spam",
+            "tickets": "Tickets", "logs": "Logs",
+            "notifications": "Notifications",
+        }
 
         self.backend.category = None
         self.avance = False
         states = await setup_ui.module_switch_states(self.bot, self.guild.id)
         labels = dict(setup_ui.MODULE_SWITCHES)
-        actifs = [labels[key] for key in labels if states.get(key) == "enabled"]
-        inactifs = [labels[key] for key in labels if states.get(key) == "disabled"]
-        incomplets = [labels[key] for key in labels if states.get(key) in {"empty", "not_configured"}]
+        def module_name(key: str) -> str:
+            return name_en.get(key, labels[key]) if english else labels[key]
+
+        actifs = [module_name(key) for key in labels if states.get(key) == "enabled"]
+        inactifs = [module_name(key) for key in labels if states.get(key) == "disabled"]
+        incomplets = [module_name(key) for key in labels if states.get(key) in {"empty", "not_configured"}]
 
         def label_liste(items: list[str]) -> str:
-            return ", ".join(items) if items else "Aucun"
+            return ", ".join(items) if items else ("None" if english else "Aucun")
 
         container = discord.ui.Container(accent_colour=0x6C57CC)
         v73.poser_banniere(container)
         container.add_item(discord.ui.Section(
             discord.ui.TextDisplay(
-                "# Configuration SentriX\n"
-                f"**{self.guild.name}**  ·  **{len(actifs)}/{len(labels)} modules actifs**\n"
-                "-# Chaque choix ouvre les réglages du module ; aucun changement sans action."
+                (
+                    "# SentriX Configuration\n"
+                    f"**{self.guild.name}** · **{len(actifs)}/{len(labels)} modules enabled**\n"
+                    "Choose a module to view its settings. Changes require confirmation."
+                ) if english else (
+                    "# Configuration SentriX\n"
+                    f"**{self.guild.name}** · **{len(actifs)}/{len(labels)} modules actifs**\n"
+                    "Choisissez un module pour afficher ses paramètres. "
+                    "Aucun changement sans confirmation."
+                )
             ),
             accessory=v73._thumbnail(self.bot),
         ))
@@ -394,16 +417,23 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         off_icon = _status_icons.emoji("lock") or "🔒"
         waiting_icon = _status_icons.emoji("clock") or "⏳"
         container.add_item(discord.ui.TextDisplay(
-            "### État des fonctionnalités\n\n"
-            f"{actif_icon} **Actives ({len(actifs)})**\n"
-            f"{label_liste(actifs)}\n\n"
-            f"{off_icon} **Désactivées ({len(inactifs)})**\n"
-            f"{label_liste(inactifs)}\n\n"
-            f"{waiting_icon} **À terminer ({len(incomplets)})**\n"
-            f"{label_liste(incomplets)}"
+            (
+                "### Feature status\n\n"
+                f"{actif_icon} **Enabled ({len(actifs)})**\n{label_liste(actifs)}\n\n"
+                f"{off_icon} **Disabled ({len(inactifs)})**\n{label_liste(inactifs)}\n\n"
+                f"{waiting_icon} **Needs setup ({len(incomplets)})**\n{label_liste(incomplets)}"
+            ) if english else (
+                "### État des fonctionnalités\n\n"
+                f"{actif_icon} **Actives ({len(actifs)})**\n{label_liste(actifs)}\n\n"
+                f"{off_icon} **Désactivées ({len(inactifs)})**\n{label_liste(inactifs)}\n\n"
+                f"{waiting_icon} **À terminer ({len(incomplets)})**\n{label_liste(incomplets)}"
+            )
         ))
         container.add_item(discord.ui.Separator())
-        container.add_item(discord.ui.TextDisplay("### Que veux-tu configurer ?"))
+        container.add_item(discord.ui.TextDisplay(
+            "### What would you like to configure?"
+            if english else "### Que souhaitez-vous configurer ?"
+        ))
 
         # Même bibliothèque partout ; chaque sujet a SON icône et non un
         # emoji copié sur des catégories différentes. Les codes existants du
@@ -421,23 +451,32 @@ class SentriXSetupV74(v73.SentriXSetupV73):
 
         def etat(key: str) -> str:
             value = states.get(key)
-            if value == "enabled":
-                return "Actif"
-            if value == "disabled":
-                return "Désactivé"
-            if value in {"empty", "not_configured"}:
-                return "À configurer"
-            detail = str(etats.get(key, "")).upper()
-            if "INACTIF" in detail:
-                return "Désactivé"
-            if "ACTIF" in detail:
-                return "Actif"
-            return "À configurer"
+            if value not in {"enabled", "disabled", "empty", "not_configured"}:
+                detail = str(etats.get(key, "")).upper()
+                value = "disabled" if "INACTIF" in detail else (
+                    "enabled" if "ACTIF" in detail else "not_configured"
+                )
+            text = {
+                "enabled": ("Enabled", "Actif"),
+                "disabled": ("Disabled", "Désactivé"),
+                "empty": ("Needs setup", "À configurer"),
+                "not_configured": ("Needs setup", "À configurer"),
+            }[value]
+            return text[0] if english else text[1]
 
         options = [
             discord.SelectOption(
-                label=CATEGORY_META[key][1][:100], value=key,
-                description=(etat(key) + " · " + CATEGORY_META[key][2])[:100],
+                label=(
+                    name_en.get(key, CATEGORY_META[key][1]) if english
+                    else CATEGORY_META[key][1]
+                )[:100],
+                value=key,
+                description=(
+                    etat(key) + " · " +
+                    (language_runtime.english_ui_text(
+                        CATEGORY_META[key][2], setup=True,
+                    ) or CATEGORY_META[key][2] if english else CATEGORY_META[key][2])
+                )[:100],
                 emoji=icons.partiel(icons_par_module.get(key, ""))
                       or CATEGORY_META[key][0],
             )
@@ -467,16 +506,30 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             ("language", "Langue du serveur", "settings",
              "Français ou English"),
         )
+        extras_en = {
+            "rules_access": ("Rules & verification", "Rules, CAPTCHA, roles and channel access"),
+            "suggestions": ("Suggestions", "Channel, voting and moderation"),
+            "embeds": ("Embed builder", "Text, images, colours and buttons"),
+            "custom_commands": ("Custom commands", "Create your own commands"),
+            "prefixes": ("Prefixes", "Separate official and custom prefixes"),
+            "snippets": ("Saved messages", "Prepare reusable messages"),
+            "recurring_messages": ("Scheduled messages", "Automatic posts"),
+            "automation": ("Automations", "Automation rules and actions"),
+            "language": ("Server language", "French or English"),
+        }
         options.extend(
             discord.SelectOption(
-                label=label, value=key, description=description,
+                label=(extras_en[key][0] if english else label),
+                value=key,
+                description=(extras_en[key][1] if english else description),
                 emoji=icons.partiel(icone),
             )
             for key, label, icone, description in extras
         )
         assert len(options) <= 25, "Discord limite les menus à 25 choix."
         choice = discord.ui.Select(
-            placeholder="Choisir un module ou une fonction…", options=options,
+            placeholder=("Choose a module or feature…" if english else "Choisir un module ou une fonction…"),
+            options=options,
         )
 
         async def ouvrir(interaction: discord.Interaction):
@@ -488,7 +541,9 @@ class SentriXSetupV74(v73.SentriXSetupV73):
                 panneau = discord.ui.LayoutView(timeout=180)
                 bloc = discord.ui.Container(accent_colour=0x6C57CC)
                 v73.poser_banniere(bloc)
-                bloc.add_item(discord.ui.TextDisplay("## Langue du serveur"))
+                bloc.add_item(discord.ui.TextDisplay(
+                    "## Server language" if english else "## Langue du serveur"
+                ))
                 bloc.add_item(discord.ui.Separator())
                 bloc.add_item(discord.ui.ActionRow(OfficialLanguageSelect(self.backend)))
                 panneau.add_item(bloc)
@@ -502,7 +557,8 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         choice.callback = ouvrir
         container.add_item(discord.ui.ActionRow(choice))
         close = discord.ui.Button(
-            label="Fermer", style=discord.ButtonStyle.secondary,
+            label="Close" if english else "Fermer",
+            style=discord.ButtonStyle.secondary,
             emoji=icons.partiel("close"),
         )
         async def fermer(interaction: discord.Interaction):
