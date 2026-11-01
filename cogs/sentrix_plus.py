@@ -527,7 +527,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
         """Create a sticky with a real text/embed choice, in the current channel."""
         message = str(message or "").strip()
         channel = ctx.channel
-        match = re.match(r"^<#(\\d+)>\\s+([\\s\\S]+)$", message)
+        match = re.match(r"^<#(\d+)>\s+([\s\S]+)$", message)
         if match:
             channel = ctx.guild.get_channel(int(match.group(1)))
             message = match.group(2).strip()
