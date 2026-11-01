@@ -894,6 +894,13 @@ class OfficialHelp(commands.Cog, name="SentriXHelp"):
 
     async def send_help(self, target, query: str | None = None):
         prefix = "+"
+        guild = getattr(target, "guild", None)
+        if guild is not None:
+            try:
+                conf = await self.bot.db.get_guild_config(guild.id)
+                prefix = str(conf["prefix"] if conf and conf["prefix"] else "+")
+            except Exception:
+                prefix = self.bot.prefix_cache.get(guild.id, "+")
         member = getattr(target, "author", None) or getattr(target, "user", None)
         if member is None:
             return
@@ -945,7 +952,8 @@ class OfficialHelp(commands.Cog, name="SentriXHelp"):
         choices: list[app_commands.Choice[str]] = []
         for command in matches[:25]:
             slash = _slash_name(self.bot, command)
-            public = f"/{slash}" if slash else f"+{_display_name(command)}"
+            prefix = self.bot.prefix_cache.get(interaction.guild_id, "+")
+            public = f"/{slash}" if slash else f"{prefix}{_display_name(command)}"
             label = sentrix_emojis.tronquer(f"{public} · {_description(command)}", 100)
             value = (slash or _display_name(command))[:100]
             choices.append(app_commands.Choice(name=label, value=value))
