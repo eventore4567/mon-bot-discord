@@ -5,6 +5,7 @@ aucun transport Discord et aucune couche de style existante.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
@@ -79,7 +80,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
         # Cache negatif : la plupart des salons n'ont aucun sticky.
         self._no_sticky: dict[int, bool] = {}
         self.bot = bot
-        self._sticky_cooldowns: dict[int, float] = {}
+        self._sticky_locks: dict[int, asyncio.Lock] = {}
 
     async def cog_load(self) -> None:
         await self._ensure_tables()
@@ -520,7 +521,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
         """Crée un message sticky : +sticky-set #annonces texte"""
         content = str(message).strip()
         if not content or len(content) > 1700:
-            return await panels.envoyer(ctx, _reponse("Message sticky", 'Le message sticky doit contenir entre 1 et 1700 caractères.', kind="danger"))
+            return await ctx.send("Sticky must contain between 1 and 1700 characters.")
         old = await self.bot.db.fetchone("SELECT message_id FROM sentrix_sticky WHERE channel_id=?", (channel.id,))
         if old and old["message_id"]:
             try:
@@ -551,12 +552,12 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
         every = max(1, min(50, int(every)))
         row = await self.bot.db.fetchone("SELECT channel_id FROM sentrix_sticky WHERE channel_id=?", (channel.id,))
         if not row:
-            return await panels.envoyer(ctx, _reponse("Message sticky", "Aucun sticky n'est configuré dans ce salon.", kind="warning"))
+            return await ctx.send("No sticky configured in this channel.")
         await self.bot.db.execute(
             "UPDATE sentrix_sticky SET every_messages=?,counter=0 WHERE channel_id=?",
             (every, channel.id),
         )
-        await panels.envoyer(ctx, _reponse("Message sticky", f'Le sticky de {channel.mention} remontera maintenant tous les {every} messages.', kind="success"))
+        await ctx.send(f"Sticky in {channel.mention} now refreshes every {every} message(s).")
 
     @commands.command(name="sticky-off")
     @commands.guild_only()
@@ -571,7 +572,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
                 pass
         await self.bot.db.execute("DELETE FROM sentrix_sticky WHERE channel_id=?", (channel.id,))
         self._no_sticky[int(channel.id)] = True
-        await panels.envoyer(ctx, _reponse("Message sticky", f'Sticky désactivé dans {channel.mention}.', kind="success"))
+        await ctx.send(f"Sticky disabled in {channel.mention}.")
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -584,53 +585,53 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
         channel_id = int(message.channel.id)
         if self._no_sticky.get(channel_id) is True:
             return
-        row = await self.bot.db.fetchone(
-            "SELECT content,message_id,every_messages,counter FROM sentrix_sticky WHERE channel_id=?",
-            (channel_id,),
-        )
-        if not row:
-            # Borne memoire : ce cache est indexe par SALON, pas par serveur. Sur un bot
-            # present sur beaucoup de serveurs il grossirait sans limite.
-            if len(self._no_sticky) > 20000:
-                self._no_sticky.clear()
-            self._no_sticky[channel_id] = True
-            return
-        if row["message_id"] and int(row["message_id"]) == int(message.id):
-            return
-
-        counter = int(row["counter"]) + 1
-        every = max(1, int(row["every_messages"]))
-        if counter < every:
-            await self.bot.db.execute(
-                "UPDATE sentrix_sticky SET counter=? WHERE channel_id=?",
-                (counter, message.channel.id),
+        lock = self._sticky_locks.setdefault(channel_id, asyncio.Lock())
+        async with lock:
+            row = await self.bot.db.fetchone(
+                "SELECT content,message_id,every_messages,counter FROM sentrix_sticky WHERE channel_id=?",
+                (channel_id,),
             )
-            return
+            if not row:
+                # Borne memoire : ce cache est indexe par SALON, pas par serveur. Sur un bot
+                # present sur beaucoup de serveurs il grossirait sans limite.
+                if len(self._no_sticky) > 20000:
+                    self._no_sticky.clear()
+                self._no_sticky[channel_id] = True
+                return
+            if row["message_id"] and int(row["message_id"]) == int(message.id):
+                return
 
-        # No cooldown: moving the sticky after every message is intentional.
+            counter = int(row["counter"]) + 1
+            every = max(1, int(row["every_messages"]))
+            if counter < every:
+                await self.bot.db.execute(
+                    "UPDATE sentrix_sticky SET counter=? WHERE channel_id=?",
+                    (counter, message.channel.id),
+                )
+                return
 
-        if row["message_id"]:
+            if row["message_id"]:
+                try:
+                    previous = await message.channel.fetch_message(int(row["message_id"]))
+                    await previous.delete()
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    pass
             try:
-                previous = await message.channel.fetch_message(int(row["message_id"]))
-                await previous.delete()
-            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                pass
-        try:
-            stored = str(row["content"])
-            use_embed = stored.startswith("__SENTRIX_EMBED__")
-            if stored.startswith("__SENTRIX_EMBED__"):
-                displayed = stored[len("__SENTRIX_EMBED__"):]
-            elif stored.startswith("__SENTRIX_TEXT__"):
-                displayed = stored[len("__SENTRIX_TEXT__"):]
-            else:
-                displayed = stored  # Existing sticky records remain compatible.
-            sticky = await message.channel.send(embed=discord.Embed(description=displayed) if use_embed else None, content=None if use_embed else displayed)
-        except (discord.Forbidden, discord.HTTPException):
-            return
-        await self.bot.db.execute(
-            "UPDATE sentrix_sticky SET message_id=?,counter=0 WHERE channel_id=?",
-            (sticky.id, message.channel.id),
-        )
+                stored = str(row["content"])
+                use_embed = stored.startswith("__SENTRIX_EMBED__")
+                if stored.startswith("__SENTRIX_EMBED__"):
+                    displayed = stored[len("__SENTRIX_EMBED__"):]
+                elif stored.startswith("__SENTRIX_TEXT__"):
+                    displayed = stored[len("__SENTRIX_TEXT__"):]
+                else:
+                    displayed = stored  # Existing sticky records remain compatible.
+                sticky = await message.channel.send(embed=discord.Embed(description=displayed) if use_embed else None, content=None if use_embed else displayed)
+            except (discord.Forbidden, discord.HTTPException):
+                return
+            await self.bot.db.execute(
+                "UPDATE sentrix_sticky SET message_id=?,counter=0 WHERE channel_id=?",
+                (sticky.id, message.channel.id),
+            )
 
     # ------------------------------------------------------------------
     # SCHEDULED ANNOUNCEMENTS
