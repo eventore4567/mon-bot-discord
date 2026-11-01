@@ -267,12 +267,26 @@ class CleanHelpSelect(discord.ui.Select):
         self.entries = _help_entries(bot, is_staff)
         total = sum(len(commands_list) for _, commands_list in self.entries)
         all_label = "All commands" if language == "en" else "Toutes les commandes"
-        options: list[discord.SelectOption] = [discord.SelectOption(label=all_label, value=_ALL_VALUE, description=f"{total} " + ("active commands" if language == "en" else "commandes actives"))]
+        # Les catégories métier arrivent d'abord. Le catalogue complet,
+        # très volumineux, reste disponible mais n'encombre plus le premier
+        # choix de l'utilisateur.
+        options: list[discord.SelectOption] = []
         for category, commands_list in self.entries:
             name, summary = _category_text(category, language)
             unit = "commands" if language == "en" else "commandes"
             options.append(discord.SelectOption(label=name[:100], value=category.key, description=f"{len(commands_list)} {unit} | {summary}"[:100]))
-        super().__init__(placeholder="Select a category..." if language == "en" else "Selectionne une categorie...", options=options[:25], row=0)
+        options.append(discord.SelectOption(
+            label=all_label, value=_ALL_VALUE,
+            description=(
+                "Advanced: complete searchable command list"
+                if language == "en"
+                else "Avancé : liste complète des commandes"
+            ),
+        ))
+        super().__init__(
+            placeholder="Choose a category…" if language == "en" else "Choisissez une catégorie…",
+            options=options[:25], row=0,
+        )
 
     async def callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.author_id:
