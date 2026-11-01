@@ -31,7 +31,9 @@ class TargetSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         self.owner.target = self.values[0]
-        self.owner.confirm.disabled = False
+        for item in self.owner.children:
+            if isinstance(item, discord.ui.Button) and item.custom_id == "sentrix:mass:confirm":
+                item.disabled = False
         label = {"members": "members", "bots": "bots", "all": "everyone"}[self.owner.target]
         desc = (
             f"Target: **{label}**. Click Confirm to {self.owner.action} the role."
@@ -53,8 +55,13 @@ class MassRoleView(discord.ui.View):
         self.target = None
         self.english = english
         self.add_item(TargetSelect(self))
-        self.confirm.label = "Confirm" if english else "Confirmer"
-        self.cancel.label = "Cancel" if english else "Annuler"
+        for item in self.children:
+            if isinstance(item, discord.ui.Button):
+                if item.label == "Confirm":
+                    item.label = "Confirm" if english else "Confirmer"
+                    item.custom_id = "sentrix:mass:confirm"
+                elif item.label == "Cancel":
+                    item.label = "Cancel" if english else "Annuler"
 
     async def interaction_check(self, interaction: discord.Interaction):
         member = interaction.user
