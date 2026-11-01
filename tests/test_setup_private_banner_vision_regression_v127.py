@@ -360,7 +360,7 @@ async def test_prefix_setup_has_clickable_private_launcher_and_checks_author():
         guild_id=5678, user=SimpleNamespace(id=1234),
         response=SimpleNamespace(send_message=AsyncMock()),
     )
-    await launcher.open_setup(inter, launcher.children[0])
+    await launcher.children[0].callback(inter)
     setup.send_setup.assert_awaited_once_with(inter)
     inter.response.send_message.assert_not_awaited()
 
@@ -368,7 +368,7 @@ async def test_prefix_setup_has_clickable_private_launcher_and_checks_author():
         guild_id=5678, user=SimpleNamespace(id=9999),
         response=SimpleNamespace(send_message=AsyncMock()),
     )
-    await launcher.open_setup(other, launcher.children[0])
+    await launcher.children[0].callback(other)
     other.response.send_message.assert_awaited_once()
     assert other.response.send_message.await_args.kwargs["ephemeral"] is True
     setup.send_setup.assert_awaited_once_with(inter)
