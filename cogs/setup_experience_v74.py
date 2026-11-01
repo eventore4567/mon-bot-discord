@@ -377,7 +377,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         def label_liste(items: list[str]) -> str:
             return ", ".join(items) if items else "Aucun"
 
-        container = discord.ui.Container()
+        container = discord.ui.Container(accent_colour=0x6C57CC)
         v73.poser_banniere(container)
         container.add_item(discord.ui.Section(
             discord.ui.TextDisplay(
@@ -479,7 +479,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             if selected == "language":
                 from .language_official_bridge import OfficialLanguageSelect
                 panneau = discord.ui.LayoutView(timeout=180)
-                bloc = discord.ui.Container()
+                bloc = discord.ui.Container(accent_colour=0x6C57CC)
                 v73.poser_banniere(bloc)
                 bloc.add_item(discord.ui.TextDisplay("## Langue du serveur"))
                 bloc.add_item(discord.ui.Separator())
@@ -514,7 +514,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         )
         problems = sum("CORRIGER" in states.get(key, "") for key in CATEGORY_ORDER)
 
-        container = discord.ui.Container()
+        container = discord.ui.Container(accent_colour=0x6C57CC)
         v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
@@ -671,7 +671,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
 
         toggle.callback = toggle_module
 
-        container = discord.ui.Container()
+        container = discord.ui.Container(accent_colour=0x6C57CC)
         v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
@@ -763,7 +763,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         else:
             channel_text = "All channels" if english else "Tous les salons"
 
-        container = discord.ui.Container()
+        container = discord.ui.Container(accent_colour=0x6C57CC)
         v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
@@ -863,7 +863,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
     async def _build_suggestions(self) -> None:
         from cogs import suggestions
 
-        container = discord.ui.Container()
+        container = discord.ui.Container(accent_colour=0x6C57CC)
         v73.poser_banniere(container)
         for item in await suggestions.setup_page_items(self):
             container.add_item(item)
@@ -917,7 +917,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             f"**Panneau public :** {'Publié' if published else 'Non publié'}"
         )
 
-        container = discord.ui.Container()
+        container = discord.ui.Container(accent_colour=0x6C57CC)
         v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
@@ -995,7 +995,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             else "Configurez les réactions automatiques et les règles de contenu par salon."
         )
 
-        container = discord.ui.Container()
+        container = discord.ui.Container(accent_colour=0x6C57CC)
         v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
@@ -1092,7 +1092,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             style=discord.ButtonStyle.success if settings.get("enabled") else discord.ButtonStyle.secondary,
             disabled=True,
         )
-        container = discord.ui.Container()
+        container = discord.ui.Container(accent_colour=0x6C57CC)
         v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
@@ -1309,7 +1309,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             style=discord.ButtonStyle.success if enabled else discord.ButtonStyle.secondary,
             disabled=True,
         )
-        container = discord.ui.Container()
+        container = discord.ui.Container(accent_colour=0x6C57CC)
         v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
@@ -1380,7 +1380,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             else discord.ButtonStyle.secondary
         )
         status = discord.ui.Button(label=status_label, style=status_style, disabled=True)
-        container = discord.ui.Container()
+        container = discord.ui.Container(accent_colour=0x6C57CC)
         v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
@@ -1457,7 +1457,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             disabled=True,
         )
 
-        container = discord.ui.Container()
+        container = discord.ui.Container(accent_colour=0x6C57CC)
         v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
