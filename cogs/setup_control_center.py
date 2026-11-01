@@ -1247,6 +1247,14 @@ class SetupView(discord.ui.LayoutView):
                         )
                     ],
                 ),
+                panels.Section(
+                    "Importation depuis un autre bot",
+                    [
+                        panels.Ligne("Importer des données", "Utilisez `/import-data` ou `+import-data` avec un fichier JSON."),
+                        panels.Ligne("Fichier", '{"users":[{"id":"123456789012345678","xp":50,"level":1,"cash":100,"bank":0}]}'),
+                        panels.Ligne("Choix", "Aperçu puis ajouter les absents ou remplacer les champs importés."),
+                    ],
+                ),
             ]
         if cle == "notifications":
             rows = await self.bot.db.fetchall(
@@ -1380,7 +1388,7 @@ class OfficialSetup(commands.Cog, name="SentriXSetup"):
             )
             overview.add_field(
                 name="Available modules" if english else "Modules disponibles",
-                value=", ".join(CATEGORIES[key][0] for key in CATEGORY_ORDER),
+                value=", ".join((language_runtime._english_setup_text(CATEGORIES[key][0]) if english else CATEGORIES[key][0]) for key in CATEGORY_ORDER),
                 inline=False,
             )
             if isinstance(target, commands.Context):
