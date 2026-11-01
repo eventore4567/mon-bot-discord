@@ -93,6 +93,7 @@ STANDARD_DIRECT_SLASH: dict[str, str] = {
 STANDARD_GROUPED_SLASH: dict[str, tuple[str, str]] = {
     "giverole": ("role", "give"),
     "removerole": ("role", "remove"),
+    "role mass": ("role", "mass"),
 
     # ------------------------------------------------------------------ 07/10/2026
     # /embeds : les 14 feuilles répétaient « embed », déjà porté par la racine.
