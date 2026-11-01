@@ -1372,30 +1372,42 @@ class OfficialSetup(commands.Cog, name="SentriXSetup"):
     def __init__(self, bot):
         self.bot = bot
 
+    async def send_public_overview(self, target):
+        """A safe public summary, without privileged interactive controls."""
+        guild = getattr(target, "guild", None)
+        if guild is None:
+            return await _permission_error(target)
+        from . import language_runtime
+        en = await language_runtime.get_language(self.bot, guild.id) == language_runtime.LANG_EN
+        overview = discord.Embed(
+            title="SentriX · Server modules" if en else "SentriX · Modules du serveur",
+            description=(
+                "Read-only overview. Server managers can modify settings with `/setup`."
+                if en else "Consultation uniquement. Les gestionnaires du serveur peuvent modifier les réglages avec `/setup`."
+            ),
+            color=discord.Colour.blurple(),
+        )
+        categories = ", ".join(
+            language_runtime._english_setup_text(CATEGORIES[key][0]) if en else CATEGORIES[key][0]
+            for key in CATEGORY_ORDER
+        )
+        overview.add_field(
+            name="Available modules" if en else "Modules disponibles",
+            value=categories, inline=False,
+        )
+        if isinstance(target, commands.Context):
+            return await target.send(embed=overview)
+        if target.response.is_done():
+            return await target.followup.send(embed=overview, ephemeral=True)
+        return await target.response.send_message(embed=overview, ephemeral=True)
+
     async def send_setup(self, target):
         guild = getattr(target, "guild", None)
         member = getattr(target, "author", None) or getattr(target, "user", None)
         if guild is None or member is None:
             return await _permission_error(target)
         if not await _can_setup(self.bot, member, guild):
-            from . import language_runtime
-            english = await language_runtime.get_language(self.bot, guild.id) == language_runtime.LANG_EN
-            overview = discord.Embed(
-                title="SentriX · Server modules" if english else "SentriX · Modules du serveur",
-                description=("Read-only view. A server manager can change settings with `/setup`." if english
-                             else "Consultation uniquement. Une personne autorisée peut modifier les réglages avec `/setup`."),
-                color=discord.Colour.blurple(),
-            )
-            overview.add_field(
-                name="Available modules" if english else "Modules disponibles",
-                value=", ".join((language_runtime._english_setup_text(CATEGORIES[key][0]) if english else CATEGORIES[key][0]) for key in CATEGORY_ORDER),
-                inline=False,
-            )
-            if isinstance(target, commands.Context):
-                return await target.send(embed=overview)
-            if target.response.is_done():
-                return await target.followup.send(embed=overview, ephemeral=True)
-            return await target.response.send_message(embed=overview, ephemeral=True)
+            return await self.send_public_overview(target)
         view = SetupView(self.bot, guild, member.id)
         await view.composer()
         return await panels.envoyer(target, view)
