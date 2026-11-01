@@ -8,6 +8,7 @@ déclencheurs déjà créés. Après migration, les deux valeurs évoluent sépa
 from __future__ import annotations
 
 import re
+import time
 
 TABLE = """
 CREATE TABLE IF NOT EXISTS sentrix_custom_command_prefix (
@@ -23,12 +24,24 @@ def validate_prefix(value: str) -> str:
     return value
 
 async def get_custom_prefix(bot, guild_id: int) -> str:
-    await bot.db.execute(TABLE)
+    guild_id = int(guild_id)
+    cache = getattr(bot, "_custom_prefix_cache", None)
+    if cache is None:
+        cache = {}
+        bot._custom_prefix_cache = cache
+    cached = cache.get(guild_id)
+    if cached and time.monotonic() - cached[1] < 20:
+        return cached[0]
+    if not getattr(bot, "_custom_prefix_schema_ready", False):
+        await bot.db.execute(TABLE)
+        bot._custom_prefix_schema_ready = True
     row = await bot.db.fetchone(
-        "SELECT prefix FROM sentrix_custom_command_prefix WHERE guild_id=?", (int(guild_id),)
+        "SELECT prefix FROM sentrix_custom_command_prefix WHERE guild_id=?", (guild_id,)
     )
     if row:
-        return str(row["prefix"])
+        prefix = str(row["prefix"])
+        cache[guild_id] = (prefix, time.monotonic())
+        return prefix
     # Migration non destructive : l'ancien préfixe servait aux deux systèmes.
     conf = await bot.db.get_guild_config(int(guild_id))
     legacy = str(conf["prefix"] if conf and conf["prefix"] else "+")
@@ -44,16 +57,23 @@ async def get_custom_prefix(bot, guild_id: int) -> str:
     row = await bot.db.fetchone(
         "SELECT prefix FROM sentrix_custom_command_prefix WHERE guild_id=?", (int(guild_id),)
     )
-    return str(row["prefix"]) if row else legacy
+    prefix = str(row["prefix"]) if row else legacy
+    cache[guild_id] = (prefix, time.monotonic())
+    return prefix
 
 async def set_custom_prefix(bot, guild_id: int, prefix: str) -> str:
     prefix = validate_prefix(prefix)
-    await bot.db.execute(TABLE)
+    if not getattr(bot, "_custom_prefix_schema_ready", False):
+        await bot.db.execute(TABLE)
+        bot._custom_prefix_schema_ready = True
     await bot.db.execute(
         "INSERT INTO sentrix_custom_command_prefix (guild_id, prefix) VALUES (?, ?) "
         "ON CONFLICT(guild_id) DO UPDATE SET prefix=excluded.prefix",
         (int(guild_id), prefix),
     )
+    cache = getattr(bot, "_custom_prefix_cache", None)
+    if isinstance(cache, dict):
+        cache[int(guild_id)] = (prefix, time.monotonic())
     return prefix
 
 async def set_official_prefix(bot, guild_id: int, prefix: str) -> str:
