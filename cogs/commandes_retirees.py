@@ -15,8 +15,18 @@ from discord.ext import commands
 
 from utils.unused_commands import OUTILS_PROPRIETAIRE_RETIRES, SUPPRIMEES
 
-#: Commandes jamais utilisées (28/10) + outils du propriétaire global (29/10).
-A_RETIRER = SUPPRIMEES | OUTILS_PROPRIETAIRE_RETIRES
+#: Ces huit routes sont déjà remplacées et masquées du catalogue.
+#: On retire l'ancienne commande, PAS les fonctions qu'elle doublonnait :
+#: rank -> level, buyrole -> shop, ask/chat -> ai, embed-create -> embed,
+#: latency -> ping, levelroles -> level, roleinfo -> info role.
+DOUBLONS_SANS_FONCTION_PROPRE = frozenset({
+    "rank", "buyrole", "ask", "chat", "embed-create",
+    "latency", "levelroles", "roleinfo",
+})
+
+#: Commandes jamais utilisées + anciens outils owner + doublons confirmés.
+#: Une vérification du nom qualifié empêche d'effacer une autre commande.
+A_RETIRER = SUPPRIMEES | OUTILS_PROPRIETAIRE_RETIRES | DOUBLONS_SANS_FONCTION_PROPRE
 
 logger = logging.getLogger("bot.commandes-retirees")
 
