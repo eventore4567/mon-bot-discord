@@ -35,6 +35,7 @@ dans les logs serveur (logger "bot.ai").
 """
 
 import asyncio
+import contextvars
 import copy
 import io
 import json
@@ -63,6 +64,10 @@ from utils.audit_trail import journaliser
 from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.ai")
+
+# Contexte d'image limité à l'exécution actuelle ; n'altère ni la signature
+# publique, ni les wrappers legacy de send_sentrix_reply.
+_PASSIVE_IMAGE_CONTEXT = contextvars.ContextVar("sentrix_passive_images", default=())
 
 
 # ---------------------------------------------------------------- VUE : BOUTONS DE RÉPONSE
@@ -793,6 +798,10 @@ class Ai(commands.Cog, name="Ai"):
         model_key = ai_service.pick_model(prompt if isinstance(prompt, str) else "")
         reasoning_effort = ai_service.pick_reasoning_effort(model_key, "medium")
         instructions = await self._build_system_instructions(user_id, author_name)
+        # Les wrappers historiques n'acceptent pas "attachments". Le listener
+        # fournit donc la sélection validée via le contexte de CETTE requête.
+        if image_urls is None:
+            image_urls = list(_PASSIVE_IMAGE_CONTEXT.get())
         # Le moteur ne lit jamais des fichiers tout seul : seules les images
         # explicitement jointes au message et validées passent à OpenAI.
         content = prompt
@@ -2444,17 +2453,19 @@ class Ai(commands.Cog, name="Ai"):
                 pass
             return
 
-        async with message.channel.typing():
-            if attachments:
-                await self.send_sentrix_reply(
-                    message.channel, message.author, question,
-                    reply_to=message, attachments=attachments,
-                )
-            else:
+        # Les couches V57, fast-home et fallback changent la signature de
+        # send_sentrix_reply : ne JAMAIS leur passer de nouveaux paramètres.
+        # L'image validée circule uniquement dans le contexte de cette tâche.
+        images = await _images_from_discord_attachments(attachments)
+        token = _PASSIVE_IMAGE_CONTEXT.set(tuple(images))
+        try:
+            async with message.channel.typing():
                 await self.send_sentrix_reply(
                     message.channel, message.author, question,
                     reply_to=message,
                 )
+        finally:
+            _PASSIVE_IMAGE_CONTEXT.reset(token)
 
     @commands.hybrid_command(name="ask", description="Poser une question à l'IA.")
     @app_commands.describe(question="Votre question pour l'IA")
