@@ -575,6 +575,36 @@ class SentriXSetupV73(discord.ui.LayoutView):
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.TextDisplay("Aucun réglage supplémentaire n’est nécessaire sur cette page."))
 
+        if page == "levels":
+            from . import import_data, language_runtime
+            english = (await language_runtime.get_language(self.bot, self.guild.id)
+                       == language_runtime.LANG_EN)
+            import_button = discord.ui.Button(
+                label="Import data" if english else "Importer des données",
+                style=discord.ButtonStyle.primary,
+            )
+
+            async def open_import(interaction: discord.Interaction):
+                if not await setup_ui._can_setup(self.bot, interaction.user, interaction.guild):
+                    return await interaction.response.send_message(
+                        "Manage Server required." if english else "Permission Gérer le serveur requise.",
+                        ephemeral=True,
+                    )
+                await interaction.response.send_modal(
+                    import_data.ImportFileModal(self.bot, self.guild.id, interaction.user.id, english)
+                )
+
+            import_button.callback = open_import
+            container.add_item(discord.ui.Separator())
+            container.add_item(discord.ui.Section(
+                discord.ui.TextDisplay(
+                    "**Import from another bot**\nUpload a JSON export for XP, levels and balances."
+                    if english else
+                    "**Importer depuis un autre bot**\nAjoutez un export JSON pour les XP, niveaux et soldes."
+                ),
+                accessory=import_button,
+            ))
+
         # La navigation partagée (V74) sait aussi afficher la configuration
         # guidée ; sans elle, l'étape Bienvenue du guide perdait ses boutons.
         partagee = getattr(self, "_add_navigation", None)
