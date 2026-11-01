@@ -528,19 +528,27 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
                 await previous.delete()
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 pass
-        sent = await channel.send(f"📌 **Information**\n{content}")
+        # "embed:" selects an embed; plain text is the default.
+        use_embed = content.lower().startswith("embed:")
+        content = content[6:].strip() if use_embed else content
+        if content.lower().startswith("text:"):
+            content = content[5:].strip()
+        if not content:
+            return await ctx.send("Sticky content cannot be empty.")
+        stored = ("__SENTRIX_EMBED__" if use_embed else "__SENTRIX_TEXT__") + content
+        sent = await channel.send(embed=discord.Embed(description=content) if use_embed else None, content=None if use_embed else content)
         await self.bot.db.execute(
-            "INSERT OR REPLACE INTO sentrix_sticky(channel_id,guild_id,content,message_id,every_messages,counter) VALUES(?,?,?,?,5,0)",
-            (channel.id, ctx.guild.id, content, sent.id),
+            "INSERT OR REPLACE INTO sentrix_sticky(channel_id,guild_id,content,message_id,every_messages,counter) VALUES(?,?,?,?,1,0)",
+            (channel.id, ctx.guild.id, stored, sent.id),
         )
         self._no_sticky.pop(int(channel.id), None)
-        await panels.envoyer(ctx, _reponse("Message sticky", f'Message sticky activé dans {channel.mention}. Il remontera automatiquement tous les 5 messages.', kind="success"))
+        await panels.envoyer(ctx, _reponse("Message sticky", f'Sticky enabled in {channel.mention}. It will appear after each new message. Use embed: or text: before the message to choose its format.', kind="success"))
 
     @commands.command(name="sticky-every")
     @commands.guild_only()
     @commands.has_guild_permissions(manage_messages=True)
     async def sticky_every(self, ctx: commands.Context, channel: discord.TextChannel, every: int):
-        every = max(2, min(50, int(every)))
+        every = max(1, min(50, int(every)))
         row = await self.bot.db.fetchone("SELECT channel_id FROM sentrix_sticky WHERE channel_id=?", (channel.id,))
         if not row:
             return await panels.envoyer(ctx, _reponse("Message sticky", "Aucun sticky n'est configuré dans ce salon.", kind="warning"))
@@ -591,7 +599,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
             return
 
         counter = int(row["counter"]) + 1
-        every = max(2, int(row["every_messages"]))
+        every = max(1, int(row["every_messages"]))
         if counter < every:
             await self.bot.db.execute(
                 "UPDATE sentrix_sticky SET counter=? WHERE channel_id=?",
@@ -599,10 +607,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
             )
             return
 
-        now = time.monotonic()
-        if now - self._sticky_cooldowns.get(message.channel.id, 0.0) < 8.0:
-            return
-        self._sticky_cooldowns[message.channel.id] = now
+        # No cooldown: moving the sticky after every message is intentional.
 
         if row["message_id"]:
             try:
@@ -611,7 +616,15 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 pass
         try:
-            sticky = await message.channel.send(f"📌 **Information**\n{row['content']}")
+            stored = str(row["content"])
+            use_embed = stored.startswith("__SENTRIX_EMBED__")
+            if stored.startswith("__SENTRIX_EMBED__"):
+                displayed = stored[len("__SENTRIX_EMBED__"):]
+            elif stored.startswith("__SENTRIX_TEXT__"):
+                displayed = stored[len("__SENTRIX_TEXT__"):]
+            else:
+                displayed = stored  # Existing sticky records remain compatible.
+            sticky = await message.channel.send(embed=discord.Embed(description=displayed) if use_embed else None, content=None if use_embed else displayed)
         except (discord.Forbidden, discord.HTTPException):
             return
         await self.bot.db.execute(
