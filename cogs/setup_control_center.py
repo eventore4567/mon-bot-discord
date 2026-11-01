@@ -125,6 +125,76 @@ def _completion(statuses):
     return round(complete / len(statuses) * 100) if statuses else 0
 
 
+SETUP_DELEGATES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS sentrix_setup_delegates (
+    guild_id INTEGER NOT NULL,
+    subject_type TEXT NOT NULL,
+    subject_id INTEGER NOT NULL,
+    updated_by INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (guild_id, subject_type, subject_id)
+)
+"""
+
+
+async def _setup_delegates_ready(bot):
+    if not getattr(bot, "_sentrix_setup_delegates_ready", False):
+        await bot.db.execute(SETUP_DELEGATES_SCHEMA)
+        bot._sentrix_setup_delegates_ready = True
+
+
+def _can_manage_setup_delegates(member, guild):
+    perms = getattr(member, "guild_permissions", None)
+    return bool(
+        guild is not None and member is not None and
+        (getattr(guild, "owner_id", None) == getattr(member, "id", None)
+         or (perms and getattr(perms, "administrator", False)))
+    )
+
+
+async def _setup_delegates(bot, guild_id):
+    await _setup_delegates_ready(bot)
+    return await bot.db.fetchall(
+        "SELECT subject_type, subject_id FROM sentrix_setup_delegates WHERE guild_id=? ORDER BY subject_type, subject_id",
+        (int(guild_id),),
+    )
+
+
+async def _is_setup_delegate(bot, member, guild):
+    if member is None or guild is None:
+        return False
+    try:
+        rows = await _setup_delegates(bot, guild.id)
+        user_id = int(member.id)
+        role_ids = {int(role.id) for role in getattr(member, "roles", ())}
+        return any(
+            (row["subject_type"] == "user" and int(row["subject_id"]) == user_id)
+            or (row["subject_type"] == "role" and int(row["subject_id"]) in role_ids)
+            for row in rows
+        )
+    except Exception:
+        logger.exception("Lecture des autorisations /setup impossible guild=%s", guild.id)
+        return False
+
+
+async def _set_setup_delegate(bot, guild_id, kind, subject_id, actor_id, enabled=True):
+    if kind not in {"role", "user"} or int(subject_id) <= 0:
+        raise ValueError("Sélection invalide.")
+    await _setup_delegates_ready(bot)
+    if enabled:
+        await bot.db.execute(
+            "INSERT INTO sentrix_setup_delegates (guild_id, subject_type, subject_id, updated_by, updated_at) "
+            "VALUES (?, ?, ?, ?, strftime('%s','now')) "
+            "ON CONFLICT(guild_id, subject_type, subject_id) DO UPDATE SET updated_by=excluded.updated_by, updated_at=excluded.updated_at",
+            (int(guild_id), kind, int(subject_id), int(actor_id)),
+        )
+    else:
+        await bot.db.execute(
+            "DELETE FROM sentrix_setup_delegates WHERE guild_id=? AND subject_type=? AND subject_id=?",
+            (int(guild_id), kind, int(subject_id)),
+        )
+
+
 async def _can_setup(bot, member, guild):
     if guild is None or not isinstance(member, discord.Member):
         return False
@@ -149,13 +219,15 @@ async def _can_setup(bot, member, guild):
     from .permission_setup_hardening_v65 import CATEGORY_REQUIRED_PERMISSION
 
     required = CATEGORY_REQUIRED_PERMISSION.get("configuration", "manage_guild")
-    return bool(getattr(member.guild_permissions, required, False))
+    if getattr(member.guild_permissions, required, False):
+        return True
+    return await _is_setup_delegate(bot, member, guild)
 
 
 async def _permission_error(target):
     panel = embeds.error(
         "Vous ne pouvez pas ouvrir la configuration de ce serveur.\n\n"
-        "**Permission requise :** Administrateur ou Gérer le serveur"
+        "**Accès requis :** administrateur, Gérer le serveur ou rôle/membre autorisé."
     )
     if isinstance(target, commands.Context):
         return await panels.envoyer(target, panels.depuis_embed(panel))
