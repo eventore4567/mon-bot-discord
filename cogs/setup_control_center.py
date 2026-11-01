@@ -149,13 +149,14 @@ async def _can_setup(bot, member, guild):
     from .permission_setup_hardening_v65 import CATEGORY_REQUIRED_PERMISSION
 
     required = CATEGORY_REQUIRED_PERMISSION.get("configuration", "manage_guild")
-    return bool(getattr(member.guild_permissions, required, False))
+    if getattr(member.guild_permissions, required, False):
+        return True
+    return False
 
 
 async def _permission_error(target):
     panel = embeds.error(
-        "Vous ne pouvez pas ouvrir la configuration de ce serveur.\n\n"
-        "**Permission requise :** Administrateur ou Gérer le serveur"
+        "Tu n'as pas la permission d'utiliser /setup. Demande à un administrateur de t'autoriser."
     )
     if isinstance(target, commands.Context):
         return await panels.envoyer(target, panels.depuis_embed(panel))

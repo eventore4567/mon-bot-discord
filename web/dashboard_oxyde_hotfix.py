@@ -285,6 +285,13 @@ def patch_dashboard_runtime(dashboard=None) -> None:
             inflight[guild_id] = future
             future.add_done_callback(lambda _f: inflight.pop(guild_id, None))
         payload = await future
+        from utils.command_prefixes import get_custom_prefix
+        from types import SimpleNamespace
+        payload = dict(payload)
+        payload["settings"] = dict(payload.get("settings") or {})
+        payload["settings"]["custom_prefix"] = await get_custom_prefix(
+            SimpleNamespace(db=request.app["bot"].db), guild_id
+        )
         return web.json_response(payload)
 
     resilient_handle_guild._sentrix_oxyde_hotfix = True

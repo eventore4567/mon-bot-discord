@@ -20,8 +20,8 @@ def source(name: str) -> str:
 def test_prefix_plus_is_never_replaced_by_custom_prefix():
     code = source("main.py")
     function = code.split("async def get_prefix(", 1)[1].split("class BotAllInOne", 1)[0]
-    assert '("+", str(cached), default)' in function
-    assert "when_mentioned_or(*prefixes)" in function
+    assert "return commands.when_mentioned_or(str(cached))(bot, message)" in function
+    assert "Le préfixe personnalisé est réservé au listener PlatformV4" in function
     assert 'bot.prefix_cache[message.guild.id] = cached' in function
 
 
@@ -85,4 +85,27 @@ def test_custom_role_select_numeric_modal_and_embed_option():
     assert "message.channel.send(content=ping, embed=embed" in platform
     for name in ("main.py", "cogs/ai.py", "cogs/setup_custom_commands.py",
                  "cogs/platform_v4.py", "sentrix_v95_runtime.py"):
+        ast.parse(source(name), filename=name)
+
+
+def test_custom_prefix_applies_to_native_commands_and_cache_refreshes():
+    custom = source("cogs/custom_commands.py")
+    main = source("main.py")
+    assert "set_custom_prefix(self.bot, ctx.guild.id, prefixe)" in custom
+    assert "self.bot.db.set_guild_config(ctx.guild.id, \"prefix\", prefixe)" not in custom
+    assert 'prefix_cache_refreshed' in main
+    assert 'now - last_refresh >= 20' in main
+
+
+def test_image_only_followup_and_private_setup_transport():
+    ai = source("cogs/ai.py")
+    assert "_PENDING_IMAGE_FOLLOWUPS" in ai
+    assert "image_attachments and (pending or reply_to_bot)" in ai
+    assert "_PASSIVE_IMAGE_CONTEXT.set(tuple(images))" in ai
+    assert "ephemeral=True" in source("cogs/setup_experience_v74.py")
+    assert "ephemere=True" in source("cogs/setup_invitations.py")
+    assert "interaction.user.id) != self.author_id" in source("cogs/setup_components_v73.py")
+    for name in ("cogs/ai.py", "cogs/setup_experience_v74.py",
+                 "cogs/setup_components_v73.py", "cogs/setup_invitations.py",
+                 "main.py", "cogs/custom_commands.py"):
         ast.parse(source(name), filename=name)

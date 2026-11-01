@@ -271,6 +271,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
 
     def __init__(self, bot: commands.Bot, guild: discord.Guild, author_id: int):
         super().__init__(bot, guild, author_id)
+        self._author_member = guild.get_member(int(author_id))
         self.moderation_role_id: int | None = None
         self.moderation_member_id: int | None = None
         self.moderation_profile = "moderator"
@@ -455,6 +456,8 @@ class SentriXSetupV74(v73.SentriXSetupV73):
              "Texte, images, couleurs et boutons"),
             ("custom_commands", "Commandes personnalisées", "tools",
              "Créer ses propres commandes"),
+            ("prefixes", "Préfixes", "settings",
+             "Préfixes officiels et personnalisés, séparés"),
             ("snippets", "Messages enregistrés", "message",
              "Préparer des messages à réutiliser"),
             ("recurring_messages", "Messages programmés", "calendar",
@@ -587,7 +590,16 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             return await setup_automation_extras.build_page(self, page)
         if page == "custom_commands":
             from . import setup_custom_commands
+            if not setup_custom_commands.is_admin(self, SimpleNamespace(user=self._author_member or self.guild.get_member(self.author_id), guild=self.guild)):
+                box = discord.ui.Container()
+                box.add_item(discord.ui.TextDisplay("# Commandes personnalisées\nSeuls les administrateurs peuvent créer et modifier des commandes personnalisées."))
+                self._add_navigation(box)
+                self.add_item(box)
+                return
             return await setup_custom_commands.build_page(self)
+        if page == "prefixes":
+            from . import setup_custom_commands
+            return await setup_custom_commands.build_prefix_page(self)
         if page == "rules_access":
             return await self._build_rules_access()
         if page == "automation":
@@ -1650,6 +1662,7 @@ async def _send_setup_v74(self, target):
         return await setup_ui._permission_error(target)
 
     view = SentriXSetupV74(self.bot, guild, member.id)
+    view._author_member = member
     await view.prepare()
 
     if isinstance(target, commands.Context):

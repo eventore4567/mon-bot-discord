@@ -12,10 +12,22 @@ import time
 import discord
 
 from utils import sentrix_panels as panels
+from utils.command_prefixes import get_custom_prefix, set_custom_prefix, set_official_prefix, validate_prefix
 
 logger = logging.getLogger("bot.setup-custom-commands")
 
 VALID_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{1,31}$")
+
+def is_admin(shell, interaction: discord.Interaction) -> bool:
+    perms = getattr(interaction.user, "guild_permissions", None)
+    return bool(
+        getattr(interaction.guild, "id", None) == getattr(shell.guild, "id", None)
+        and getattr(interaction, "user", None) is not None
+        and (getattr(interaction.guild, "owner_id", None) == interaction.user.id
+             or (perms and getattr(perms, "administrator", False)))
+    )
+
+
 ROLE_KINDS = {"role_add", "role_remove", "role_temp"}
 KINDS = {
     "role_add": "Ajouter un rôle",
@@ -88,6 +100,8 @@ class CommandTextModal(discord.ui.Modal):
             self.texte.default = str(row["response"])
 
     async def on_submit(self, interaction: discord.Interaction):
+        if not is_admin(self.shell, interaction):
+            return await notify(interaction, "Seuls les administrateurs peuvent gérer ces commandes.")
         # Les actions sont indexées par (guild_id, name). La modification du
         # message ne renomme donc jamais la commande et ne perd pas ses actions.
         name = (str(self.existing["name"]) if self.existing else str(self.nom.value or "")).strip().casefold()
@@ -113,20 +127,24 @@ class CommandTextModal(discord.ui.Modal):
 
 
 class PrefixModal(discord.ui.Modal, title="Préfixe des commandes personnalisées"):
-    prefixe = discord.ui.TextInput(label="Préfixe", placeholder="!", min_length=1, max_length=3)
+    prefixe = discord.ui.TextInput(label="Préfixe", placeholder="!", min_length=1, max_length=5)
 
     def __init__(self, shell):
         super().__init__()
         self.shell = shell
 
     async def on_submit(self, interaction: discord.Interaction):
+        if not is_admin(self.shell, interaction):
+            return await notify(interaction, "Seuls les administrateurs peuvent gérer ces commandes.")
         value = str(self.prefixe.value or "").strip()
-        if not value or value.startswith("/") or any(ch.isspace() for ch in value):
-            return await notify(interaction, "Préfixe invalide : 1 à 3 caractères, sans espaces ni slash.")
-        await self.shell.bot.db.set_guild_config(self.shell.guild.id, "prefix", value)
-        # Éviter le cache périmé : + reste actif dans tous les cas.
-        self.shell.bot.prefix_cache[self.shell.guild.id] = value
-        await notify(interaction, "Préfixe personnalisé enregistré. Le préfixe + reste disponible.")
+        try:
+            validate_prefix(value)
+        except ValueError as exc:
+            return await notify(interaction, str(exc))
+        if not is_admin(self.shell, interaction):
+            return await notify(interaction, "Seuls les administrateurs peuvent modifier ce préfixe.")
+        await set_custom_prefix(self.shell.bot, self.shell.guild.id, value)
+        await notify(interaction, "Préfixe personnalisé enregistré. Il n'affecte pas les commandes officielles.")
 
 
 async def enregistrer_action(shell, name: str, kind: str, value: int, seconds: int) -> None:
@@ -160,6 +178,8 @@ class ActionModal(discord.ui.Modal):
         self.add_item(self.valeur)
 
     async def on_submit(self, interaction: discord.Interaction):
+        if not is_admin(self.shell, interaction):
+            return await notify(interaction, "Seuls les administrateurs peuvent gérer ces commandes.")
         try:
             value, seconds = parse_action(
                 self.kind, str(self.valeur.value or ""), "",
@@ -181,6 +201,8 @@ class DureeRoleModal(discord.ui.Modal, title="Durée du rôle temporaire"):
         self.add_item(self.duree)
 
     async def on_submit(self, interaction: discord.Interaction):
+        if not is_admin(self.shell, interaction):
+            return await notify(interaction, "Seuls les administrateurs peuvent gérer ces commandes.")
         try:
             value, seconds = parse_action(
                 "role_temp", str(self.role_id), str(self.duree.value),
@@ -223,13 +245,163 @@ class ChoisirRoleAction(discord.ui.View):
         self.add_item(select)
 
 
+class OfficialPrefixModal(discord.ui.Modal, title="Préfixe des commandes officielles"):
+    prefixe = discord.ui.TextInput(label="Préfixe officiel", placeholder="+", min_length=1, max_length=5)
+
+    def __init__(self, shell):
+        super().__init__()
+        self.shell = shell
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not is_admin(self.shell, interaction):
+            return await notify(interaction, "Seuls les administrateurs peuvent modifier le préfixe officiel.")
+        try:
+            await set_official_prefix(self.shell.bot, self.shell.guild.id, str(self.prefixe.value))
+        except ValueError as exc:
+            return await notify(interaction, str(exc))
+        await notify(interaction, "Préfixe officiel mis à jour. Les commandes personnalisées sont inchangées.")
+
+
+async def build_prefix_page(shell) -> None:
+    from . import setup_components_v73 as v73
+    conf = await shell.bot.db.get_guild_config(shell.guild.id)
+    official = str(conf["prefix"] if conf and conf["prefix"] else "+")
+    custom = await get_custom_prefix(shell.bot, shell.guild.id)
+    box = discord.ui.Container(accent_colour=0x6C57CC)
+    v73.poser_banniere(box)
+    box.add_item(discord.ui.TextDisplay(
+        "# Préfixes de SentriX\n"
+        f"**Commandes officielles :** `{official}` (ex. `{official}help`)\n"
+        f"**Commandes personnalisées :** `{custom}` (uniquement les commandes créées)\n\n"
+        "Les commandes slash / restent indépendantes."
+    ))
+    change = discord.ui.Button(label="Modifier le préfixe officiel", style=discord.ButtonStyle.primary)
+    async def change_official(interaction):
+        if not is_admin(shell, interaction):
+            return await notify(interaction, "Réservé aux administrateurs.")
+        await interaction.response.send_modal(OfficialPrefixModal(shell))
+    change.callback = change_official
+    box.add_item(discord.ui.ActionRow(change))
+    shell._add_navigation(box)
+    shell.add_item(box)
+
+
+class CustomCommandAccessView(discord.ui.View):
+    """Autorisations pour UNE commande personnalisée, indépendantes de /setup."""
+
+    def __init__(self, shell, command_id: int, command_name: str, grants: list[dict]):
+        super().__init__(timeout=180)
+        self.shell = shell
+        self.author_id = shell.author_id
+        self.command_id = int(command_id)
+        self.command_name = command_name
+        self.grants = grants
+
+        add_role = discord.ui.RoleSelect(
+            placeholder="Autoriser un rôle à lancer la commande", row=0,
+        )
+        remove_role = discord.ui.RoleSelect(
+            placeholder="Retirer l'autorisation d'un rôle", row=1,
+        )
+        add_user = discord.ui.UserSelect(
+            placeholder="Autoriser un membre à lancer la commande", row=2,
+        )
+        remove_user = discord.ui.UserSelect(
+            placeholder="Retirer l'autorisation d'un membre", row=3,
+        )
+        public_button = discord.ui.Button(style=discord.ButtonStyle.secondary, row=4)
+        self.public_button = public_button
+
+        async def role_allow(interaction):
+            await self.change(interaction, "role", add_role.values, True)
+
+        async def role_revoke(interaction):
+            await self.change(interaction, "role", remove_role.values, False)
+
+        async def user_allow(interaction):
+            await self.change(interaction, "user", add_user.values, True)
+
+        async def user_revoke(interaction):
+            await self.change(interaction, "user", remove_user.values, False)
+
+        async def toggle_public(interaction):
+            public = any(item["subject_type"] == "everyone" for item in self.grants)
+            await self.change(interaction, "everyone", [], not public)
+
+        add_role.callback = role_allow
+        remove_role.callback = role_revoke
+        add_user.callback = user_allow
+        remove_user.callback = user_revoke
+        public_button.callback = toggle_public
+        for item in (add_role, remove_role, add_user, remove_user, public_button):
+            self.add_item(item)
+        self.sync()
+
+    def sync(self):
+        public = any(item["subject_type"] == "everyone" for item in self.grants)
+        self.public_button.label = (
+            "Interdire à tous (sauf autorisés)" if public else "Autoriser tout le monde"
+        )
+
+    def description(self) -> str:
+        roles = [
+            f"<@&{int(item['subject_id'])}>"
+            for item in self.grants if item["subject_type"] == "role"
+        ]
+        users = [
+            f"<@{int(item['subject_id'])}>"
+            for item in self.grants if item["subject_type"] == "user"
+        ]
+        everyone = any(item["subject_type"] == "everyone" for item in self.grants)
+        return (
+            f"**Autorisations de la commande `{self.command_name}`**\n\n"
+            "**Propriétaire et administrateurs :** toujours autorisés\n"
+            f"**Tout le monde :** {'autorisé' if everyone else 'non autorisé'}\n"
+            f"**Rôles :** {', '.join(roles[:15]) if roles else 'Aucun'}\n"
+            f"**Membres :** {', '.join(users[:15]) if users else 'Aucun'}\n\n"
+            "Si un membre n'est pas autorisé, SentriX ignore entièrement sa commande."
+        )
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id or not is_admin(self.shell, interaction):
+            await notify(interaction, "Ce panneau est réservé à l'administrateur qui l'a ouvert.")
+            return False
+        return True
+
+    async def change(self, interaction, kind: str, values, enabled: bool):
+        service = self.shell.bot.get_cog("PlatformV4")
+        if service is None:
+            return await notify(interaction, "Commandes personnalisées indisponibles.")
+        target = values[0] if values else None
+        if kind != "everyone" and target is None:
+            return await notify(interaction, "Choisis un rôle ou un membre.")
+        try:
+            await service.set_custom_command_access(
+                self.shell.guild, interaction.user.id, self.command_id,
+                kind, 0 if kind == "everyone" else target.id, enabled=enabled,
+            )
+            self.grants = await service.list_custom_command_access(
+                self.shell.guild.id, self.command_id
+            )
+        except (ValueError, PermissionError) as exc:
+            return await notify(interaction, str(exc))
+        except Exception:
+            logger.exception("Impossible de mettre à jour les autorisations de commande")
+            return await notify(interaction, "Erreur d'enregistrement des autorisations.")
+        self.sync()
+        await interaction.response.edit_message(
+            content=self.description(), view=self,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+
 async def build_page(shell) -> None:
     from cogs import setup_components_v73 as v73, setup_control_center as setup_ui
     from cogs.custom_commands import actions_de, supprimer_declencheur, decrire
 
     guild_id = shell.guild.id
     conf = await shell.bot.db.get_guild_config(guild_id)
-    prefix = str(conf["prefix"] if conf and conf["prefix"] else "+")
+    prefix = await get_custom_prefix(shell.bot, guild_id)
     delete_trigger = await supprimer_declencheur(shell.bot.db, guild_id)
     rows = list(await shell.bot.db.fetchall(
         "SELECT id,name,response FROM platform_custom_commands WHERE guild_id=? ORDER BY name LIMIT 25",
@@ -267,6 +439,13 @@ async def build_page(shell) -> None:
     if selected:
         from cogs import custom_commands
         action_rows = await actions_de(shell.bot.db, guild_id, str(selected["name"]))
+        service = shell.bot.get_cog("PlatformV4")
+        allowed = await service.list_custom_command_access(guild_id, int(selected["id"])) if service else []
+        is_public = any(grant["subject_type"] == "everyone" for grant in allowed)
+        permission_label = (
+            "Tout le monde" if is_public else
+            (f"{len(allowed)} rôle(s) ou membre(s)" if allowed else "Administrateurs uniquement")
+        )
         details = "\n".join(
             f"{i}. {decrire(action)}" for i, action in enumerate(action_rows, 1)
         ) or "Aucune action ajoutée."
@@ -275,7 +454,8 @@ async def build_page(shell) -> None:
             f"**Format :** {'Embed Discord' if selected['embed_title'] else 'Texte simple'}\n"
             f"**Ping :** {(shell.guild.get_role(int(selected['ping_role_id'])).mention if selected['ping_role_id'] and shell.guild.get_role(int(selected['ping_role_id'])) else 'Aucun')}\n"
             f"**Message :** {str(selected['response'])[:250]}\n\n"
-            f"**Actions ({len(action_rows)}/10) :**\n{details[:1300]}"
+            f"**Exécution autorisée :** {permission_label}\n"
+            f"**Actions ({len(action_rows)}/10) :**\n{details[:1200]}"
         ))
     else:
         container.add_item(discord.ui.TextDisplay("Aucune commande. Choisissez **Créer**."))
@@ -405,7 +585,29 @@ async def build_page(shell) -> None:
         await shell.refresh(interaction)
 
     format_button.callback = toggle_format
-    container.add_item(discord.ui.ActionRow(format_button))
+    access_button = discord.ui.Button(
+        label="Qui peut utiliser ?", style=discord.ButtonStyle.primary,
+        disabled=selected is None,
+    )
+
+    async def manage_access(interaction):
+        if not is_admin(shell, interaction):
+            return await notify(interaction, "Réservé aux administrateurs.")
+        row = await selected_row(shell)
+        if row is None:
+            return await notify(interaction, "Cette commande n'existe plus.")
+        service = shell.bot.get_cog("PlatformV4")
+        if service is None:
+            return await notify(interaction, "Commandes personnalisées indisponibles.")
+        grants = await service.list_custom_command_access(guild_id, int(row["id"]))
+        view = CustomCommandAccessView(shell, int(row["id"]), str(row["name"]), grants)
+        await interaction.response.send_message(
+            view.description(), view=view, ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+    access_button.callback = manage_access
+    container.add_item(discord.ui.ActionRow(format_button, access_button))
 
     # RoleSelect affiche les rôles existants, sans demander aux admins de
     # chercher un ID dans le mode développeur. Le ping reste OFF par défaut.
@@ -468,6 +670,7 @@ async def build_page(shell) -> None:
             if i.user.id != shell.author_id:
                 return await notify(i, "Cette confirmation ne vous appartient pas.")
             await shell.bot.db.execute("DELETE FROM custom_command_actions WHERE guild_id=?", (guild_id,))
+            await shell.bot.db.execute("DELETE FROM platform_custom_command_access WHERE guild_id=?", (guild_id,))
             await shell.bot.db.execute("DELETE FROM platform_custom_commands WHERE guild_id=?", (guild_id,))
             shell.custom_selected_name = ""
             await i.response.edit_message(
