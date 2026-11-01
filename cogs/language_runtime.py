@@ -282,6 +282,32 @@ PARAM_EN = {
 }
 
 SETUP_EN_REPLACEMENTS = (
+    ("Centre de configuration SentriX", "SentriX Configuration Center"),
+    ("Configuration SentriX", "SentriX Configuration"),
+    ("État des fonctionnalités", "Feature status"),
+    ("Statut des fonctionnalités", "Feature status"),
+    ("Actives (", "Enabled ("),
+    ("Désactivées (", "Disabled ("),
+    ("À terminer (", "Needs setup ("),
+    ("Que veux-tu configurer ?", "What would you like to configure?"),
+    ("Que souhaitez-vous configurer ?", "What would you like to configure?"),
+    ("Choisir un module ou une fonction…", "Choose a module or feature…"),
+    ("Choisir un module ou une fonction...", "Choose a module or feature..."),
+    ("Langue du serveur", "Server language"),
+    ("Disable cette catégorie", "Disable this category"),
+    ("Désactiver cette catégorie", "Disable this category"),
+    ("Activer cette catégorie", "Enable this category"),
+    ("Chaque choix ouvre les réglages du module ; aucun changement sans action.",
+     "Choose a module to view its settings. Nothing changes without confirmation."),
+    ("modules actifs", "modules enabled"),
+    ("Aucun", "None"),
+    ("Règlement et vérification", "Rules and verification"),
+    ("Créer un embed", "Create an embed"),
+    ("Commandes personnalisées", "Custom commands"),
+    ("Messages enregistrés", "Saved messages"),
+    ("Messages programmés", "Scheduled messages"),
+    ("Préfixes officiels et personnalisés, séparés", "Separate official and custom prefixes"),
+    ("Français ou English", "French or English"),
     ("Centre de controle", "Control Center"), ("Centre de contrôle", "Control Center"),
     ("Base du serveur", "Server basics"), ("Roles automatiques", "Automatic roles"),
     ("Rôles automatiques", "Automatic roles"), ("Tickets & support", "Tickets & support"),
@@ -1249,15 +1275,29 @@ async def get_language(bot: commands.Bot, guild_id: int | None) -> str:
     if guild_id is None:
         return DEFAULT_LANGUAGE
     await _ensure_table(bot)
-    cached = bot.guild_language_cache.get(int(guild_id))
-    if cached in _VALID_LANGUAGES:
+    # Railway fait tourner un bot principal et un standby. Une sélection
+    # English sauvegardée dans un processus était gardée indéfiniment en
+    # mémoire par l'autre : setup et bienvenue pouvaient rester en français.
+    # Revalider le cache en base à intervalle borné, sans requête à chaque rendu.
+    checked = getattr(bot, "_sentrix_language_checked_at", None)
+    if checked is None:
+        checked = {}
+        bot._sentrix_language_checked_at = checked
+    gid = int(guild_id)
+    cached = bot.guild_language_cache.get(gid)
+    now_tick = time.monotonic()
+    if (
+        cached in _VALID_LANGUAGES
+        and now_tick - checked.get(gid, -1e10) < 12
+    ):
         return cached
     row = await bot.db.fetchone(
         "SELECT language FROM guild_language_settings WHERE guild_id = ?",
-        (int(guild_id),),
+        (gid,),
     )
     language = str(row["language"]) if row and row["language"] in _VALID_LANGUAGES else DEFAULT_LANGUAGE
-    bot.guild_language_cache[int(guild_id)] = language
+    bot.guild_language_cache[gid] = language
+    checked[gid] = now_tick
     return language
 
 
@@ -1313,6 +1353,11 @@ async def set_language(bot: commands.Bot, guild_id: int, language: str) -> None:
         (int(guild_id), language, timestamp),
     )
     bot.guild_language_cache[int(guild_id)] = language
+    checked = getattr(bot, "_sentrix_language_checked_at", None)
+    if checked is None:
+        checked = {}
+        bot._sentrix_language_checked_at = checked
+    checked[int(guild_id)] = time.monotonic()
 
     # Ne bloque pas le clic de sélection de langue pendant la réédition de tous les
     # panels persistants du serveur.
