@@ -215,7 +215,8 @@ class MassRole(commands.Cog):
         view.target = cible
         for item in view.children:
             if isinstance(item, TargetSelect):
-                item.default_values = []
+                for option in item.options:
+                    option.default = option.value == cible
                 item.placeholder = {
                     "members": "Cible : membres",
                     "bots": "Cible : bots",
