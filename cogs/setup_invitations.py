@@ -426,9 +426,16 @@ def _patch_setup_v74(bot: commands.Bot) -> None:
         if not await setup_ui._can_setup(self.bot, member, guild):
             return await setup_ui._permission_error(target)
 
-        # Le vrai /setup se publie dans le salon. Les contrôles restent
-        # vérifiés par la matrice native de permissions Discord.
-        if isinstance(target, commands.Context) and getattr(target, "interaction", None) is not None:
+        # Cet installateur s'exécute APRÈS V74 et écrasait son transport privé.
+        # /setup est une vraie interaction => réponse éphémère dès l'origine.
+        # +setup ne peut pas être éphémère : ne publier qu'une notice courte.
+        if isinstance(target, commands.Context):
+            if getattr(target, "interaction", None) is None:
+                return await target.send(
+                    "Ouvre **/setup** : le panneau de configuration sera visible uniquement par toi.",
+                    delete_after=15,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
             target = target.interaction
 
         view = cls(self.bot, guild, member.id)
@@ -437,8 +444,8 @@ def _patch_setup_v74(bot: commands.Bot) -> None:
             view.page = CATEGORY
             view.backend = view._new_backend(CATEGORY)
         await view.prepare()
-        # Une réponse éphémère n'est jamais convertible en message public.
-        return await panels.envoyer(target, view, ephemere=False)
+        # Toujours joindre la bannière dans le même message éphémère.
+        return await panels.envoyer(target, view, ephemere=True)
 
     current = setup_ui.OfficialSetup.send_setup
     if not getattr(current, "_sentrix_invitation_v74_final", False):
