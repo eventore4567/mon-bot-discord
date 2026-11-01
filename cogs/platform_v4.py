@@ -506,7 +506,7 @@ class PlatformV4(commands.Cog):
             ping_role = guild.get_role(ping_role_id)
             if ping_role is None or ping_role.is_default():
                 raise ValueError("Le rôle à mentionner n'existe plus.")
-            if not ping_role.mentionable and not guild.me.guild_permissions.mention_everyone:
+            if not ping_role.mentionable and not (guild.me and guild.me.guild_permissions.mention_everyone):
                 raise ValueError("SentriX ne peut pas mentionner ce rôle : active ses mentions ou accorde la permission adaptée.")
         command_id = int(data.get("id") or 0)
         old = None
@@ -515,6 +515,10 @@ class PlatformV4(commands.Cog):
             if not row:
                 raise ValueError("Commande introuvable.")
             old = dict(row)
+            # Les anciens appelants du Dashboard ne connaissent pas encore
+            # ping_role_id : une édition sans ce champ ne doit pas effacer le ping.
+            if "ping_role_id" not in data:
+                ping_role_id = int(old.get("ping_role_id") or 0)
             await self.bot.db.execute(
                 "UPDATE platform_custom_commands SET name=?,response=?,embed_title=?,embed_color=?,ping_role_id=?,enabled=?,updated_at=? WHERE id=? AND guild_id=?",
                 (name, response, str(data.get("embed_title") or "")[:200], int(data.get("embed_color") or 8228095) & 0xFFFFFF, ping_role_id, int(bool(data.get("enabled", True))), now(), command_id, guild.id),
