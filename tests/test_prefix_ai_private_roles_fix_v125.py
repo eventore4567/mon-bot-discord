@@ -64,11 +64,11 @@ async def test_ai_uses_image_from_current_message_without_polluting_next_request
     assert isinstance(generate.await_args.args[0], str)
 
 
-def test_private_setup_acks_before_loading():
+def test_public_setup_acks_before_loading():
     code = source("sentrix_v95_runtime.py")
     portion = code.split('if str(getattr(command, "qualified_name", "")).casefold().strip() == "setup":',1)[1]
-    assert "defer(ephemeral=True, thinking=True)" in portion
-    assert portion.index("defer(ephemeral=True, thinking=True)") < portion.index("setup.send_setup(interaction)")
+    assert "defer(ephemeral=False, thinking=True)" in portion
+    assert portion.index("defer(ephemeral=False, thinking=True)") < portion.index("setup.send_setup(interaction)")
 
 
 def test_custom_role_select_numeric_modal_and_embed_option():
@@ -85,4 +85,27 @@ def test_custom_role_select_numeric_modal_and_embed_option():
     assert "message.channel.send(content=ping, embed=embed" in platform
     for name in ("main.py", "cogs/ai.py", "cogs/setup_custom_commands.py",
                  "cogs/platform_v4.py", "sentrix_v95_runtime.py"):
+        ast.parse(source(name), filename=name)
+
+
+def test_custom_prefix_applies_to_native_commands_and_cache_refreshes():
+    custom = source("cogs/custom_commands.py")
+    main = source("main.py")
+    assert 'self.bot.prefix_cache[ctx.guild.id] = prefixe' in custom
+    assert 'Les commandes personnalisées se lancent' not in custom
+    assert 'prefix_cache_refreshed' in main
+    assert 'now - last_refresh >= 20' in main
+
+
+def test_image_only_followup_and_public_setup_transport():
+    ai = source("cogs/ai.py")
+    assert "_PENDING_IMAGE_FOLLOWUPS" in ai
+    assert "image_attachments and (pending or reply_to_bot)" in ai
+    assert "_PASSIVE_IMAGE_CONTEXT.set(tuple(images))" in ai
+    assert "ephemeral=False" in source("cogs/setup_experience_v74.py")
+    assert "ephemere=False" in source("cogs/setup_invitations.py")
+    assert "interaction.guild.id != self.guild.id" in source("cogs/setup_components_v73.py")
+    for name in ("cogs/ai.py", "cogs/setup_experience_v74.py",
+                 "cogs/setup_components_v73.py", "cogs/setup_invitations.py",
+                 "main.py", "cogs/custom_commands.py"):
         ast.parse(source(name), filename=name)
