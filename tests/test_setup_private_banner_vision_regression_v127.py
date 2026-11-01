@@ -345,7 +345,7 @@ async def test_canonical_pipeline_sends_image_to_responses_api_instead_of_text_o
     payload = generate.await_args.args[0]
     assert payload[0]["content"][0]["type"] == "input_text"
     assert payload[0]["content"][1] == {
-        "type": "input_image", "image_url": screenshot, "detail": "low"
+        "type": "input_image", "image_url": screenshot, "detail": "high"
     }
     assert "images fournies" in generate.await_args.kwargs["instructions"]
 
