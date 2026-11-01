@@ -369,28 +369,84 @@ class SentriXSetupV74(v73.SentriXSetupV73):
 
         states = await setup_ui.module_switch_states(self.bot, self.guild.id)
         actifs = sum(state == "enabled" for state in states.values())
+        actifs_labels = [
+            label for key, label in setup_ui.MODULE_SWITCHES
+            if states.get(key) == "enabled"
+        ]
+        inactifs_labels = [
+            label for key, label in setup_ui.MODULE_SWITCHES
+            if states.get(key) == "disabled"
+        ]
+        manquants_labels = [
+            label for key, label in setup_ui.MODULE_SWITCHES
+            if states.get(key) in {"not_configured", "empty"}
+        ]
         container = discord.ui.Container()
+        v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
                     "# Configuration SentriX\n"
                     f"**{self.guild.name}** · **{actifs}/{len(setup_ui.MODULE_SWITCHES)}** modules actifs\n"
-                    "Choisis un module, puis configure-le. Les réglages sont conservés."
+                    "Choisis une fonctionnalité pour modifier ses réglages."
                 ),
                 accessory=v73._thumbnail(self.bot),
             )
         )
+        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.TextDisplay(
+            "**Actifs :** " + (", ".join(actifs_labels) or "Aucun") + "\n"
+            "**Désactivés :** " + (", ".join(inactifs_labels) or "Aucun") + "\n"
+            "**À configurer :** " + (", ".join(manquants_labels) or "Aucun")
+        ))
+
+        # Emojis d'APPLICATION déjà téléversés : jamais de copie sur le serveur.
+        # Chaque catégorie reçoit son dessin propre ; animation seulement pour
+        # les états vivants, avec repli Unicode tant que le cache n'est pas prêt.
+        from utils import sentrix_emojis
+        categories_emoji = {
+            "security": "bouclier",
+            "moderation": "mod",
+            "tickets": "ticket",
+            "welcome": "member_join",
+            "goodbye": "member_leave",
+            "roles": "role",
+            "logs": "logs",
+            "levels": "level",
+            "notifications": "notification",
+            "music": "musique",
+            "ai": "ai",
+            "invitations": "tracking",
+        }
+        # Les pages comme Invitations et Musique ont leur propre état réel :
+        # ne pas afficher « Désactivé » uniquement parce qu'elles ne font
+        # pas partie des 12 interrupteurs de l'ancien menu.
+        details = await self._effective_states()
+
+        def _etat_page(key: str) -> str:
+            status = states.get(key)
+            if status == "enabled":
+                return "Actif"
+            if status in {"not_configured", "empty"}:
+                return "À configurer"
+            if status == "disabled":
+                return "Désactivé"
+            detail = str(details.get(key, "")).upper()
+            if "ACTIF" in detail and "INACTIF" not in detail:
+                return "Actif"
+            if "INACTIF" in detail:
+                return "Désactivé"
+            return "À configurer"
 
         modules = [
             discord.SelectOption(
                 label=CATEGORY_META[key][1][:100],
                 value=key,
-                description=(
-                    "Actif" if states.get(key) == "enabled"
-                    else "À configurer" if states.get(key) in {"not_configured", "empty"}
-                    else "Désactivé"
+                description=_etat_page(key),
+                emoji=(
+                    sentrix_emojis.partiel(categories_emoji.get(key, ""))
+                    or CATEGORY_META[key][0]
                 ),
-                emoji=CATEGORY_META[key][0],
             )
             for key in CATEGORY_ORDER if key in CATEGORY_META
         ]
@@ -424,10 +480,13 @@ class SentriXSetupV74(v73.SentriXSetupV73):
                 from .language_official_bridge import OfficialLanguageSelect
                 panneau = discord.ui.LayoutView(timeout=180)
                 bloc = discord.ui.Container()
+                v73.poser_banniere(bloc)
                 bloc.add_item(discord.ui.TextDisplay("## Langue du serveur"))
                 bloc.add_item(discord.ui.ActionRow(OfficialLanguageSelect(self.backend)))
                 panneau.add_item(bloc)
-                return await interaction.response.send_message(view=panneau, ephemeral=True)
+                return await interaction.response.send_message(
+                    **v73.joindre_banniere({"view": panneau}), ephemeral=True
+                )
             self.page = "logs" if selected == "soundboard" else selected
             self.backend = self._new_backend(self.page)
             if selected == "soundboard":

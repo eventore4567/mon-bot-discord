@@ -457,26 +457,10 @@ async def synchroniser(bot, *, forcer: bool = False) -> dict[str, int]:
         _SYNCHRONISE = True
         return bilan
 
-    # Version précédente encore en place : on efface avant de reposer. Un
-    # emoji d'application n'est pas modifiable en place, et `create` sur un nom
-    # existant échoue — sans cette purge, les anciennes icônes resteraient
-    # pour toujours.
-    if TEMOIN not in deja:
-        a_effacer = [i for n, i in deja.items() if n.startswith(PREFIXE)]
-        if a_effacer:
-            logger.info(
-                "Pack d'icônes v%s : remplacement de %s icône(s).",
-                VERSION_PACK, len(a_effacer),
-            )
-        for item in a_effacer:
-            try:
-                await item.delete()
-                bilan["remplaces"] += 1
-            except Exception:
-                logger.warning("Icône %s non supprimée.", getattr(item, "name", "?"), exc_info=True)
-            await asyncio.sleep(DELAI_ENTRE_ENVOIS)
-        deja = {}
-
+    # Ne jamais purger tout le pack si le témoin de version manque.
+    # Les emojis existants ont des IDs utilisés par les panneaux déjà publiés ;
+    # un déploiement ne doit ni les casser ni les téléverser à nouveau.
+    # On ajoute seulement les noms manquants, de façon idempotente.
     for nom, item in deja.items():
         if nom.startswith(PREFIXE):
             _RESOLUS[nom] = str(item)

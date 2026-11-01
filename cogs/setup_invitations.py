@@ -425,16 +425,27 @@ def _patch_setup_v74(bot: commands.Bot) -> None:
         member = getattr(target, "author", None) or getattr(target, "user", None)
         if not await setup_ui._can_setup(self.bot, member, guild):
             return await setup_ui._permission_error(target)
+
+        # Cet installateur s'exécute APRÈS V74 et écrasait son transport privé.
+        # /setup est une vraie interaction => réponse éphémère dès l'origine.
+        # +setup ne peut pas être éphémère : ne publier qu'une notice courte.
+        if isinstance(target, commands.Context):
+            if getattr(target, "interaction", None) is None:
+                return await target.send(
+                    "Ouvre **/setup** : le panneau de configuration sera visible uniquement par toi.",
+                    delete_after=15,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            target = target.interaction
+
         view = cls(self.bot, guild, member.id)
         requested = _requested_setup_category(target)
         if requested == CATEGORY:
             view.page = CATEGORY
             view.backend = view._new_backend(CATEGORY)
         await view.prepare()
-        # Ne jamais envoyer cette vue directement : elle référence
-        # attachment://banner_config.webp et doit donc passer par le transport
-        # qui joint view.fichiers() dans le même payload.
-        return await panels.envoyer(target, view)
+        # Toujours joindre la bannière dans le même message éphémère.
+        return await panels.envoyer(target, view, ephemere=True)
 
     current = setup_ui.OfficialSetup.send_setup
     if not getattr(current, "_sentrix_invitation_v74_final", False):

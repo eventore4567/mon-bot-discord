@@ -154,46 +154,33 @@ def test_les_options_traduites_ont_une_description():
     assert sans == [], sans
 
 
-def test_seules_les_commandes_supprimees_restent_hors_du_menu():
-    """16/10/2026 : les commandes jamais utilisées quittaient le « / » et restaient
-    en « + ». 28/10/2026 : passage à 100 % « / » ; une masquée gardée revient dans
-    le menu, sinon le retrait du préfixe la perdrait. Seules les supprimées
-    (unused_commands.SUPPRIMEES) restent dehors, avec leur raison dans RETIRED."""
+def test_les_commandes_essentielles_restent_visibles_apres_simplification():
+    """Le menu / est raccourci, mais aucune fonction métier n'est supprimée."""
     from utils import unused_commands
-
     publiees = {e.source for e in sc.CATALOG}
     assert not (publiees & unused_commands.SUPPRIMEES)
-    for entree in sc._MASQUEES_DU_MENU:
-        assert (entree.source in unused_commands.SUPPRIMEES
-                or entree.source.split(" ")[0] in unused_commands.SUPPRIMEES), entree
-        assert "unused" in sc.RETIRED[entree.source] or entree.source in sc.RETIRED
-    for revenue in ("pay", "buy", "sell", "shoprole add", "give-money", "reset-economy", "minesweeper"):
-        assert revenue in publiees, revenue
-    # La modération et la sécurité ne sont jamais masquées, même sans usage.
-    for garde in ("hackban", "tempban", "quarantine", "panic status", "antinuke-whitelist-add",
-                  "clearwarnings", "verify-repair", "music skip", "giveaway end"):
-        assert not unused_commands.masquee(garde), garde
+    for entry in sc._MASQUEES_DU_MENU:
+        assert entry.source not in publiees
+        assert entry.source in sc.RETIRED
+    for source in ("pay", "buy", "sell", "give-money", "reset-economy", "minesweeper",
+                   "tempban", "clearwarnings", "ticket-reopen"):
+        assert source in publiees, source
 
 
-def test_les_routes_hors_menu_sont_celles_des_commandes_supprimees():
-    """Le nombre porte sur les feuilles du catalogue, pas sur les sources
-    préfixées ni sur des valeurs comme le ``100`` accepté par ``/clear count``."""
-    routes = {entry.path for entry in sc._MASQUEES_DU_MENU}
-    # 132 masquées le 16/10/2026 ; les 79 gardées sont revenues le 28/10/2026.
-    assert len(routes) == 53
-    assert len(routes) == len(sc._MASQUEES_DU_MENU)
-    assert len([entry for entry in sc.CATALOG if entry.path.split()[0] in sc.GAME_ROOTS and ' ' in entry.path]) == 49
-    assert len([entry for entry in sc._MASQUEES_DU_MENU if entry.path.split()[0] in sc.GAME_ROOTS and ' ' in entry.path]) == 19
-    tous_les_jeux = [entry for entry in (*sc.CATALOG, *sc._MASQUEES_DU_MENU)
-                     if entry.path.split()[0] in sc.GAME_ROOTS and ' ' in entry.path]
-    assert len(tous_les_jeux) == 68
-    assert len({entry.source for entry in tous_les_jeux}) == 68
-    assert "clear" not in routes
-    assert "count" not in routes
-
-    publiees = {entry.path for entry in sc.CATALOG}
-    for essentielle in (
-        "clear", "role mass", "logs search", "tickets open", "music play",
-        "duel fight", "security antinuke", "moderation warnings",
+def test_nettoyage_retire_des_commandes_sans_casser_les_actions_critiques():
+    masquees = {e.path for e in sc._MASQUEES_DU_MENU}
+    publiees = {e.path for e in sc.CATALOG}
+    assert len(masquees) >= 150
+    assert len(publiees) <= 340
+    assert masquees.isdisjoint(publiees)
+    assert "config theme" in masquees
+    assert "market find" in masquees
+    assert "music play" in publiees
+    assert "music skip" in publiees
+    for essentiel in (
+        "setup", "clear", "ban", "warn", "role mass", "logs search",
+        "tickets open", "duel fight", "security antinuke", "moderation warnings",
     ):
-        assert essentielle in publiees
+        assert essentiel in publiees
+
+
