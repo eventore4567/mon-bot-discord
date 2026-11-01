@@ -107,7 +107,7 @@ async def api_options(dashboard, request: web.Request):
         "settings": settings,
         "text_channels": [{"id": str(c.id), "name": c.name} for c in guild.text_channels],
         "roles": [{"id": str(r.id), "name": r.name} for r in guild.roles if not r.is_default() and not r.managed],
-        "prefix": str((await service.bot.db.get_guild_config(guild.id))["prefix"] or "+"),
+        "prefix": await __import__("utils.command_prefixes", fromlist=["get_custom_prefix"]).get_custom_prefix(service.bot, guild.id),
     })
 
 
