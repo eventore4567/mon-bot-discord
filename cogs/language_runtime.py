@@ -929,8 +929,8 @@ def _english_setup_text(value: str | None) -> str | None:
     for source, target in SETUP_EN_REPLACEMENTS:
         # Do not translate "active" inside "inactive" or "Activer" inside
         # "Désactiver": partial substitutions made English screens unreadable.
-        left = r"(?<!\\w)" if source[:1].isalnum() else ""
-        right = r"(?!\\w)" if source[-1:].isalnum() else ""
+        left = r"(?<!\w)" if source[:1].isalnum() else ""
+        right = r"(?!\w)" if source[-1:].isalnum() else ""
         text = re.sub(left + re.escape(source) + right, lambda match: target, text)
     return text
 
