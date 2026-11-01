@@ -53,6 +53,10 @@ class DisableGuardSurvivesReapplicationTests(unittest.IsolatedAsyncioTestCase):
     intercalée) sans booter les 51 extensions."""
 
     def setUp(self):
+        from cogs import setup_v2_core
+        # The runtime caches authoritative module switches per guild. Isolate
+        # fake-enabled and fake-disabled cases even though they share ID 999.
+        setup_v2_core.invalidate_module_cache(999, "ai")
         self._original_generate = ai_service.generate
 
     def tearDown(self):
