@@ -423,8 +423,31 @@ def _patch_setup_v74(bot: commands.Bot) -> None:
     async def final_send_setup(self, target):
         guild = getattr(target, "guild", None)
         member = getattr(target, "author", None) or getattr(target, "user", None)
+
+        # Une commande +setup ne peut pas être éphémère dans Discord.
+        # /setup et /config utilisent une INTERACTION avec visibilité fixée
+        # AVANT la moindre requête SQL ou génération de panneau.
+        slash = getattr(target, "interaction", None) if isinstance(target, commands.Context) else target
+        if isinstance(slash, discord.Interaction):
+            if not slash.response.is_done():
+                await slash.response.defer(ephemeral=True, thinking=True)
+            elif slash.response.type == discord.InteractionResponseType.deferred_channel_message:
+                # Une autre couche aurait pu différer en PUBLIC. Le drapeau
+                # ephemeral est alors immuable : ne JAMAIS éditer cette réponse
+                # avec un panneau de configuration sensible.
+                try:
+                    original = await slash.original_response()
+                    is_private = bool(getattr(getattr(original, "flags", None), "ephemeral", False))
+                except (discord.HTTPException, AttributeError):
+                    is_private = False
+                if not is_private:
+                    logger.error("Setup slash initialement différé en public : panneau bloqué pour confidentialité.")
+                    return await slash.followup.send(
+                        "Pour ta confidentialité, relance /setup. Aucun panneau public n'a été envoyé.",
+                        ephemeral=True,
+                    )
         if not await setup_ui._can_setup(self.bot, member, guild):
-            return await setup_ui._permission_error(target)
+            return await setup_ui._permission_error(slash if isinstance(slash, discord.Interaction) else target)
 
         # Cet installateur s'exécute APRÈS V74 et écrasait son transport privé.
         # /setup est une vraie interaction => réponse éphémère dès l'origine.
@@ -437,6 +460,8 @@ def _patch_setup_v74(bot: commands.Bot) -> None:
                     allowed_mentions=discord.AllowedMentions.none(),
                 )
             target = target.interaction
+        elif isinstance(slash, discord.Interaction):
+            target = slash
 
         view = cls(self.bot, guild, member.id)
         view._author_member = member
