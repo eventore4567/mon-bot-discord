@@ -107,15 +107,20 @@ async def _images_from_discord_attachments(attachments) -> list[str]:
     for attachment in list(attachments)[:3]:
         mime = str(getattr(attachment, "content_type", "") or "").split(";")[0].lower()
         filename = str(getattr(attachment, "filename", "") or "").lower()
-        if mime not in {"image/png", "image/jpeg", "image/webp", "image/gif"} and not (
-            not mime and filename.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif"))
-        ):
+        # Certains clients Discord transmettent application/octet-stream
+        # pour une capture PNG. L'extension ne suffit pas à faire confiance au
+        # fichier : Pillow valide les octets juste après le téléchargement.
+        known_image = mime in {"image/png", "image/jpeg", "image/webp", "image/gif"}
+        image_filename = filename.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif"))
+        if not known_image and not image_filename:
             continue
-        if int(getattr(attachment, "size", 0) or 0) > 4 * 1024 * 1024:
+        max_bytes = 12 * 1024 * 1024
+        if int(getattr(attachment, "size", 0) or 0) > max_bytes:
+            logger.info("Capture Discord trop volumineuse pour vision (12 Mo max).")
             continue
         try:
             raw = await attachment.read()
-            if len(raw) > 4 * 1024 * 1024:
+            if len(raw) > max_bytes:
                 continue
             # Pillow valide les octets. Les GIF animés sont réduits à une
             # image, et les autres formats peuvent être compressés si besoin.
@@ -914,15 +919,26 @@ class Ai(commands.Cog, name="Ai"):
         command = "sentrix-passif" if reply_to is not None else "sentrix"
         history = self.histories.get(author.id, [])
         author_name = getattr(author, "display_name", None) or str(author)
-        images = await _images_from_discord_attachments(attachments or [])
-        # Les wrappers historiques n'acceptent pas d'argument attachments.
-        # on_message a déjà validé l'image et l'a conservée dans le ContextVar.
-        if not images:
-            images = list(_PASSIVE_IMAGE_CONTEXT.get())
-        if attachments and not images and any(
-            mot in question.casefold() for mot in ("image", "photo", "capture", "gif", "regarde", "voir")
-        ):
-            return await _send(content="Je peux analyser jusqu'à 3 images PNG, JPG, WebP ou GIF (4 Mo max chacune).")
+        # Toutes les couches de compatibilité (V57, natural fallback, HA,
+        # reply recovery) reçoivent reply_to mais pas le paramètre attachments.
+        # Lire les pièces jointes du vrai message, pas seulement le ContextVar
+        # qui peut être vide si une couche de secours a gagné la course.
+        images = list(_PASSIVE_IMAGE_CONTEXT.get())
+        explicit_attachments = (
+            list(attachments) if attachments is not None else
+            list(getattr(reply_to, "attachments", ()) or ())
+        )
+        if not images and explicit_attachments:
+            images = await _images_from_discord_attachments(explicit_attachments)
+        if not images and explicit_attachments:
+            return await _send(
+                content="Je n'ai pas pu lire cette image. Utilise un fichier PNG, JPG, WebP ou GIF de 12 Mo maximum."
+            )
+        if images:
+            logger.info(
+                "Vision Discord transmise à l'IA : %s image(s), message=%s",
+                len(images), getattr(reply_to, "id", None),
+            )
         answer = await self.ask_ai(question, history, author_name=author_name,
                                     guild_id=guild_id, channel_id=channel_id,
                                     user_id=author.id, command=command, image_urls=images)
