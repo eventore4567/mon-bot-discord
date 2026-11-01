@@ -260,7 +260,10 @@ async def _goodbye_destination(bot, guild: discord.Guild, *, require_embed: bool
     )
 
 
-async def _send_welcome_dm(member: discord.Member, presentation: dict, body: str) -> bool | None:
+async def _send_welcome_dm(
+    member: discord.Member, presentation: dict, body: str, *,
+    language: str = "fr",
+) -> bool | None:
     """Copie privée de la bienvenue. None = non demandée ; False = MP fermés.
 
     Un MP refusé n'est pas une erreur du module : beaucoup de membres ferment
@@ -268,7 +271,13 @@ async def _send_welcome_dm(member: discord.Member, presentation: dict, body: str
     """
     if not presentation.get("dm"):
         return None
-    title = _without_duplicate_member_mention(_format_welcome(presentation["title"], member), member)
+    title = _without_duplicate_member_mention(
+        _format_welcome(
+            _localized_default_template(presentation["title"], "welcome_title", language),
+            member,
+        ),
+        member,
+    )
     try:
         await member.send(content=f"**{title}**\n{body}"[:2000], allowed_mentions=discord.AllowedMentions.none())
     except (discord.HTTPException, AttributeError):
@@ -334,7 +343,7 @@ async def _send_welcome(bot, member: discord.Member, *, test: bool = False) -> t
             await channel.send(content=content, allowed_mentions=mentions)
         except discord.HTTPException as exc:
             return False, f"Discord a refusé l’envoi : {exc}"
-        return True, _welcome_result(channel, test, await _send_welcome_dm(member, presentation, body))
+        return True, _welcome_result(channel, test, await _send_welcome_dm(member, presentation, body, language=language))
     # Le vrai @ (cliquable, ouvre le profil) est le `content` posé au-dessus du
     # panneau ; dans le titre et le corps, {user} devient le nom. Décision du
     # 30/09 (f66f1811, « accueils propres ») : deux @ identiques l'un sous
@@ -380,7 +389,7 @@ async def _send_welcome(bot, member: discord.Member, *, test: bool = False) -> t
         )
     except discord.HTTPException as exc:
         return False, f"Discord a refusé l’envoi : {exc}"
-    return True, _welcome_result(channel, test, await _send_welcome_dm(member, presentation, body))
+    return True, _welcome_result(channel, test, await _send_welcome_dm(member, presentation, body, language=language))
 
 
 async def _send_goodbye(bot, member: discord.Member, *, test: bool = False) -> discord.abc.Messageable | None:
