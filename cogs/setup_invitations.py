@@ -59,6 +59,31 @@ async def _prepare_private_setup_interaction(interaction: discord.Interaction) -
     return True
 
 
+class PrivateSetupLauncher(discord.ui.View):
+    """Bouton public SANS données de configuration, ouvrant /setup en privé.
+
+    Une commande préfixée Discord n'a pas de réponse ephemeral : ce bouton
+    crée sa propre interaction, ce qui permet enfin le setup privé pour +/!setup.
+    """
+
+    def __init__(self, setup, author_id: int, guild_id: int):
+        super().__init__(timeout=1800)
+        self.setup = setup
+        self.author_id = int(author_id)
+        self.guild_id = int(guild_id)
+
+    @discord.ui.button(label="Ouvrir mon setup privé", style=discord.ButtonStyle.primary)
+    async def open_setup(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.guild_id != self.guild_id or interaction.user.id != self.author_id:
+            return await interaction.response.send_message(
+                "Lance ta propre commande setup pour ouvrir ton panneau.",
+                ephemeral=True,
+            )
+        # Lance EXACTEMENT la même autorité que /setup : permission contrôlée,
+        # defer(ephemeral=True) avant la construction et navigation privée.
+        return await self.setup.send_setup(interaction)
+
+
 CATEGORY = "invitations"
 LABEL = "Invitations"
 # On accepte aussi la faute montrée en production : +setup invition.
@@ -460,6 +485,19 @@ def _patch_setup_v74(bot: commands.Bot) -> None:
         guild = getattr(target, "guild", None)
         member = getattr(target, "author", None) or getattr(target, "user", None)
 
+        if isinstance(target, commands.Context) and target.interaction is None:
+            # Un Context.message ne dispose PAS du drapeau ephemeral.
+            # Au lieu d'un texte inutile qui disparaît après 15 secondes,
+            # laisser un bouton lançable qui crée une vraie interaction
+            # éphémère, sans exposer la configuration dans le salon.
+            if guild is None or member is None:
+                return await target.channel.send("La configuration s'ouvre depuis un serveur.")
+            return await target.channel.send(
+                "Clique sur **Ouvrir mon setup privé** pour configurer SentriX.",
+                view=PrivateSetupLauncher(self, member.id, guild.id),
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+
         # Discord ne sait pas envoyer un panneau éphémère depuis +setup.
         # Les commandes slash doivent être acquittées AVANT le premier accès DB.
         slash = (
@@ -488,12 +526,6 @@ def _patch_setup_v74(bot: commands.Bot) -> None:
             )
 
         if isinstance(target, commands.Context):
-            if slash is None:
-                return await target.send(
-                    "Ouvre **/setup** : le panneau de configuration sera visible uniquement par toi.",
-                    delete_after=15,
-                    allowed_mentions=discord.AllowedMentions.none(),
-                )
             target = slash
         elif isinstance(slash, discord.Interaction):
             target = slash
