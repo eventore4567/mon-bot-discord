@@ -388,13 +388,17 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             accessory=v73._thumbnail(self.bot),
         ))
         container.add_item(discord.ui.Separator())
+        from utils import sentrix_emojis as _status_icons
+        actif_icon = _status_icons.emoji("success") or "✅"
+        off_icon = _status_icons.emoji("lock") or "🔒"
+        waiting_icon = _status_icons.emoji("clock") or "⏳"
         container.add_item(discord.ui.TextDisplay(
-            "### État des fonctionnalités\n"
-            "**Actives**\n"
+            "### État des fonctionnalités\n\n"
+            f"{actif_icon} **Actives ({len(actifs)})**\n"
             f"{label_liste(actifs)}\n\n"
-            "**Désactivées**\n"
+            f"{off_icon} **Désactivées ({len(inactifs)})**\n"
             f"{label_liste(inactifs)}\n\n"
-            "**À terminer**\n"
+            f"{waiting_icon} **À terminer ({len(incomplets)})**\n"
             f"{label_liste(incomplets)}"
         ))
         container.add_item(discord.ui.Separator())
