@@ -110,6 +110,7 @@ MODULES: tuple[ModuleSpec, ...] = (
         _s("rewards", "Récompenses", "Paliers de niveaux et rôles attribués.", "levels-config"),
         _s("announce", "Annonces", "Activer et choisir le salon des montées de niveau.", "levels-config"),
         _s("appearance", "Profil & affichage", "Couleur, titre, footer et champs visibles.", "levels-config"),
+        _s("import", "Importer des données", "Importer XP, niveaux et argent depuis un export JSON.", "import-data"),
     )),
     ModuleSpec("economy", "Économie", "Banque, monnaie, boutique, inventaire et réputation.", (
         _s("currency", "Monnaie", "Emoji, affichage et paramètres économiques liés aux profils.", "levels-config"),
@@ -117,6 +118,7 @@ MODULES: tuple[ModuleSpec, ...] = (
         _s("shop", "Boutique", "Objets, rôles et achats disponibles.", "hint:+shop"),
         _s("inventory", "Inventaire", "Objets possédés et gestion des récompenses.", "hint:+inventory"),
         _s("reputation", "Réputation", "Cooldown et affichage de la réputation.", "levels-config"),
+        _s("import", "Importer des données", "Importer les soldes, XP et niveaux depuis un autre bot.", "import-data"),
     )),
     ModuleSpec("tickets", "Tickets", "Panels, formulaires, permissions et logs.", (
         _s("panels", "Panels", "Créer et gérer les panneaux de tickets.", "hint:+ticketsetup"),
@@ -732,6 +734,16 @@ async def _run_action(view, interaction: discord.Interaction) -> None:
         view.page = v4.PAGE_SUMMARY
     elif action == "levels-config":
         return await _open_levels_config(view, interaction)
+    elif action == "import-data":
+        from cogs.import_data import ImportSetupView
+        return await interaction.response.send_message(
+            "**Importer les données d'un autre bot**\n"
+            "Choisissez un fichier JSON, vérifiez l'aperçu, puis confirmez "
+            "l'ajout ou le remplacement des champs importés.",
+            view=ImportSetupView(view.bot, interaction.guild.id, interaction.user.id),
+            ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
     elif action.startswith("automation:"):
         return await _open_automation(view, interaction, action.split(":", 1)[1])
     elif action == "music-config":
