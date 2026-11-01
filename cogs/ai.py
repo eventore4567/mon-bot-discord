@@ -2407,7 +2407,7 @@ class Ai(commands.Cog, name="Ai"):
             return
 
         mentioned = self.bot.user is not None and self.bot.user in message.mentions
-        name_match = re.match(r"^(?:sentrix|ssentrix|sentri|snetri|snentrix)\\b", content, re.IGNORECASE)
+        name_match = re.match(r"^(?:sentrix|ssentrix|sentri|snetri|snentrix)\b", content, re.IGNORECASE)
         name_trigger = name_match is not None
         reference = getattr(message, "reference", None)
         referenced = getattr(reference, "resolved", None)
