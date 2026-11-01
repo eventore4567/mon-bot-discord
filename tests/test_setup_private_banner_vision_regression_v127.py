@@ -390,3 +390,108 @@ def test_only_native_custom_messages_bypass_legacy_information_banner():
     setup = (ROOT / "cogs/setup_invitations.py").read_text(encoding="utf-8")
     assert 'return await panels.envoyer(target, view, ephemere=False)' in setup
     assert 'PrivateSetupLauncher' not in setup
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("lang", "confirmation"),
+    [
+        ("fr", "**Ajouté par :** <@200>"),
+        ("en", "**Added by:** <@200>"),
+    ],
+)
+async def test_ticket_add_shows_exact_staff_member_and_audits_actor(lang, confirmation):
+    from cogs import tickets
+    selected_member = SimpleNamespace(id=300, mention="<@300>")
+    staff = SimpleNamespace(id=200, mention="<@200>")
+    chosen = SimpleNamespace(values=[selected_member], callback=None)
+    fake_view = SimpleNamespace(add_item=lambda _item: None)
+    guild = SimpleNamespace(id=100)
+    channel = SimpleNamespace(set_permissions=AsyncMock())
+    setup_interaction = SimpleNamespace(
+        response=SimpleNamespace(send_message=AsyncMock()),
+    )
+    submit_interaction = SimpleNamespace(
+        guild=guild, channel=channel, user=staff,
+        response=SimpleNamespace(),
+    )
+    self = SimpleNamespace(bot=SimpleNamespace())
+    with patch("cogs.tickets.discord.ui.UserSelect", return_value=chosen), patch(
+        "cogs.tickets.discord.ui.View", return_value=fake_view
+    ), patch("cogs.tickets.language_runtime.get_language", AsyncMock(return_value=lang)):
+        with patch("cogs.tickets.sx_panels.envoyer", AsyncMock()) as sent, patch(
+            "cogs.tickets.sx_panels.depuis_embed", side_effect=lambda e: e
+        ), patch("cogs.tickets.tickets_service.journaliser_evenement", AsyncMock()) as audit:
+            await tickets.Tickets.btn_add(self, setup_interaction, {"id": 18})
+            assert setup_interaction.response.send_message.await_args.kwargs["ephemeral"]
+            await chosen.callback(submit_interaction)
+    channel.set_permissions.assert_awaited_once_with(
+        selected_member, view_channel=True, send_messages=True,
+        read_message_history=True,
+    )
+    embed = sent.await_args.args[1]
+    assert confirmation in str(embed.to_dict())
+    assert "<@300>" in str(embed.to_dict())
+    assert audit.await_args.kwargs["acteur"] is staff
+    assert audit.await_args.kwargs["cible"] is selected_member
+    assert audit.await_args.kwargs["ticket_id"] == 18
+
+
+@pytest.mark.asyncio
+async def test_ticket_remove_shows_actor_and_audits_after_discord_success():
+    from cogs import tickets
+    member = SimpleNamespace(id=300, mention="<@300>")
+    staff = SimpleNamespace(id=200, mention="<@200>")
+    selected = SimpleNamespace(values=[member], callback=None)
+    guild = SimpleNamespace(id=100)
+    channel = SimpleNamespace(set_permissions=AsyncMock())
+    setup = SimpleNamespace(response=SimpleNamespace(send_message=AsyncMock()))
+    inter = SimpleNamespace(guild=guild, channel=channel, user=staff,
+                            response=SimpleNamespace())
+    with patch("cogs.tickets.discord.ui.UserSelect", return_value=selected), patch(
+        "cogs.tickets.discord.ui.View", return_value=SimpleNamespace(add_item=lambda _: None)
+    ), patch("cogs.tickets.language_runtime.get_language", AsyncMock(return_value="fr")):
+        with patch("cogs.tickets.sx_panels.envoyer", AsyncMock()) as sent, patch(
+            "cogs.tickets.sx_panels.depuis_embed", side_effect=lambda e: e
+        ), patch("cogs.tickets.tickets_service.journaliser_evenement", AsyncMock()) as audit:
+            await tickets.Tickets.btn_remove(SimpleNamespace(bot=SimpleNamespace()),
+                                             setup, {"id": 18, "user_id": 400})
+            await selected.callback(inter)
+    channel.set_permissions.assert_awaited_once_with(member, overwrite=None)
+    assert "**Retiré par :** <@200>" in str(sent.await_args.args[1].to_dict())
+    assert audit.await_args.args[2] == "ticket_member_remove"
+    assert audit.await_args.kwargs["acteur"] is staff
+
+
+def test_english_french_language_defaults_and_safe_duplicate_command_removal():
+    import discord
+    from discord.ext import commands
+    from cogs import commandes_retirees, language_runtime
+
+    assert language_runtime.DEFAULT_LANGUAGE == language_runtime.LANG_FR == "fr"
+    assert language_runtime.text_for_language(
+        language_runtime.DEFAULT_LANGUAGE, "Bonjour", "Hello"
+    ) == "Bonjour"
+    assert language_runtime.text_for_language("en", "Bonjour", "Hello") == "Hello"
+
+    duplicates = {
+        "ask", "chat", "rank", "buyrole", "embed-create",
+        "latency", "levelroles", "roleinfo",
+    }
+    assert duplicates <= commandes_retirees.A_RETIRER
+    bot = commands.Bot(command_prefix="+", intents=discord.Intents.none())
+
+    async def noop(ctx):
+        return None
+
+    for name in duplicates | {"ping", "help", "ai", "level"}:
+        if name == "help":
+            continue  # discord.py enregistre déjà son aide intégrée
+        bot.command(name=name)(noop)
+    removed = commandes_retirees.retirer(bot)
+    assert duplicates <= set(removed)
+    for name in duplicates:
+        assert bot.get_command(name) is None
+    for name in ("ping", "ai", "level"):
+        assert bot.get_command(name) is not None
