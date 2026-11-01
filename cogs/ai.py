@@ -106,7 +106,10 @@ async def _images_from_discord_attachments(attachments) -> list[str]:
     images = []
     for attachment in list(attachments)[:3]:
         mime = str(getattr(attachment, "content_type", "") or "").split(";")[0].lower()
-        if mime not in {"image/png", "image/jpeg", "image/webp", "image/gif"}:
+        filename = str(getattr(attachment, "filename", "") or "").lower()
+        if mime not in {"image/png", "image/jpeg", "image/webp", "image/gif"} and not (
+            not mime and filename.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif"))
+        ):
             continue
         if int(getattr(attachment, "size", 0) or 0) > 4 * 1024 * 1024:
             continue
@@ -912,6 +915,10 @@ class Ai(commands.Cog, name="Ai"):
         history = self.histories.get(author.id, [])
         author_name = getattr(author, "display_name", None) or str(author)
         images = await _images_from_discord_attachments(attachments or [])
+        # Les wrappers historiques n'acceptent pas d'argument attachments.
+        # on_message a déjà validé l'image et l'a conservée dans le ContextVar.
+        if not images:
+            images = list(_PASSIVE_IMAGE_CONTEXT.get())
         if attachments and not images and any(
             mot in question.casefold() for mot in ("image", "photo", "capture", "gif", "regarde", "voir")
         ):
