@@ -404,21 +404,9 @@ class SentriXSetupV73(discord.ui.LayoutView):
         return backend
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        # Le panneau est public, mais l'utilisation reste réservée aux personnes
-        # disposant des permissions Discord de configuration du serveur.
-        if interaction.guild is None or interaction.guild.id != self.guild.id or not await setup_ui._can_setup(
-            self.bot, interaction.user, interaction.guild
-        ):
-            await panels.envoyer(
-                interaction.response,
-                panels.depuis_embed(embeds.error("Tu peux voir ce panneau, mais tu n'as pas les permissions pour le modifier.")),
-                ephemere=True,
-            )
+        if int(interaction.user.id) != self.author_id:
+            await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Ce panneau appartient à une autre personne.')), ephemere=True)
             return False
-        # Les composants historiques utilisent author_id pour les opérations.
-        # Associer l'action à la personne qui clique, pas au créateur du panneau.
-        self.author_id = int(interaction.user.id)
-        self.backend.author_id = int(interaction.user.id)
         return True
 
     async def prepare(self) -> None:
