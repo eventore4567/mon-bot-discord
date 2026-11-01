@@ -40,10 +40,11 @@ class TargetSelect(discord.ui.Select):
             if isinstance(item, discord.ui.Button) and item.custom_id == "sentrix:mass:confirm":
                 item.disabled = False
         label = {"members": "members", "bots": "bots", "all": "everyone"}[self.owner.target]
+        label_fr = {"members": "membres", "bots": "bots", "all": "tous"}[self.owner.target]
         desc = (
             f"Target: **{label}**. Click Confirm to {self.owner.action} the role."
             if self.owner.english else
-            f"Cible : **{{'members': 'membres', 'bots': 'bots', 'all': 'tous'}[self.owner.target]}**. "
+            f"Cible : **{label_fr}**. "
             f"Cliquez sur Confirmer pour {'ajouter' if self.owner.action == 'add' else 'retirer'} le rôle."
         )
         if parent is not None:
