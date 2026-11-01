@@ -310,7 +310,11 @@ class CustomCommands(commands.Cog):
         if not 1 <= len(prefixe) <= 3 or " " in prefixe or prefixe.startswith("/"):
             return await panels.envoyer(ctx, panels.Panneau(titre="Préfixe invalide", sous_titre="1 à 3 caractères, sans espace ni « / ».", kind="danger"))
         await self.bot.db.set_guild_config(ctx.guild.id, "prefix", prefixe)
-        await panels.envoyer(ctx, panels.Panneau(titre="Préfixe enregistré", sous_titre=f"Les commandes personnalisées se lancent avec `{prefixe}`.", kind="success"))
+        # Le préfixe est global : les commandes natives et personnalisées partagent
+        # la même configuration. Invalider le cache lors d'un changement manuel.
+        if hasattr(self.bot, "prefix_cache"):
+            self.bot.prefix_cache[ctx.guild.id] = prefixe
+        await panels.envoyer(ctx, panels.Panneau(titre="Préfixe enregistré", sous_titre=f"Toutes les commandes utilisent `{prefixe}` ou `+`. Les commandes / restent disponibles.", kind="success"))
 
     @customcmd.command(name="delete-trigger", help="Supprimer le message qui lance la commande (on/off).")
     async def customcmd_delete_trigger(self, ctx: commands.Context, etat: str):
