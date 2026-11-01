@@ -6,6 +6,7 @@ import os
 import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -98,3 +99,26 @@ def test_dashboard_persists_both_prefixes_separately():
         "utils/command_prefixes.py", "web/platform_v4.py",
     ):
         ast.parse((ROOT / path).read_text(encoding="utf-8"), filename=path)
+
+
+
+@pytest.mark.asyncio
+async def test_passive_vision_survives_legacy_reply_signature():
+    from cogs.ai import Ai, _PASSIVE_IMAGE_CONTEXT
+    author = SimpleNamespace(id=123, display_name="Membre")
+    channel = SimpleNamespace(
+        id=456, guild=SimpleNamespace(id=789), send=AsyncMock()
+    )
+    fake = SimpleNamespace(
+        histories={}, ask_ai=AsyncMock(return_value="Je vois un panneau.")
+    )
+    token = _PASSIVE_IMAGE_CONTEXT.set(("data:image/jpeg;base64,ZGF0YQ==",))
+    try:
+        with patch("cogs.ai._images_from_discord_attachments", AsyncMock(return_value=[])):
+            await Ai.send_sentrix_reply(fake, channel, author, "Décris cette image")
+    finally:
+        _PASSIVE_IMAGE_CONTEXT.reset(token)
+    assert fake.ask_ai.await_args.kwargs["image_urls"] == [
+        "data:image/jpeg;base64,ZGF0YQ=="
+    ]
+    channel.send.assert_awaited()
