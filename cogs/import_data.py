@@ -67,6 +67,7 @@ class ImportConfirm(discord.ui.View):
         self.author_id = author_id
         self.records = records
         self.english = english
+        self._submitted = False
         # Decorated callbacks (self.merge/self.replace/self.cancel) are methods,
         # not Button objects in discord.py. Update the actual View children.
         labels = {
@@ -79,6 +80,13 @@ class ImportConfirm(discord.ui.View):
                 item.label = labels[item.label]
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if self._submitted:
+            await interaction.response.send_message(
+                "This import has already been confirmed or cancelled." if self.english
+                else "Cette importation a déjà été confirmée ou annulée.",
+                ephemeral=True,
+            )
+            return False
         user = interaction.user
         if (interaction.guild is None or interaction.guild.id != self.guild_id
                 or user.id != self.author_id
@@ -92,6 +100,15 @@ class ImportConfirm(discord.ui.View):
         return True
 
     async def apply(self, interaction: discord.Interaction, *, replace: bool) -> None:
+        # The source view is embedded in a Components V2 panel; stopping only
+        # the source view does not unregister the panel's buttons. Guard against
+        # double-clicks independently of Discord message updates.
+        if self._submitted:
+            return await interaction.response.send_message(
+                "Import already processed." if self.english else
+                "Importation déjà traitée.", ephemeral=True,
+            )
+        self._submitted = True
         await interaction.response.defer(ephemeral=True, thinking=True)
         changed = 0
         try:
@@ -150,6 +167,7 @@ class ImportConfirm(discord.ui.View):
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self._submitted = True
         self.stop()
         await interaction.response.edit_message(view=None)
 
