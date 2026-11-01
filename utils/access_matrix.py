@@ -1031,6 +1031,10 @@ async def evaluate(bot, *, command_name: Any, author: Any, guild: Any) -> Access
     # interactif. Cette exception ne s'applique qu'à l'entrée, pas aux autres
     # commandes de configuration ni aux sous-commandes.
     if name == "setup":
+        if _is_guild_owner(author, guild):
+            return AccessDecision(True, policy="guild-owner:setup-recovery")
+        if _is_administrator(author) or _has_discord_permission(author, "manage_guild"):
+            return AccessDecision(True, policy="setup:editable-entry")
         return AccessDecision(True, policy="setup:readonly-entry")
 
     # (4) module désactivé
