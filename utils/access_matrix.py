@@ -229,6 +229,8 @@ DISCORD_PERMISSION_COMMANDS: dict[str, str] = {
     "disconnect": "move_members",
     "role-snapshot": "manage_roles",
     "role-restore": "manage_roles",
+    "role": "manage_roles",
+    "import-data": "manage_guild",
     "giverole": "manage_roles",
     "removerole": "manage_roles",
     "protectmember": "manage_roles",
