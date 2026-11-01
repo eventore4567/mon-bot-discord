@@ -369,17 +369,36 @@ class SentriXSetupV74(v73.SentriXSetupV73):
 
         states = await setup_ui.module_switch_states(self.bot, self.guild.id)
         actifs = sum(state == "enabled" for state in states.values())
+        actifs_labels = [
+            label for key, label in setup_ui.MODULE_SWITCHES
+            if states.get(key) == "enabled"
+        ]
+        inactifs_labels = [
+            label for key, label in setup_ui.MODULE_SWITCHES
+            if states.get(key) == "disabled"
+        ]
+        manquants_labels = [
+            label for key, label in setup_ui.MODULE_SWITCHES
+            if states.get(key) in {"not_configured", "empty"}
+        ]
         container = discord.ui.Container()
+        v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
                     "# Configuration SentriX\n"
                     f"**{self.guild.name}** · **{actifs}/{len(setup_ui.MODULE_SWITCHES)}** modules actifs\n"
-                    "Choisis un module, puis configure-le. Les réglages sont conservés."
+                    "Choisis une fonctionnalité pour modifier ses réglages."
                 ),
                 accessory=v73._thumbnail(self.bot),
             )
         )
+        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.TextDisplay(
+            "**Actifs :** " + (", ".join(actifs_labels) or "Aucun") + "\n"
+            "**Désactivés :** " + (", ".join(inactifs_labels) or "Aucun") + "\n"
+            "**À configurer :** " + (", ".join(manquants_labels) or "Aucun")
+        ))
 
         modules = [
             discord.SelectOption(
@@ -424,10 +443,13 @@ class SentriXSetupV74(v73.SentriXSetupV73):
                 from .language_official_bridge import OfficialLanguageSelect
                 panneau = discord.ui.LayoutView(timeout=180)
                 bloc = discord.ui.Container()
+                v73.poser_banniere(bloc)
                 bloc.add_item(discord.ui.TextDisplay("## Langue du serveur"))
                 bloc.add_item(discord.ui.ActionRow(OfficialLanguageSelect(self.backend)))
                 panneau.add_item(bloc)
-                return await interaction.response.send_message(view=panneau, ephemeral=True)
+                return await interaction.response.send_message(
+                    **v73.joindre_banniere({"view": panneau}), ephemeral=True
+                )
             self.page = "logs" if selected == "soundboard" else selected
             self.backend = self._new_backend(self.page)
             if selected == "soundboard":
