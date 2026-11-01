@@ -226,8 +226,7 @@ async def _can_setup(bot, member, guild):
 
 async def _permission_error(target):
     panel = embeds.error(
-        "Vous ne pouvez pas ouvrir la configuration de ce serveur.\n\n"
-        "**Accès requis :** administrateur, Gérer le serveur ou rôle/membre autorisé."
+        "Tu n'as pas la permission d'utiliser /setup. Demande à un administrateur de t'autoriser."
     )
     if isinstance(target, commands.Context):
         return await panels.envoyer(target, panels.depuis_embed(panel))
