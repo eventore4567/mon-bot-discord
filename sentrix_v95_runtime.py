@@ -428,6 +428,17 @@ async def _invoke_original(
     option_names: tuple[str, ...],
     kwargs: dict,
 ) -> None:
+    # /setup doit répondre directement en éphémère. Ne JAMAIS passer par
+    # defer(thinking=True) public ni par Context.from_interaction : ils
+    # enverraient une réponse publique impossible à rendre privée ensuite.
+    if str(getattr(command, "qualified_name", "")).casefold().strip() == "setup":
+        setup = bot.get_cog("SentriXSetup")
+        if setup is None:
+            return await interaction.response.send_message(
+                "Configuration momentanément indisponible.", ephemeral=True,
+            )
+        return await setup.send_setup(interaction, private=True)
+
     if not interaction.response.is_done():
         await interaction.response.defer(thinking=True)
 
