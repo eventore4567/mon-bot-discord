@@ -28,8 +28,32 @@ from . import server_builder_existing_bootstrap as managed_builder
 logger = logging.getLogger("bot.setup-v2-completion")
 
 WELCOME_DEFAULT_TITLE = "Bienvenue sur {server}"
-WELCOME_DEFAULT_TEXT = "Heureux de t’accueillir parmi nous sur **{server}**."
+WELCOME_DEFAULT_TEXT = "Bienvenue sur **{server}**."
 GOODBYE_DEFAULT_TEXT = "Au revoir **{username}**. Merci d’avoir fait partie de **{server}**."
+WELCOME_DEFAULT_TITLE_EN = "Welcome to {server}"
+WELCOME_DEFAULT_TEXT_EN = "Welcome to **{server}**."
+GOODBYE_DEFAULT_TEXT_EN = "Goodbye **{username}**. Thank you for being part of **{server}**."
+
+# Ancien texte, conservé comme entrée de migration en lecture seule.
+_LEGACY_FR_WELCOME = "Heureux de t’accueillir parmi nous sur **{server}**."
+
+
+def _localized_default_template(value: str | None, kind: str, language: str) -> str:
+    """Localiser UNIQUEMENT les modèles système, pas le texte écrit par un admin."""
+    text = str(value or "").strip()
+    if language != "en":
+        return WELCOME_DEFAULT_TEXT if not text and kind == "welcome_text" else text
+    if kind == "welcome_title" and text in {
+        WELCOME_DEFAULT_TITLE, "Welcome sur {server}", "",
+    }:
+        return WELCOME_DEFAULT_TITLE_EN
+    if kind == "welcome_text" and text in {
+        WELCOME_DEFAULT_TEXT, _LEGACY_FR_WELCOME, "",
+    }:
+        return WELCOME_DEFAULT_TEXT_EN
+    if kind == "goodbye_text" and text in {GOODBYE_DEFAULT_TEXT, ""}:
+        return GOODBYE_DEFAULT_TEXT_EN
+    return text
 
 
 async def ensure_schema(bot) -> None:
@@ -266,6 +290,8 @@ async def _send_welcome(bot, member: discord.Member, *, test: bool = False) -> t
         return False, "Les bots ne reçoivent pas de bienvenue."
     if not test and not await core.module_enabled(bot, member.guild.id, "welcome"):
         return False, "Le module Bienvenue est désactivé."
+    from . import language_runtime
+    language = await language_runtime.get_language(bot, member.guild.id)
     conf = await bot.db.get_guild_config(member.guild.id)
     presentation = await _welcome_presentation(bot, member.guild.id)
     channel, error = await _welcome_destination(
@@ -276,7 +302,12 @@ async def _send_welcome(bot, member: discord.Member, *, test: bool = False) -> t
     if channel is None:
         return False, error or "Salon de bienvenue indisponible."
     body = _without_duplicate_member_mention(
-        _format_welcome(_conf_value(conf, "welcome_message", WELCOME_DEFAULT_TEXT), member),
+        _format_welcome(
+            _localized_default_template(
+                _conf_value(conf, "welcome_message", WELCOME_DEFAULT_TEXT),
+                "welcome_text", language,
+            ), member,
+        ),
         member,
     )
     # La mention et la NOTIFICATION sont deux choses distinctes, et les
@@ -309,7 +340,10 @@ async def _send_welcome(bot, member: discord.Member, *, test: bool = False) -> t
     # 30/09 (f66f1811, « accueils propres ») : deux @ identiques l'un sous
     # l'autre se lisaient comme un doublon. Ce commentaire disait l'inverse.
     title = _without_duplicate_member_mention(
-        _format_welcome(presentation["title"], member),
+        _format_welcome(
+            _localized_default_template(presentation["title"], "welcome_title", language),
+            member,
+        ),
         member,
     )
     panel = discord.Embed(
@@ -331,6 +365,7 @@ async def _send_welcome(bot, member: discord.Member, *, test: bool = False) -> t
                 kind="welcome",
                 background_preset=background_preset,
                 avatar_bytes=avatar_bytes,
+                language=language,
             )
             panel.set_image(url="attachment://sentrix_welcome.png")
     except Exception:
@@ -359,6 +394,8 @@ async def _send_goodbye(bot, member: discord.Member, *, test: bool = False) -> d
     """
     if not test and not await core.module_enabled(bot, member.guild.id, "goodbye"):
         return None
+    from . import language_runtime
+    language = await language_runtime.get_language(bot, member.guild.id)
     conf = await bot.db.get_guild_config(member.guild.id)
     presentation = await _welcome_presentation(bot, member.guild.id)
     channel, _error = await _goodbye_destination(
@@ -368,7 +405,10 @@ async def _send_goodbye(bot, member: discord.Member, *, test: bool = False) -> d
     )
     if channel is None:
         return None
-    template = _conf_value(conf, "goodbye_message", GOODBYE_DEFAULT_TEXT)
+    template = _localized_default_template(
+        _conf_value(conf, "goodbye_message", GOODBYE_DEFAULT_TEXT),
+        "goodbye_text", language,
+    )
     # Réglage SÉPARÉ de celui de la bienvenue, et par défaut à False : la
     # personne est partie, Discord ne peut plus la notifier, et pinguer le
     # salon à chaque départ est le meilleur moyen de faire couper le module.
@@ -391,7 +431,7 @@ async def _send_goodbye(bot, member: discord.Member, *, test: bool = False) -> d
             return None
         return channel
     panel = discord.Embed(
-        title="Un membre vient de partir",
+        title="A member has left" if language == "en" else "Un membre vient de partir",
         description=goodbye_body,
         colour=discord.Colour(0x4E5058),
     )
@@ -409,6 +449,7 @@ async def _send_goodbye(bot, member: discord.Member, *, test: bool = False) -> d
                 kind="goodbye",
                 background_preset=background_preset,
                 avatar_bytes=avatar_bytes,
+                language=language,
             )
             panel.set_image(url="attachment://sentrix_goodbye.png")
     except Exception:
