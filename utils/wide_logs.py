@@ -598,11 +598,56 @@ class WideLogView(discord.ui.LayoutView):
         identity_icon: str | None = None,
         emoji: str = "",
         log_type: str = "",
+        english: bool = False,
     ) -> None:
         super().__init__(timeout=None)
         container = discord.ui.Container(
             accent_colour=discord.Colour(accent) if accent is not None else None
         )
+        # Ticket logs are deliberately compact: no duplicate identity card, long
+        # history, footer or reference block. The existing actions remain usable.
+        if str(log_type).startswith("ticket_"):
+            gallery = discord.ui.MediaGallery()
+            gallery.add_item(media=f"attachment://{banner_filename}")
+            container.add_item(gallery)
+            labels_en = {"ticket_open": "Ticket opened", "ticket_close": "Ticket closed",
+                         "ticket_delete": "Ticket deleted", "ticket_claim": "Ticket claimed",
+                         "ticket_reopen": "Ticket reopened"}
+            labels_fr = {"ticket_open": "Ticket ouvert", "ticket_close": "Ticket fermé",
+                         "ticket_delete": "Ticket supprimé", "ticket_claim": "Ticket pris en charge",
+                         "ticket_reopen": "Ticket rouvert"}
+            title = (labels_en if english else labels_fr).get(str(log_type), "Ticket")
+            number = re.search(r"#(\\d+)", str(embed.title or ""))
+            heading = f"**{title}{' · #' + number.group(1) if number else ''}**"
+            container.add_item(discord.ui.TextDisplay(heading))
+            compact = []
+            if identity_name:
+                compact.append(("Member: " if english else "Membre : ") + safe_text(identity_name)[:90])
+            desc = _clean_lines(embed.description)
+            seen = set()
+            # Preserve only decisive fields; ignore verbose history and orphaned
+            # deleted-channel mentions such as '# inconnu'.
+            for line in desc.splitlines():
+                stripped = line.strip()
+                folded = stripped.casefold()
+                if not stripped or "inconnu" in folded or "unknown" in folded:
+                    continue
+                if any(token in folded for token in ("raison", "reason", "modérateur", "moderator",
+                                                   "fermé par", "closed by", "salon", "channel",
+                                                   "durée", "duration", "type")):
+                    if stripped in seen:
+                        continue
+                    seen.add(stripped)
+                    compact.append(stripped[:220])
+                if len(compact) >= 5:
+                    break
+            if not compact:
+                compact = [("Ticket event recorded." if english else "Événement de ticket enregistré.")]
+            container.add_item(discord.ui.TextDisplay("\\n".join(compact)[:1100]))
+            for row in build_rows(old_view):
+                container.add_item(row)
+            self.add_item(container)
+            return
 
         # Deux séparateurs maximum par panneau. Le compteur garantit la règle quelle que
         # soit la combinaison de blocs présents (identité absente, boutons absents...).
@@ -813,6 +858,17 @@ async def send_wide_log(
         identity_icon=identity_icon,
     )
 
+    english = False
+    if isinstance(guild, discord.Guild):
+        try:
+            from cogs import language_runtime
+            getter = getattr(getattr(guild, "_state", None), "_get_client", None)
+            bot = getter() if callable(getter) else None
+            if bot is not None:
+                english = await language_runtime.get_language(bot, guild.id) == language_runtime.LANG_EN
+        except Exception:
+            logger.debug("Ticket log locale unavailable; using default", exc_info=True)
+
     try:
         view = WideLogView(
             embed,
@@ -824,6 +880,7 @@ async def send_wide_log(
             identity_icon,
             emoji,
             event_type,
+            english,
         )
     except Exception as exc:
         logger.error(
