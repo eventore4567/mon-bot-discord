@@ -439,6 +439,7 @@ def _patch_setup_v74(bot: commands.Bot) -> None:
             target = target.interaction
 
         view = cls(self.bot, guild, member.id)
+        view._author_member = member
         requested = _requested_setup_category(target)
         if requested == CATEGORY:
             view.page = CATEGORY
