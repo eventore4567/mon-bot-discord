@@ -529,9 +529,13 @@ class PlatformV4(commands.Cog):
             logger.exception("Réactions automatiques impossibles guild=%s", message.guild.id)
         conf = await self.bot.db.get_guild_config(message.guild.id)
         prefix = str(conf["prefix"] if conf and conf["prefix"] else "+")
-        if not message.content.startswith(prefix):
+        # Les commandes personnalisées fonctionnent aussi avec +, même si le
+        # serveur utilise un alias alternatif pour ses commandes.
+        prefixes = sorted(set(("+", prefix)), key=len, reverse=True)
+        matched = next((p for p in prefixes if message.content.startswith(p)), None)
+        if matched is None:
             return
-        raw = message.content[len(prefix):].strip()
+        raw = message.content[len(matched):].strip()
         if not raw:
             return
         name, _, args = raw.partition(" ")
@@ -561,7 +565,12 @@ class PlatformV4(commands.Cog):
         try:
             if row["embed_title"]:
                 embed = discord.Embed(title=row["embed_title"], description=response, color=int(row["embed_color"] or 8228095))
-                await panels.envoyer(message.channel, panels.depuis_embed(embed), allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False))
+                # Envoyer un VRAI embed Discord, pas convertir l'embed
+                # demandé en panneau Components V2 ni créer de second message.
+                await message.channel.send(
+                    embed=embed,
+                    allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
+                )
             else:
                 await message.channel.send(response, allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False))
         except discord.HTTPException:
