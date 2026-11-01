@@ -262,6 +262,7 @@ def build_member_event_card(
     background_preset: str | None = None,
     avatar_bytes: bytes | None = None,
     level: int | None = None,
+    language: str = "fr",
 ) -> discord.File:
     """Carte sobre façon Discord : avatar rond, gros titre, zéro couleur néon."""
     kind = str(kind or "welcome").casefold()
@@ -305,21 +306,22 @@ def build_member_event_card(
     # Trois niveaux, donc trois tailles : un libellé discret, le nom en grand,
     # le contexte en dessous. Avant, les trois lignes se valaient et la carte
     # n'avait aucune hiérarchie.
+    english = str(language or "fr").casefold().startswith("en")
     if kind == "level":
         current_level = max(1, int(level or 1))
-        libelle = "Niveau atteint"
-        vedette = f"Niveau {current_level}"
+        libelle = "Level reached" if english else "Niveau atteint"
+        vedette = f"Level {current_level}" if english else f"Niveau {current_level}"
         detail = name
         filename = "sentrix_level_up.png"
     elif kind == "goodbye":
-        libelle = "À bientôt"
+        libelle = "Goodbye" if english else "À bientôt"
         vedette = name
-        detail = f"a quitté {server}"
+        detail = f"left {server}" if english else f"a quitté {server}"
         filename = "sentrix_goodbye.png"
     else:
-        libelle = "Bienvenue"
+        libelle = "Welcome" if english else "Bienvenue"
         vedette = name
-        detail = f"vient de rejoindre {server}"
+        detail = f"joined {server}" if english else f"vient de rejoindre {server}"
         filename = "sentrix_welcome.png"
 
     libelle_text, libelle_font = _fit_text(draw, libelle, 760, 30, 22)
