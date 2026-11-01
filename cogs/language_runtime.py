@@ -300,7 +300,6 @@ SETUP_EN_REPLACEMENTS = (
     ("Chaque choix ouvre les réglages du module ; aucun changement sans action.",
      "Choose a module to view its settings. Nothing changes without confirmation."),
     ("modules actifs", "modules enabled"),
-    ("Aucun", "None"),
     ("Règlement et vérification", "Rules and verification"),
     ("Créer un embed", "Create an embed"),
     ("Commandes personnalisées", "Custom commands"),
