@@ -503,20 +503,16 @@ class SentriXContext(commands.Context):
 
 
 async def get_prefix(bot: "BotAllInOne", message: discord.Message):
-    """Le préfixe + reste TOUJOURS utilisable, quel que soit le préfixe personnalisé.
+    """Préfixe officiel du serveur, indépendant des commandes personnalisées.
 
-    Avant, un changement depuis /setup remplaçait + dans le cache :
-    +help, +setup et les commandes normales ne déclenchaient alors plus rien.
-    Le préfixe personnalisé est un alias supplémentaire, jamais un remplacement.
+    Le préfixe personnalisé est réservé au listener PlatformV4 : une commande
+    telle que !welcome ne doit jamais rendre !help / !setup accessibles.
     """
     default = config.DEFAULT_PREFIX
     if message.guild is None:
-        return commands.when_mentioned_or("+", default)(bot, message)
+        return commands.when_mentioned_or(default)(bot, message)
 
     cached = bot.prefix_cache.get(message.guild.id)
-    # La configuration peut aussi changer depuis le dashboard, une autre
-    # instance Railway ou un ancien formulaire. Le cache ne doit pas rester
-    # périmé jusqu'au prochain redémarrage.
     now = time.monotonic()
     last_refresh = getattr(bot, "prefix_cache_refreshed", {}).get(message.guild.id, 0.0)
     if cached is None or now - last_refresh >= 20:
@@ -524,13 +520,11 @@ async def get_prefix(bot: "BotAllInOne", message: discord.Message):
             conf = await bot.db.get_guild_config(message.guild.id)
             cached = str(conf["prefix"] if conf and conf["prefix"] else default)
         except Exception:
-            cached = default
+            cached = cached or default
         bot.prefix_cache[message.guild.id] = cached
         if hasattr(bot, "prefix_cache_refreshed"):
             bot.prefix_cache_refreshed[message.guild.id] = now
-    # Supprimer les doublons et garder + en tête pour garantir la compatibilité.
-    prefixes = tuple(dict.fromkeys(("+", str(cached), default)))
-    return commands.when_mentioned_or(*prefixes)(bot, message)
+    return commands.when_mentioned_or(str(cached))(bot, message)
 
 
 class BotAllInOne(commands.Bot):
