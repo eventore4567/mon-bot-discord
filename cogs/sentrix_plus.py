@@ -514,6 +514,98 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
     # STICKY MESSAGES
     # ------------------------------------------------------------------
 
+    @commands.group(name="sticky", invoke_without_command=True)
+    @commands.guild_only()
+    @commands.has_guild_permissions(manage_messages=True)
+    async def sticky(self, ctx: commands.Context):
+        await ctx.send("Use `+sticky add <message>` to create a sticky in this channel.")
+
+    @sticky.command(name="add")
+    @commands.guild_only()
+    @commands.has_guild_permissions(manage_messages=True)
+    async def sticky_add(self, ctx: commands.Context, *, message: str = ""):
+        """Create a sticky with a real text/embed choice, in the current channel."""
+        message = str(message or "").strip()
+        channel = ctx.channel
+        match = re.match(r"^<#(\\d+)>\\s+([\\s\\S]+)$", message)
+        if match:
+            channel = ctx.guild.get_channel(int(match.group(1)))
+            message = match.group(2).strip()
+        if not isinstance(channel, discord.TextChannel):
+            return await ctx.send("Choose a text channel.")
+        if not message or len(message) > 1700:
+            return await ctx.send("Usage: `+sticky add Your message` (max 1700 characters).")
+
+        from . import language_runtime
+        english = await language_runtime.get_language(self.bot, ctx.guild.id) == language_runtime.LANG_EN
+        view = discord.ui.View(timeout=180)
+        plain = discord.ui.Button(
+            label="Normal text" if english else "Texte normal",
+            style=discord.ButtonStyle.primary,
+        )
+        embedded = discord.ui.Button(
+            label="Embed" if english else "Encadré (embed)",
+            style=discord.ButtonStyle.secondary,
+        )
+
+        async def choose(interaction: discord.Interaction, use_embed: bool):
+            if interaction.user.id != ctx.author.id:
+                return await interaction.response.send_message(
+                    "Only the author can choose this format." if english
+                    else "Seul l'auteur peut choisir le format.", ephemeral=True
+                )
+            if not interaction.user.guild_permissions.manage_messages:
+                return await interaction.response.send_message(
+                    "Manage Messages permission is required." if english
+                    else "La permission Gérer les messages est requise.", ephemeral=True
+                )
+            await interaction.response.edit_message(
+                content=("Sticky created." if english else "Sticky créé."), view=None
+            )
+            old = await self.bot.db.fetchone(
+                "SELECT message_id FROM sentrix_sticky WHERE channel_id=?", (channel.id,)
+            )
+            if old and old["message_id"]:
+                try:
+                    previous = await channel.fetch_message(int(old["message_id"]))
+                    await previous.delete()
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    pass
+            try:
+                sent = await channel.send(
+                    embed=discord.Embed(description=message) if use_embed else None,
+                    content=None if use_embed else message,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except (discord.Forbidden, discord.HTTPException):
+                return await interaction.followup.send(
+                    "Cannot send a sticky to this channel." if english else
+                    "Impossible de publier le sticky dans ce salon.", ephemeral=True
+                )
+            stored = ("__SENTRIX_EMBED__" if use_embed else "__SENTRIX_TEXT__") + message
+            await self.bot.db.execute(
+                "INSERT OR REPLACE INTO sentrix_sticky(channel_id,guild_id,content,message_id,every_messages,counter) VALUES(?,?,?,?,1,0)",
+                (channel.id, ctx.guild.id, stored, sent.id),
+            )
+            self._no_sticky.pop(int(channel.id), None)
+            view.stop()
+
+        async def on_plain(interaction):
+            await choose(interaction, False)
+
+        async def on_embed(interaction):
+            await choose(interaction, True)
+
+        plain.callback = on_plain
+        embedded.callback = on_embed
+        view.add_item(plain)
+        view.add_item(embedded)
+        await ctx.send(
+            ("Choose the sticky format for " if english else "Choisissez le format du sticky dans ")
+            + channel.mention + ":", view=view,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
     @commands.command(name="sticky-set")
     @commands.guild_only()
     @commands.has_guild_permissions(manage_messages=True)
