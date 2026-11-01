@@ -257,7 +257,7 @@ async def publish_or_refresh(
 @commands.command(
     name="massrole",
     help="Ajouter ou retirer un rôle pour tous les membres humains du serveur.",
-    usage="<add|remove> <rôle>",
+    usage="<add|remove> <rôle> [membres|bots|tous]",
 )
 @commands.guild_only()
 @checks.is_owner_or_admin()
@@ -269,8 +269,9 @@ async def _massrole_all_members(
     ctx: commands.Context,
     action: str,
     role: discord.Role,
+    cible: str = "members",
 ):
-    """Implémentation finale de +massrole : le rôle choisi est appliqué au serveur entier."""
+    """Rôle appliqué aux humains, bots, ou aux deux selon le choix explicite."""
     guild = ctx.guild
     normalized = str(action or "").strip().casefold()
     if normalized in {"add", "ajout", "ajouter", "ajoute"}:
@@ -284,12 +285,26 @@ async def _massrole_all_members(
                 discord.Embed(
                     title="Rôles en masse — action invalide",
                     description=(
-                        "Choisissez une action claire :\n"
-                        "• `add @Rôle` — ajouter le rôle à tous les membres humains ;\n"
-                        "• `remove @Rôle` — retirer le rôle à tous les membres humains."
+                        "Choisissez une action :\n"
+                        "• `add @Rôle [membres|bots|tous]` — ajouter ;\n"
+                        "• `remove @Rôle [membres|bots|tous]` — retirer."
                     ),
                 )
             ),
+        )
+
+    cible = str(cible or "members").strip().casefold()
+    cible = {
+        "membres": "members", "humains": "members", "humans": "members",
+        "bots": "bots", "bot": "bots",
+        "tous": "both", "tout": "both", "les-deux": "both", "all": "both",
+    }.get(cible, cible)
+    if cible not in {"members", "bots", "both"}:
+        return await panels.envoyer(
+            ctx, panels.depuis_embed(discord.Embed(
+                title="Cible invalide",
+                description="Choisis **membres**, **bots** ou **les deux**.",
+            )),
         )
 
     me = guild.me
@@ -312,14 +327,15 @@ async def _massrole_all_members(
             panels.depuis_embed(discord.Embed(title="Rôles en masse — impossible", description=problem)),
         )
 
+    cible_texte = {"members": "membres humains", "bots": "bots", "both": "membres et bots"}[cible]
     progress = await panels.envoyer(
         ctx,
         panels.depuis_embed(
             discord.Embed(
                 title="Rôles en masse — traitement en cours",
                 description=(
-                    f"{'Ajout' if mode == 'add' else 'Retrait'} de {role.mention} sur tous les membres du serveur. "
-                    "SentriX traite les membres par lots pour respecter les limites Discord."
+                    f"{'Ajout' if mode == 'add' else 'Retrait'} de {role.mention} : **{cible_texte}**. "
+                    "Traitement par lots pour respecter les limites Discord."
                 ),
             )
         ),
@@ -334,7 +350,7 @@ async def _massrole_all_members(
 
     async def apply(member: discord.Member) -> None:
         nonlocal added_or_removed, failed, skipped, protected
-        if member.bot:
+        if (member.bot and cible == "members") or (not member.bot and cible == "bots"):
             skipped += 1
             return
         has_role = role in member.roles
@@ -397,7 +413,10 @@ async def _massrole_all_members(
     verb = "ajouté" if mode == "add" else "retiré"
     result = discord.Embed(
         title="Rôles en masse — terminé",
-        description=f"Rôle {role.mention} **{verb}** pour **{added_or_removed}** membre(s).",
+        description=(
+            f"Rôle {role.mention} **{verb}** pour **{added_or_removed}** compte(s). "
+            f"**Cible : {cible_texte}**."
+        ),
     )
     result.add_field(name="Traités", value=str(processed), inline=True)
     result.add_field(name="Ignorés", value=str(skipped), inline=True)
