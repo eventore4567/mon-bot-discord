@@ -22,6 +22,7 @@ def is_admin(shell, interaction: discord.Interaction) -> bool:
     perms = getattr(interaction.user, "guild_permissions", None)
     return bool(
         getattr(interaction.guild, "id", None) == getattr(shell.guild, "id", None)
+        and getattr(interaction, "user", None) is not None
         and (getattr(interaction.guild, "owner_id", None) == interaction.user.id
              or (perms and getattr(perms, "administrator", False)))
     )
@@ -269,9 +270,9 @@ async def build_prefix_page(shell) -> None:
     box = discord.ui.Container(accent_colour=0x6C57CC)
     v73.poser_banniere(box)
     box.add_item(discord.ui.TextDisplay(
-        "# Préfixes de SentriX\\n"
-        f"**Commandes officielles :** `{official}` (ex. `{official}help`)\\n"
-        f"**Commandes personnalisées :** `{custom}` (uniquement les commandes créées)\\n\\n"
+        "# Préfixes de SentriX\n"
+        f"**Commandes officielles :** `{official}` (ex. `{official}help`)\n"
+        f"**Commandes personnalisées :** `{custom}` (uniquement les commandes créées)\n\n"
         "Les commandes slash / restent indépendantes."
     ))
     change = discord.ui.Button(label="Modifier le préfixe officiel", style=discord.ButtonStyle.primary)
