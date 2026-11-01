@@ -96,25 +96,28 @@ def test_final_setup_private_from_first_interaction_ack():
     assert "Aucun panneau public n'a été envoyé" not in code
     assert "return await panels.envoyer(target.followup, view, ephemere=True)" in code
     assert "return await panels.envoyer(target, view, ephemere=True)" in code
-    assert "delete_after=15" in code
+    assert "view=PrivateSetupLauncher(self, member.id, guild.id)" in code
+    assert "delete_after=15" not in code
     for name in ("cogs/setup_invitations.py", "cogs/ai.py", "cogs/ai_api_hotfix.py",
                  "cogs/ai_reply_recovery.py", "cogs/platform_v4.py"):
         ast.parse((ROOT / name).read_text(encoding="utf-8"), filename=name)
 
 
 def test_custom_embed_has_real_thin_banner_above_not_extra_message():
-    from utils.log_banners import BANNER_DIR, ensure_banners, nom_fichier
-    ensure_banners()
-    path = BANNER_DIR / nom_fichier("special")
+    from utils.premium_log_banners import get_premium_log_banner
+    path = get_premium_log_banner()
     assert path.exists()
     with Image.open(path) as banner:
-        assert banner.width >= 1000
-        assert banner.height <= 80
+        assert banner.size == (1200, 24)
     text = (ROOT / "cogs/platform_v4.py").read_text(encoding="utf-8")
     listener = text.split("    async def on_message(self, message:", 1)[1].split(
         "    # ----------------------------------------------------------- role menus", 1
     )[0]
-    assert 'banner_name = nom_fichier("special")' in listener
+    assert "from utils.premium_log_banners import BANNER_FILENAME, get_premium_log_banner" in listener
+    assert "banner_name = BANNER_FILENAME" in listener
+    assert 'nom_fichier("special")' not in listener
+    assert "discord.Embed()" in listener
+    assert "_sentrix_native_message=True" in listener
     assert 'banner.set_image(url=f"attachment://{banner_name}")' in listener
     assert "embeds=[banner, embed]" in listener
     assert "file=banner_file" in listener
@@ -255,3 +258,126 @@ async def test_broad_image_request_remembers_followup_even_without_word_image():
         assert _PENDING_IMAGE_FOLLOWUPS[key][1] == "examine tout"
     finally:
         _PENDING_IMAGE_FOLLOWUPS.pop(key, None)
+
+
+
+@pytest.mark.asyncio
+async def test_real_production_v5_reply_reads_the_user_image_and_forwards_to_pipeline():
+    """Le wrapper V5 était l'autorité réelle en production (log ai-reply).
+    Le vieux test ne couvrait que Ai.send_sentrix_reply qui était remplacé.
+    """
+    from cogs import bot_experience_v5
+
+    guild = SimpleNamespace(id=82)
+    attachment = _attachment()
+    author = SimpleNamespace(
+        id=862, bot=False, display_name="Tomioka", roles=[],
+    )
+    channel = SimpleNamespace(id=112, guild=guild, send=AsyncMock())
+    message = SimpleNamespace(
+        id=539, content="sentrix analyse cette image",
+        guild=guild, channel=channel, author=author,
+        attachments=[attachment],
+    )
+    pipeline = AsyncMock(return_value={
+        "ok": True, "text": "La capture contient le mot bienvenue.",
+        "model_key": "luna",
+    })
+    ai_cog = SimpleNamespace(
+        _prepare_and_generate=pipeline, histories={862: ["stale"]},
+    )
+    db = SimpleNamespace(is_bot_creator=AsyncMock(return_value=False))
+    bot = SimpleNamespace(get_cog=lambda name: ai_cog if name == "Ai" else None,
+                          db=db, user=SimpleNamespace(id=99),
+                          blacklist_cache={})
+    ai_cog.bot = bot
+
+    with patch("cogs.bot_experience_v5.ai_service.get_settings",
+               AsyncMock(return_value={"enabled": True})):
+        with patch("cogs.bot_experience_v5.ai_service.is_channel_allowed",
+                   return_value=True):
+            with patch("cogs.bot_experience_v5.ai_service.is_role_allowed",
+                       return_value=True):
+                with patch("cogs.reply_reference_fix.send_native_ai_reply",
+                           AsyncMock()) as deliver:
+                    bot_experience_v5._install_ai_pipeline_upgrade(bot)
+                    await ai_cog.send_sentrix_reply(
+                        channel, author, "analyse cette image", reply_to=message,
+                    )
+
+    images = pipeline.await_args.kwargs["image_urls"]
+    assert len(images) == 1
+    assert images[0].startswith("data:image/jpeg;base64,")
+    deliver.assert_awaited_once()
+    assert ai_cog.histories == {}
+    attachment.read.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_canonical_pipeline_sends_image_to_responses_api_instead_of_text_only():
+    from cogs.ai import Ai
+    from utils import ai_service
+
+    bot = SimpleNamespace()
+    ai_cog = SimpleNamespace(
+        bot=bot,
+        _check_cooldown=lambda *_args: None,
+        _check_minute_limit=lambda *_args: False,
+        _build_system_instructions=AsyncMock(return_value="System"),
+    )
+    model_result = SimpleNamespace(ok=True, text="L'image montre deux cartes.",
+                                   model_key="luna", response_id="abc")
+    screenshot = "data:image/jpeg;base64,ZGF0YQ=="
+
+    with patch("cogs.ai.ai_service.generate", AsyncMock(return_value=model_result)) as generate:
+        result = await Ai._prepare_and_generate(
+            ai_cog, guild_id=None, channel_id=123, user_id=456,
+            author_name="Tomioka", question="Décris la capture",
+            command="ai-reply", image_urls=[screenshot],
+        )
+
+    assert result["ok"] is True
+    payload = generate.await_args.args[0]
+    assert payload[0]["content"][0]["type"] == "input_text"
+    assert payload[0]["content"][1] == {
+        "type": "input_image", "image_url": screenshot, "detail": "low"
+    }
+    assert "images fournies" in generate.await_args.kwargs["instructions"]
+
+
+@pytest.mark.asyncio
+async def test_prefix_setup_has_clickable_private_launcher_and_checks_author():
+    from cogs.setup_invitations import PrivateSetupLauncher
+
+    setup = SimpleNamespace(send_setup=AsyncMock())
+    launcher = PrivateSetupLauncher(setup, 1234, 5678)
+    inter = SimpleNamespace(
+        guild_id=5678, user=SimpleNamespace(id=1234),
+        response=SimpleNamespace(send_message=AsyncMock()),
+    )
+    await launcher.open_setup(inter, launcher.children[0])
+    setup.send_setup.assert_awaited_once_with(inter)
+    inter.response.send_message.assert_not_awaited()
+
+    other = SimpleNamespace(
+        guild_id=5678, user=SimpleNamespace(id=9999),
+        response=SimpleNamespace(send_message=AsyncMock()),
+    )
+    await launcher.open_setup(other, launcher.children[0])
+    other.response.send_message.assert_awaited_once()
+    assert other.response.send_message.await_args.kwargs["ephemeral"] is True
+    setup.send_setup.assert_awaited_once_with(inter)
+
+
+def test_only_native_custom_messages_bypass_legacy_information_banner():
+    policy = (ROOT / "cogs/plain_response_policy.py").read_text(encoding="utf-8")
+    assert 'kwargs.pop("_sentrix_native_message", False)' in policy
+    assert policy.index('kwargs.pop("_sentrix_native_message", False)') < policy.index(
+        'ctx = _COMMAND_CONTEXT.get()', policy.index('async def absolute_messageable_send')
+    )
+    custom = (ROOT / "cogs/platform_v4.py").read_text(encoding="utf-8")
+    assert 'embeds=[banner, embed]' in custom
+    assert '_sentrix_native_message=True' in custom
+    launcher = (ROOT / "cogs/setup_invitations.py").read_text(encoding="utf-8")
+    assert 'view=PrivateSetupLauncher(self, member.id, guild.id)' in launcher
+    assert '_sentrix_native_message=True' in launcher
