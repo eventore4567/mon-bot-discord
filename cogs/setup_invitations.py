@@ -66,6 +66,29 @@ async def _prepare_private_setup_interaction(interaction: discord.Interaction) -
     return True
 
 
+def _readonly_setup_view(guild) -> discord.ui.LayoutView:
+    """Un membre peut ouvrir le centre sans recevoir de boutons qui écrivent.
+
+    Ne pas construire SentriXSetupV74 pour les membres ordinaires : plusieurs
+    menus secondaires hérités ne vérifient que l'auteur des clics. Un panneau
+    purement statique est une frontière de permission simple et sûre.
+    """
+    view = discord.ui.LayoutView(timeout=180)
+    container = discord.ui.Container(accent_colour=0x5865F2)
+    container.add_item(discord.ui.TextDisplay(
+        "## SentriX · Centre du serveur\n"
+        f"**{discord.utils.escape_markdown(str(getattr(guild, 'name', 'Serveur')))}**"
+    ))
+    container.add_item(discord.ui.Separator())
+    container.add_item(discord.ui.TextDisplay(
+        "Tu peux consulter ce centre. Les réglages du serveur sont réservés "
+        "aux personnes disposant de **Gérer le serveur** ou **Administrateur**.\n"
+        "-# Aucun réglage n'est modifié."
+    ))
+    view.add_item(container)
+    return view
+
+
 CATEGORY = "invitations"
 LABEL = "Invitations"
 # On accepte aussi la faute montrée en production : +setup invition.
@@ -476,8 +499,10 @@ def _patch_setup_v74(bot: commands.Bot) -> None:
             if guild is None or member is None:
                 return await target.send("La configuration est disponible uniquement sur un serveur.")
             if not await setup_ui._can_setup(self.bot, member, guild):
-                return await target.send(
-                    "Tu n'as pas la permission d'ouvrir la configuration de ce serveur.",
+                # Accès +setup public pour tous, mais AUCUN contrôle mutable
+                # pour les membres sans droits. Ne pas afficher un gros refus.
+                return await panels.envoyer(
+                    target, _readonly_setup_view(guild), ephemere=False,
                     allowed_mentions=discord.AllowedMentions.none(),
                 )
             view = cls(self.bot, guild, member.id)
@@ -506,14 +531,12 @@ def _patch_setup_v74(bot: commands.Bot) -> None:
                 return None
 
         if not await setup_ui._can_setup(self.bot, member, guild):
-            if isinstance(slash, discord.Interaction) and private_followup:
-                return await slash.followup.send(
-                    "Tu n'as pas la permission d'utiliser /setup.",
-                    ephemeral=True,
-                    allowed_mentions=discord.AllowedMentions.none(),
-                )
-            return await setup_ui._permission_error(
-                slash if isinstance(slash, discord.Interaction) else target
+            readonly = _readonly_setup_view(guild)
+            if private_followup:
+                return await panels.envoyer(slash.followup, readonly, ephemere=True)
+            return await panels.envoyer(
+                slash if isinstance(slash, discord.Interaction) else target,
+                readonly, ephemere=True,
             )
 
         if isinstance(target, commands.Context):
