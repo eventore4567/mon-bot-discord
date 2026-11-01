@@ -90,9 +90,12 @@ def test_final_setup_private_from_first_interaction_ack():
     end = src.index("    current = setup_ui.OfficialSetup.send_setup", start)
     code = src[start:end]
     assert "await _prepare_private_setup_interaction(slash)" in code
-    assert code.index("await _prepare_private_setup_interaction(slash)") < code.index(
-        "await setup_ui._can_setup("
-    )
+    # La branche +setup est publique et vérifie les permissions AVANT
+    # d'envoyer quoi que ce soit. La branche /setup continue de différer
+    # en privé avant son propre contrôle de permissions.
+    ack = code.index("await _prepare_private_setup_interaction(slash)")
+    slash_check = code.index("await setup_ui._can_setup(", ack)
+    assert ack < slash_check
     assert "Aucun panneau public n'a été envoyé" not in code
     assert "return await panels.envoyer(target.followup, view, ephemere=True)" in code
     assert "return await panels.envoyer(target, view, ephemere=True)" in code
