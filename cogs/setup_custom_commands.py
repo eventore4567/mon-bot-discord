@@ -354,7 +354,7 @@ class CustomCommandAccessView(discord.ui.View):
         ]
         everyone = any(item["subject_type"] == "everyone" for item in self.grants)
         return (
-            f"**Autorisations de la commande \`{self.command_name}\`**\n\n"
+            f"**Autorisations de la commande `{self.command_name}`**\n\n"
             "**Propriétaire et administrateurs :** toujours autorisés\n"
             f"**Tout le monde :** {'autorisé' if everyone else 'non autorisé'}\n"
             f"**Rôles :** {', '.join(roles[:15]) if roles else 'Aucun'}\n"
