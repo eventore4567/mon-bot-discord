@@ -69,6 +69,10 @@ logger = logging.getLogger("bot.ai")
 # publique, ni les wrappers legacy de send_sentrix_reply.
 _PASSIVE_IMAGE_CONTEXT = contextvars.ContextVar("sentrix_passive_images", default=())
 
+# Suivi court d'une image demandée par SentriX, lié au serveur/salon/membre.
+_PENDING_IMAGE_FOLLOWUPS: dict[tuple[int, int, int], tuple[float, str]] = {}
+
+
 
 # ---------------------------------------------------------------- VUE : BOUTONS DE RÉPONSE
 
@@ -2393,13 +2397,28 @@ class Ai(commands.Cog, name="Ai"):
         if message.author.bot or not message.guild:
             return
         content = message.content.strip()
-        if not content:
+        image_attachments = list(message.attachments)
+        pending_key = (message.guild.id, message.channel.id, message.author.id)
+        pending = _PENDING_IMAGE_FOLLOWUPS.get(pending_key)
+        if pending and pending[0] < time.monotonic():
+            _PENDING_IMAGE_FOLLOWUPS.pop(pending_key, None)
+            pending = None
+        if not content and not image_attachments:
             return
 
         mentioned = self.bot.user is not None and self.bot.user in message.mentions
-        name_match = re.match(r"^(?:sentrix|ssentrix|sentri|snetri|snentrix)\b", content, re.IGNORECASE)
+        name_match = re.match(r"^(?:sentrix|ssentrix|sentri|snetri|snentrix)\\b", content, re.IGNORECASE)
         name_trigger = name_match is not None
-        if not mentioned and not name_trigger:
+        reference = getattr(message, "reference", None)
+        referenced = getattr(reference, "resolved", None)
+        reply_to_bot = (
+            isinstance(referenced, discord.Message)
+            and self.bot.user is not None
+            and referenced.author.id == self.bot.user.id
+        )
+        if not mentioned and not name_trigger and not (
+            image_attachments and (pending or reply_to_bot)
+        ):
             return
 
         prefix = self.bot.prefix_cache.get(message.guild.id, config.DEFAULT_PREFIX) if hasattr(self.bot, "prefix_cache") else config.DEFAULT_PREFIX
@@ -2420,14 +2439,28 @@ class Ai(commands.Cog, name="Ai"):
         # Une image postée en réponse à une capture déjà visible est aussi
         # une image volontairement présentée à SentriX. On ne récupère JAMAIS
         # les images des autres messages du salon sans demande explicite.
-        attachments = list(message.attachments)
-        reference = getattr(message, "reference", None)
+        attachments = image_attachments
         if not attachments and reference is not None:
             cible = getattr(reference, "resolved", None)
             if isinstance(cible, discord.Message):
                 attachments = list(cible.attachments)
         if not question:
-            question = "Décris cette image." if attachments else "Salut, comment tu vas ?"
+            question = pending[1] if attachments and pending else (
+                "Décris cette image." if attachments else "Salut, comment tu vas ?"
+            )
+        if attachments and pending:
+            _PENDING_IMAGE_FOLLOWUPS.pop(pending_key, None)
+        elif not attachments and any(
+            phrase in question.casefold()
+            for phrase in ("cette image", "mon image", "la photo", "cette photo",
+                           "capture d'écran", "cette capture", "l'image")
+        ):
+            _PENDING_IMAGE_FOLLOWUPS[pending_key] = (time.monotonic() + 300, question)
+            if len(_PENDING_IMAGE_FOLLOWUPS) > 4096:
+                now = time.monotonic()
+                for key, value in list(_PENDING_IMAGE_FOLLOWUPS.items()):
+                    if value[0] < now:
+                        _PENDING_IMAGE_FOLLOWUPS.pop(key, None)
 
         try:
             # Une image à comprendre n'est PAS une commande naturelle. Sinon
