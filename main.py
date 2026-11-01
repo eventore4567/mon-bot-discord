@@ -126,7 +126,7 @@ PRUNED_COMMANDS = COMMANDS_REPLACED_BY_SETUP | EXACT_DUPLICATE_COMMANDS
 # qu'un oubli de décorateur rende accidentellement une commande administrative publique.
 PUBLIC_COMMANDS = frozenset({
     # Aide et utilitaires sans modification du serveur
-    "help", "ping", "avatar", "info", "userinfo", "status", "about", "profile-card",
+    "help", "ping", "setup", "avatar", "info", "userinfo", "status", "about", "profile-card",
     # +serverinfo est le pont installe par premium_ui_v81 vers « info serveur »,
     # +leaderboard celui vers leaderboard-levels : deux racines en lecture seule
     # dont les cibles sont deja publiques, mais qui n'avaient jamais ete classees.
