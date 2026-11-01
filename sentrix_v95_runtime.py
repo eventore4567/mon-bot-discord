@@ -428,11 +428,12 @@ async def _invoke_original(
     option_names: tuple[str, ...],
     kwargs: dict,
 ) -> None:
-    # Le premier accusé de réception définit la visibilité Discord.
-    # Un defer éphémère ne peut pas être converti en panneau public ensuite.
+    # /setup doit fixer son caractère PRIVÉ avant tout travail SQL/API.
+    # Le defer éphémère est irréversible : toute réponse de suivi reste privée.
+    # Jamais de Context.from_interaction (risque de transport public).
     if str(getattr(command, "qualified_name", "")).casefold().strip() == "setup":
         if not interaction.response.is_done():
-            await interaction.response.defer(ephemeral=False, thinking=True)
+            await interaction.response.defer(ephemeral=True, thinking=True)
         setup = bot.get_cog("SentriXSetup")
         if setup is None:
             return await interaction.followup.send(
