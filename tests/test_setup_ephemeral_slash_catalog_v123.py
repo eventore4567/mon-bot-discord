@@ -67,3 +67,21 @@ def test_six_modules_importants_restent_accessibles():
 
 def test_lintercepteur_setup_se_compile():
     ast.parse((ROOT / "sentrix_v95_runtime.py").read_text())
+
+
+def test_derniere_couche_invitations_ne_rend_jamais_setup_public():
+    source = (ROOT / "cogs/setup_invitations.py").read_text()
+    start = source.index("    async def final_send_setup(")
+    end = source.index("    current = setup_ui.OfficialSetup.send_setup", start)
+    transport = source[start:end]
+    assert "ephemere=True" in transport
+    assert "delete_after=15" in transport
+    assert "panels.envoyer(target, view)" not in transport
+    assert "target = target.interaction" in transport
+
+
+def test_les_categories_ajoutees_nont_pas_de_keyerror_emoji():
+    source = (ROOT / "cogs/setup_experience_v74.py").read_text()
+    assert 'categories_emoji.get(key, "")' in source
+    assert '"invitations": "tracking"' in source
+    assert "details = await self._effective_states()" in source
