@@ -86,6 +86,19 @@ def test_private_setup_entrypoint_and_admin_custom_management():
     assert "set_official_prefix(" in custom
 
 
+def test_setup_has_no_member_or_role_delegation():
+    control = (ROOT / "cogs/setup_control_center.py").read_text(encoding="utf-8")
+    view = (ROOT / "cogs/setup_experience_v74.py").read_text(encoding="utf-8")
+    assert "SETUP_DELEGATES_SCHEMA" not in control
+    assert "_is_setup_delegate" not in control
+    assert "_set_setup_delegate" not in control
+    assert "setup_access" not in view
+    assert "_build_setup_access" not in view
+    assert "RoleSelect(placeholder=\"Autoriser un rôle\"" not in view
+    assert "UserSelect(placeholder=\"Autoriser un membre\"" not in view
+    assert "Tu n'as pas la permission d'utiliser /setup" in control
+
+
 def test_dashboard_persists_both_prefixes_separately():
     dashboard = (ROOT / "web/dashboard.py").read_text(encoding="utf-8")
     assert '"custom_prefix": (1, 5)' in dashboard
