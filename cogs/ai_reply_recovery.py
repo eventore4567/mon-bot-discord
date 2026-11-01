@@ -140,8 +140,30 @@ async def _direct_reply(
         author_name,
     ) if ai_cog is not None else ai_service.SYSTEM_PROMPT
 
+    # La récupération directe doit elle aussi transmettre les captures jointes.
+    # Sans cela, le modèle reçoit seulement la question et répond qu'il ne
+    # voit aucune image alors que Discord l'affiche dans le message cité.
+    image_attachments = list(getattr(reply_to, "attachments", ()) or ())
+    if image_attachments:
+        from .ai import _images_from_discord_attachments
+        image_urls = await _images_from_discord_attachments(image_attachments)
+        if not image_urls:
+            return await _send_text(
+                destination,
+                "Je n'ai pas pu lire la capture. Envoie un PNG, JPG, WebP ou GIF de 12 Mo maximum.",
+                reply_to=reply_to,
+            )
+        model_input = [{
+            "role": "user", "content": [
+                {"type": "input_text", "text": question},
+                *({"type": "input_image", "image_url": url, "detail": "low"} for url in image_urls),
+            ],
+        }]
+    else:
+        model_input = question
+
     result = await ai_service.generate(
-        question,
+        model_input,
         model_key=model_key,
         reasoning_effort=effort,
         instructions=instructions,

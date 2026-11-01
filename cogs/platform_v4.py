@@ -733,11 +733,36 @@ class PlatformV4(commands.Cog):
                 everyone=False,
             )
             if row["embed_title"]:
-                embed = discord.Embed(title=row["embed_title"], description=response, color=int(row["embed_color"] or 8228095))
+                embed = discord.Embed(
+                    title=row["embed_title"], description=response,
+                    color=int(row["embed_color"] or 8228095),
+                )
                 embed.set_footer(text=brand_label())
-                # Envoyer un VRAI embed Discord, pas convertir l'embed
-                # demandé en panneau Components V2 ni créer de second message.
-                await message.channel.send(content=ping, embed=embed, allowed_mentions=mentions)
+                # Bannière très fine AU-DESSUS du contenu, dans un seul message
+                # Discord. L'embed de la commande reste un vrai embed natif
+                # modifiable ; pas de deuxième message, pas de Components V2.
+                from utils.log_banners import BANNER_DIR, ensure_banners, nom_fichier
+                banner_name = nom_fichier("special")
+                try:
+                    ensure_banners()
+                    banner_file = discord.File(
+                        str(BANNER_DIR / banner_name), filename=banner_name,
+                    )
+                except (OSError, ValueError):
+                    logger.exception("Bannière de commande personnalisée indisponible.")
+                    await message.channel.send(
+                        content=ping, embed=embed, allowed_mentions=mentions,
+                    )
+                else:
+                    banner = discord.Embed(colour=embed.colour)
+                    banner.set_image(url=f"attachment://{banner_name}")
+                    try:
+                        await message.channel.send(
+                            content=ping, embeds=[banner, embed],
+                            file=banner_file, allowed_mentions=mentions,
+                        )
+                    finally:
+                        banner_file.close()
             else:
                 await message.channel.send(
                     (f"{ping}\n" if ping else "") + response,
