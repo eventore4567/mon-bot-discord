@@ -192,7 +192,11 @@ class AiGroupTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_ai_ask_reste_public_pour_tout_le_monde(self):
         from utils import access_matrix
+        from cogs import setup_v2_core
 
+        # AI is opt-in on a new guild: "public" means everyone can use
+        # /ai ask once the server has enabled the AI module.
+        await setup_v2_core.set_module_enabled(self.bot, 1, "ai", True)
         member = SimpleNamespace(id=1, guild_permissions=SimpleNamespace(administrator=False))
         guild = SimpleNamespace(id=1, owner_id=999)
         decision = await access_matrix.evaluate(self.bot, command_name="ai ask", author=member, guild=guild)
