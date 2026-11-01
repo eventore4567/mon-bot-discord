@@ -3242,5 +3242,13 @@ class Ai(commands.Cog, name="Ai"):
             await panels.envoyer(ctx, panels.depuis_embed(e))
 
 
+# La couche de performance V5 réaffecte parfois _prepare_and_generate sur
+# l'instance à une fonction fast_prepare qui n'accepte PAS image_urls.
+# Cette référence est conservée avant toute installation de runtime ;
+# elle conserve les contrôles (quota, modération, historique) et le vrai
+# payload multimodal de la Responses API pour les captures Discord.
+CANONICAL_PREPARE_FOR_VISION = Ai._prepare_and_generate
+
+
 async def setup(bot: commands.Bot):
     await bot.add_cog(Ai(bot))

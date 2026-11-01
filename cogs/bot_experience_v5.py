@@ -234,15 +234,28 @@ def _install_ai_pipeline_upgrade(bot: commands.Bot) -> None:
             return await _send(content="Je suis là. Dites-moi simplement ce que vous voulez faire.")
 
         command_name = "ai-dm" if guild_id is None else ("ai-reply" if reply_to is not None else "sentrix")
-        result = await self._prepare_and_generate(
-            guild_id=guild_id,
-            channel_id=channel_id or 0,
-            user_id=author.id,
-            author_name=getattr(author, "display_name", None) or str(author),
-            question=(question or "").strip() or ("Décris cette image." if image_urls else "Salut"),
-            command=command_name,
-            image_urls=image_urls,
-        )
+        prepare_kwargs = {
+            "guild_id": guild_id,
+            "channel_id": channel_id or 0,
+            "user_id": author.id,
+            "author_name": getattr(author, "display_name", None) or str(author),
+            "question": (question or "").strip() or (
+                "Décris cette image." if image_urls else "Salut"
+            ),
+            "command": command_name,
+        }
+        if image_urls:
+            # Certains runtimes remplacent _prepare_and_generate sur l'instance
+            # par fast_prepare(...), qui n'accepte pas image_urls et faisait
+            # planter tout le listener sans réponse (capture du 01/11 11:48).
+            # L'appel multimodal passe par la version complète, capturée au
+            # chargement du Cog avant ces optimisations incompatibles.
+            from .ai import CANONICAL_PREPARE_FOR_VISION
+            result = await CANONICAL_PREPARE_FOR_VISION(
+                self, **prepare_kwargs, image_urls=image_urls,
+            )
+        else:
+            result = await self._prepare_and_generate(**prepare_kwargs)
         if not result["ok"]:
             return await _send(embed=embeds.error(result["error"]))
 
