@@ -9,6 +9,8 @@ contrats qui doivent gagner sur les couches V74/V5/dashboard installées plus ta
 """
 from __future__ import annotations
 
+import contextvars
+
 import difflib
 import inspect
 import logging
@@ -22,6 +24,12 @@ from utils import sentrix_panels as panels
 from . import setup_control_center as setup_ui
 
 logger = logging.getLogger("bot.setup-invitations")
+
+# Marque une commande /setup déjà différée en privé par V95.
+# Pas de variable globale partagée : les interactions concurrentes sont isolées.
+_KNOWN_PRIVATE_SETUP_ACK = contextvars.ContextVar(
+    "sentrix_known_private_setup_ack", default=False,
+)
 
 CATEGORY = "invitations"
 LABEL = "Invitations"
@@ -429,9 +437,14 @@ def _patch_setup_v74(bot: commands.Bot) -> None:
         # AVANT la moindre requête SQL ou génération de panneau.
         slash = getattr(target, "interaction", None) if isinstance(target, commands.Context) else target
         if isinstance(slash, discord.Interaction):
+            private_ack_here = False
             if not slash.response.is_done():
                 await slash.response.defer(ephemeral=True, thinking=True)
-            elif slash.response.type == discord.InteractionResponseType.deferred_channel_message:
+                private_ack_here = True
+            elif (
+                slash.response.type == discord.InteractionResponseType.deferred_channel_message
+                and not _KNOWN_PRIVATE_SETUP_ACK.get()
+            ):
                 # Une autre couche aurait pu différer en PUBLIC. Le drapeau
                 # ephemeral est alors immuable : ne JAMAIS éditer cette réponse
                 # avec un panneau de configuration sensible.
