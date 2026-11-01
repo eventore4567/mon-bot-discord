@@ -89,8 +89,15 @@ def _old_panel(message: discord.Message, bot_id: int) -> bool:
 
 
 @app_commands.guild_only()
-@app_commands.describe(channel="Text channel where SentriX should publish the presentation.")
-async def _publish(interaction: discord.Interaction, channel: discord.TextChannel | None = None) -> None:
+@app_commands.describe(
+    channel="Salon où publier la présentation.",
+    banniere="Afficher ou masquer la bannière ultra-fine en haut du panneau.",
+)
+async def _publish(
+    interaction: discord.Interaction,
+    channel: discord.TextChannel | None = None,
+    banniere: bool = True,
+) -> None:
     guild = interaction.guild
     if guild is None:
         await interaction.response.send_message(
@@ -141,7 +148,7 @@ async def _publish(interaction: discord.Interaction, channel: discord.TextChanne
     english = (await language_runtime.get_language(interaction.client, guild.id)
                == language_runtime.LANG_EN)
     await interaction.response.defer(ephemeral=True, thinking=True)
-    panel = presentation_panel(url, banner=False, english=english, bot=interaction.client)
+    panel = presentation_panel(url, banner=banniere, english=english, bot=interaction.client)
     previous = None
     try:
         tracked = await interaction.client.db.fetchone(
@@ -170,7 +177,7 @@ async def _publish(interaction: discord.Interaction, channel: discord.TextChanne
     try:
         if previous is not None:
             try:
-                sent = await previous.edit(view=panel, attachments=[])
+                sent = await previous.edit(view=panel, attachments=panel.fichiers())
                 updated = True
             except discord.HTTPException:
                 logger.warning("Could not update prior presentation; posting a new one")
