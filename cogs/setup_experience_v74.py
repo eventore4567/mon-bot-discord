@@ -418,15 +418,31 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             "ai": "ai",
             "invitations": "tracking",
         }
+        # Les pages comme Invitations et Musique ont leur propre état réel :
+        # ne pas afficher « Désactivé » uniquement parce qu'elles ne font
+        # pas partie des 12 interrupteurs de l'ancien menu.
+        details = await self._effective_states()
+
+        def _etat_page(key: str) -> str:
+            status = states.get(key)
+            if status == "enabled":
+                return "Actif"
+            if status in {"not_configured", "empty"}:
+                return "À configurer"
+            if status == "disabled":
+                return "Désactivé"
+            detail = str(details.get(key, "")).upper()
+            if "ACTIF" in detail and "INACTIF" not in detail:
+                return "Actif"
+            if "INACTIF" in detail:
+                return "Désactivé"
+            return "À configurer"
+
         modules = [
             discord.SelectOption(
                 label=CATEGORY_META[key][1][:100],
                 value=key,
-                description=(
-                    "Actif" if states.get(key) == "enabled"
-                    else "À configurer" if states.get(key) in {"not_configured", "empty"}
-                    else "Désactivé"
-                ),
+                description=_etat_page(key),
                 emoji=(
                     sentrix_emojis.partiel(categories_emoji.get(key, ""))
                     or CATEGORY_META[key][0]
