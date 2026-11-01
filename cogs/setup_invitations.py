@@ -437,10 +437,8 @@ def _patch_setup_v74(bot: commands.Bot) -> None:
         # AVANT la moindre requête SQL ou génération de panneau.
         slash = getattr(target, "interaction", None) if isinstance(target, commands.Context) else target
         if isinstance(slash, discord.Interaction):
-            private_ack_here = False
             if not slash.response.is_done():
                 await slash.response.defer(ephemeral=True, thinking=True)
-                private_ack_here = True
             elif (
                 slash.response.type == discord.InteractionResponseType.deferred_channel_message
                 and not _KNOWN_PRIVATE_SETUP_ACK.get()
