@@ -200,7 +200,25 @@ def _install_ai_pipeline_upgrade(bot: commands.Bot) -> None:
         if access_error:
             return await _send(embed=embeds.error(access_error))
 
-        if _is_bare_trigger(self.bot, reply_to):
+        # Le bot Core V5 remplace send_sentrix_reply() APRÈS les correctifs
+        # du Cog IA. Historiquement ce wrapper abandonnait les pièces jointes,
+        # et gpt-5.6-luna recevait une demande texte seule (log: ai-reply).
+        from .ai import _PASSIVE_IMAGE_CONTEXT, _images_from_discord_attachments
+        image_urls = list(_PASSIVE_IMAGE_CONTEXT.get())
+        attachments = list(getattr(reply_to, "attachments", ()) or ())
+        if not image_urls and attachments:
+            image_urls = await _images_from_discord_attachments(attachments)
+        if attachments and not image_urls:
+            return await _send(
+                content="Je n'ai pas pu lire cette image. Envoie un PNG, JPG, WebP ou GIF de 12 Mo maximum."
+            )
+        if image_urls:
+            logger.info(
+                "Vision V5 : %s image(s) validée(s) dans la demande %s.",
+                len(image_urls), getattr(reply_to, "id", None),
+            )
+
+        if _is_bare_trigger(self.bot, reply_to) and not image_urls:
             # Réponse UNIQUE à une mention nue : ce pipeline est la seule
             # autorité pour ce cas. Elle porte désormais le contenu utile
             # (préfixe, commandes réellement chargées, langue du serveur) qui
@@ -221,8 +239,9 @@ def _install_ai_pipeline_upgrade(bot: commands.Bot) -> None:
             channel_id=channel_id or 0,
             user_id=author.id,
             author_name=getattr(author, "display_name", None) or str(author),
-            question=(question or "").strip() or "Salut",
+            question=(question or "").strip() or ("Décris cette image." if image_urls else "Salut"),
             command=command_name,
+            image_urls=image_urls,
         )
         if not result["ok"]:
             return await _send(embed=embeds.error(result["error"]))
