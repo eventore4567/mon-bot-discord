@@ -10,9 +10,9 @@ def test_critical_slash_commands_are_reservations():
 
 def test_rps_is_preserved_under_play_group():
     from utils import slash_catalog
-    names = {getattr(entry, "path", None) for entry in getattr(slash_catalog, "ENTRIES", [])}
+    names = {entry.path for entry in slash_catalog.CATALOG}
     assert "play" in slash_command_budget._required_names()
-    assert "rps" in str(names) or "play rps" in str(names)
+    assert "play rps" in names
 
 def test_role_mass_kept_by_final_slash_group_rebuilder():
     from sentrix_command_surface_v110 import STANDARD_GROUPED_SLASH
