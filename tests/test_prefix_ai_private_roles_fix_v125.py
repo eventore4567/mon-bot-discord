@@ -20,8 +20,8 @@ def source(name: str) -> str:
 def test_prefix_plus_is_never_replaced_by_custom_prefix():
     code = source("main.py")
     function = code.split("async def get_prefix(", 1)[1].split("class BotAllInOne", 1)[0]
-    assert '("+", str(cached), default)' in function
-    assert "when_mentioned_or(*prefixes)" in function
+    assert "return commands.when_mentioned_or(str(cached))(bot, message)" in function
+    assert "Le préfixe personnalisé est réservé au listener PlatformV4" in function
     assert 'bot.prefix_cache[message.guild.id] = cached' in function
 
 
@@ -91,8 +91,8 @@ def test_custom_role_select_numeric_modal_and_embed_option():
 def test_custom_prefix_applies_to_native_commands_and_cache_refreshes():
     custom = source("cogs/custom_commands.py")
     main = source("main.py")
-    assert 'self.bot.prefix_cache[ctx.guild.id] = prefixe' in custom
-    assert 'Les commandes personnalisées se lancent' not in custom
+    assert "set_custom_prefix(self.bot, ctx.guild.id, prefixe)" in custom
+    assert "self.bot.db.set_guild_config(ctx.guild.id, \"prefix\", prefixe)" not in custom
     assert 'prefix_cache_refreshed' in main
     assert 'now - last_refresh >= 20' in main
 
