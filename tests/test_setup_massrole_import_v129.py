@@ -24,7 +24,10 @@ def _walk(items):
 
 
 def test_any_member_can_open_setup_without_receiving_mutation_controls():
-    assert "setup" in access_matrix.PUBLIC_COMMANDS
+    # La racine reste classée configuration afin d'éviter une double ACL ;
+    # son entrée seulement est publique via la politique readonly.
+    assert "setup" in access_matrix.CATEGORY_COMMANDS["configuration"]
+    assert "setup" not in access_matrix.PUBLIC_COMMANDS
     view = setup_invitations._readonly_setup_view(SimpleNamespace(name="Serveur test"))
     assert isinstance(view, discord.ui.LayoutView)
     text = "\n".join(
