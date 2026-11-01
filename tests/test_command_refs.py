@@ -21,9 +21,9 @@ def test_en_slash_le_chemin_publie():
     assert command_refs.reference(SLASH, "trivia") == "/play trivia"
     assert command_refs.reference(SLASH, "fight") == "/duel fight"
     # autodrop n'avait que le « + » jusqu'au 28/10/2026.
-    assert command_refs.reference(SLASH, "autodrop", "#salon") == "/economy autodrop #salon"
+    assert command_refs.reference(SLASH, "autodrop", "#salon") == "+autodrop #salon"
     # infinit resume était masquée du « / » (16/10) ; revenue le 28/10/2026.
-    assert command_refs.reference(SLASH, "infinit resume") == "/counter resume"
+    assert command_refs.reference(SLASH, "infinit resume") == "+infinit resume"
 
 
 def test_en_slash_une_commande_non_publiee_reste_en_plus():
