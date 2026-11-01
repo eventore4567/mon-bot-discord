@@ -26,6 +26,9 @@ class MemoryDB:
     async def fetchone(self, sql, params=()):
         return self.conn.execute(sql, params).fetchone()
 
+    async def fetchall(self, sql, params=()):
+        return self.conn.execute(sql, params).fetchall()
+
     async def get_guild_config(self, guild_id):
         return {"prefix": self.config.get(guild_id, "+")}
 
@@ -135,3 +138,113 @@ async def test_passive_vision_survives_legacy_reply_signature():
         "data:image/jpeg;base64,ZGF0YQ=="
     ]
     channel.send.assert_awaited()
+
+
+
+@pytest.mark.asyncio
+async def test_custom_commands_are_silent_until_admin_allows_roles_or_members():
+    from cogs.platform_v4 import PlatformV4, SCHEMA
+
+    db = MemoryDB()
+    for query in SCHEMA.split(";"):
+        if query.strip():
+            await db.execute(query.strip())
+    await db.execute(
+        "INSERT INTO platform_custom_commands "
+        "(id, guild_id, name, response, created_at, updated_at) "
+        "VALUES (42, 77, 'bienvenue', 'Bonjour', 0, 0)"
+    )
+
+    def member(uid, *, admin=False, roles=()):
+        return SimpleNamespace(
+            id=uid, bot=False,
+            roles=[SimpleNamespace(id=role) for role in roles],
+            guild_permissions=SimpleNamespace(administrator=admin),
+        )
+
+    owner = member(1)
+    admin = member(2, admin=True)
+    role_member = member(3, roles=(123,))
+    user_member = member(4)
+    unknown_member = member(5)
+    other_guild_member = member(6, roles=(123,))
+    people = {m.id: m for m in (
+        owner, admin, role_member, user_member, unknown_member,
+        other_guild_member,
+    )}
+    roles = {123: SimpleNamespace(id=123, is_default=lambda: False)}
+    guild = SimpleNamespace(
+        id=77, owner_id=1,
+        get_member=lambda uid: people.get(uid),
+        get_role=lambda rid: roles.get(rid),
+    )
+    bot = SimpleNamespace(db=db)
+    service = PlatformV4(bot)
+
+    assert await service.can_run_custom_command(guild, owner, 42)
+    assert await service.can_run_custom_command(guild, admin, 42)
+    assert not await service.can_run_custom_command(guild, role_member, 42)
+    assert not await service.can_run_custom_command(guild, user_member, 42)
+    assert not await service.can_run_custom_command(guild, unknown_member, 42)
+
+    with pytest.raises(PermissionError):
+        await service.set_custom_command_access(guild, 3, 42, "role", 123, enabled=True)
+
+    await service.set_custom_command_access(
+        guild, admin.id, 42, "role", 123, enabled=True
+    )
+    assert await service.can_run_custom_command(guild, role_member, 42)
+    assert not await service.can_run_custom_command(guild, user_member, 42)
+    assert not await service.can_run_custom_command(guild, unknown_member, 42)
+
+    await service.set_custom_command_access(
+        guild, admin.id, 42, "user", user_member.id, enabled=True
+    )
+    assert await service.can_run_custom_command(guild, user_member, 42)
+    assert not await service.can_run_custom_command(guild, unknown_member, 42)
+
+    # Les autorisations sont propres à chaque commande et chaque serveur.
+    await db.execute(
+        "INSERT INTO platform_custom_commands "
+        "(id, guild_id, name, response, created_at, updated_at) "
+        "VALUES (43, 77, 'salut', 'Salut', 0, 0)"
+    )
+    assert not await service.can_run_custom_command(guild, role_member, 43)
+
+    await service.set_custom_command_access(
+        guild, owner.id, 42, "everyone", 0, enabled=True
+    )
+    assert await service.can_run_custom_command(guild, unknown_member, 42)
+    await service.set_custom_command_access(
+        guild, owner.id, 42, "everyone", 0, enabled=False
+    )
+    assert not await service.can_run_custom_command(guild, unknown_member, 42)
+
+    await service.set_custom_command_access(
+        guild, admin.id, 42, "role", 123, enabled=False
+    )
+    assert not await service.can_run_custom_command(guild, role_member, 42)
+
+    await service.delete_custom_command(guild.id, admin.id, 42)
+    assert await service.list_custom_command_access(guild.id, 42) == []
+
+
+def test_custom_command_access_checks_before_any_side_effect():
+    platform = (ROOT / "cogs/platform_v4.py").read_text(encoding="utf-8")
+    listener = platform.split("async def on_message(self, message:", 1)[1]
+    decision = listener.index("if not await self.can_run_custom_command(")
+    actions = listener.index("await custom_commands.executer_actions(")
+    deletion = listener.index("await message.delete()")
+    response = listener.index("await message.channel.send(")
+    assert decision < actions < deletion < response
+
+    view = (ROOT / "cogs/setup_custom_commands.py").read_text(encoding="utf-8")
+    assert "class CustomCommandAccessView(discord.ui.View)" in view
+    assert 'placeholder="Autoriser un rôle à lancer la commande"' in view
+    assert 'placeholder="Autoriser un membre à lancer la commande"' in view
+    assert 'label="Qui peut utiliser ?"' in view
+    assert "ephemeral=True" in view
+    assert "class CustomCommandAccessView" in view
+    assert "async def _build_setup_access" not in (
+        ROOT / "cogs/setup_experience_v74.py"
+    ).read_text(encoding="utf-8")
