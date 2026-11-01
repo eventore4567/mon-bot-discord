@@ -90,12 +90,13 @@ def _required_names() -> set[str]:
     # all of them simultaneously could demand 101 roots from Discord's 100 cap.
     primary = (
         _catalog_root_names()
+        | _v110_public_root_names()
         | set(PROOF_SLASH_PREFERRED)
         | set(STAFF_SLASH_PREFERRED)
     )
     if len(primary) > GLOBAL_CHAT_INPUT_BUDGET:
         raise RuntimeError("Canonical slash catalog alone exceeds Discord's 100-root limit")
-    for name in sorted(_v110_public_root_names() | _canonical_group_root_names()):
+    for name in sorted(_canonical_group_root_names()):
         if len(primary) >= GLOBAL_CHAT_INPUT_BUDGET:
             break
         primary.add(name)
