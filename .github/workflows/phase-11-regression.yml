@@ -180,6 +180,7 @@ jobs:
           - name: Legacy + commands + release contracts
             tests: >-
               tests/test_setup_private_banner_vision_regression_v127.py
+              tests/test_setup_massrole_import_v129.py
               tests/test_ai_natural_image_ticket_compact_v128.py
               tests/test_help_short_names.py
               tests/test_help_visibility_batch.py
