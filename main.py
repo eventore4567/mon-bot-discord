@@ -60,6 +60,7 @@ EXTENSIONS = [
     "cogs.economy",
     "cogs.levels",
     "cogs.import_data",
+    "cogs.role_mass_target",
     "cogs.minigames",
     "cogs.games_economy",
     "cogs.music",
