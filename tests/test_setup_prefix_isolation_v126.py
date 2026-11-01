@@ -248,3 +248,45 @@ def test_custom_command_access_checks_before_any_side_effect():
     assert "async def _build_setup_access" not in (
         ROOT / "cogs/setup_experience_v74.py"
     ).read_text(encoding="utf-8")
+
+
+
+@pytest.mark.asyncio
+async def test_unapproved_custom_command_does_not_reply_react_delete_or_award():
+    from cogs.platform_v4 import PlatformV4
+    bot = SimpleNamespace(
+        db=SimpleNamespace(fetchone=AsyncMock(return_value={"id": 42})),
+        get_command=lambda name: None,
+    )
+    member = SimpleNamespace(id=400, bot=False)
+    guild = SimpleNamespace(id=77)
+    message = SimpleNamespace(
+        guild=guild, author=member, content="!bienvenue",
+        channel=SimpleNamespace(send=AsyncMock()),
+        delete=AsyncMock(),
+    )
+    engine = SimpleNamespace(bot=bot, can_run_custom_command=AsyncMock(return_value=False))
+
+    with patch("utils.command_prefixes.get_custom_prefix", AsyncMock(return_value="!")):
+        with patch("cogs.word_reactions.react_for_message", AsyncMock()) as react:
+            await PlatformV4.on_message(engine, message)
+            react.assert_not_awaited()
+
+    message.channel.send.assert_not_awaited()
+    message.delete.assert_not_awaited()
+    engine.can_run_custom_command.assert_awaited_once_with(guild, member, 42)
+
+
+@pytest.mark.asyncio
+async def test_custom_access_controls_are_private_and_fit_discord_view():
+    from cogs.setup_custom_commands import CustomCommandAccessView
+
+    shell = SimpleNamespace(author_id=2, guild=SimpleNamespace(id=77))
+    view = CustomCommandAccessView(shell, 42, "bienvenue", [])
+    assert len(view.children) == 5
+    assert "administrateurs" in view.description()
+    assert "Aucun" in view.description()
+    assert view.public_button.label == "Autoriser tout le monde"
+    view.grants = [{"subject_type": "everyone", "subject_id": 0}]
+    view.sync()
+    assert view.public_button.label.startswith("Interdire à tous")
