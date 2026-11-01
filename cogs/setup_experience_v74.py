@@ -400,6 +400,23 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             "**À configurer :** " + (", ".join(manquants_labels) or "Aucun")
         ))
 
+        # Emojis d'APPLICATION déjà téléversés : jamais de copie sur le serveur.
+        # Chaque catégorie reçoit son dessin propre ; animation seulement pour
+        # les états vivants, avec repli Unicode tant que le cache n'est pas prêt.
+        from utils import sentrix_emojis
+        categories_emoji = {
+            "security": "bouclier",
+            "moderation": "mod",
+            "tickets": "ticket",
+            "welcome": "member_join",
+            "goodbye": "member_leave",
+            "roles": "role",
+            "logs": "logs",
+            "levels": "level",
+            "notifications": "notification",
+            "music": "musique",
+            "ai": "ai",
+        }
         modules = [
             discord.SelectOption(
                 label=CATEGORY_META[key][1][:100],
@@ -409,7 +426,10 @@ class SentriXSetupV74(v73.SentriXSetupV73):
                     else "À configurer" if states.get(key) in {"not_configured", "empty"}
                     else "Désactivé"
                 ),
-                emoji=CATEGORY_META[key][0],
+                emoji=(
+                    sentrix_emojis.partiel(categories_emoji[key])
+                    or CATEGORY_META[key][0]
+                ),
             )
             for key in CATEGORY_ORDER if key in CATEGORY_META
         ]
