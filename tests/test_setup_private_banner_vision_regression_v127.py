@@ -288,8 +288,14 @@ async def test_real_production_v5_reply_reads_the_user_image_and_forwards_to_pip
         "ok": True, "text": "La capture contient le mot bienvenue.",
         "model_key": "luna",
     })
+    # Reproduit la panne réelle : le runtime remplace la méthode de l'instance
+    # par fast_prepare qui ne connaît pas image_urls.
+    incompatible_fast_prepare = AsyncMock(
+        side_effect=TypeError("fast_prepare() got an unexpected keyword argument 'image_urls'")
+    )
     ai_cog = SimpleNamespace(
-        _prepare_and_generate=pipeline, histories={862: ["stale"]},
+        _prepare_and_generate=incompatible_fast_prepare,
+        histories={862: ["stale"]},
     )
     db = SimpleNamespace(is_bot_creator=AsyncMock(return_value=False))
     bot = SimpleNamespace(get_cog=lambda name: ai_cog if name == "Ai" else None,
@@ -305,11 +311,13 @@ async def test_real_production_v5_reply_reads_the_user_image_and_forwards_to_pip
                        return_value=True):
                 with patch("cogs.reply_reference_fix.send_native_ai_reply",
                            AsyncMock()) as deliver:
-                    bot_experience_v5._install_ai_pipeline_upgrade(bot)
-                    await ai_cog.send_sentrix_reply(
-                        channel, author, "analyse cette image", reply_to=message,
-                    )
+                    with patch("cogs.ai.CANONICAL_PREPARE_FOR_VISION", pipeline):
+                        bot_experience_v5._install_ai_pipeline_upgrade(bot)
+                        await ai_cog.send_sentrix_reply(
+                            channel, author, "analyse cette image", reply_to=message,
+                        )
 
+    incompatible_fast_prepare.assert_not_awaited()
     images = pipeline.await_args.kwargs["image_urls"]
     assert len(images) == 1
     assert images[0].startswith("data:image/jpeg;base64,")
