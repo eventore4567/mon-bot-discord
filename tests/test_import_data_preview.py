@@ -61,3 +61,15 @@ def test_setup_page_has_import_button():
     assert 'if page == "levels":' in code
     assert "ImportFileModal(" in code
     assert "interaction.response.send_modal" in code
+
+def test_import_confirmation_buttons_have_localized_labels():
+    import discord
+    from cogs.import_data import ImportConfirm
+
+    view = ImportConfirm(object(), 123, 456, [{"id": 12, "xp": 1}], english=False)
+    labels = [item.label for item in view.children if isinstance(item, discord.ui.Button)]
+    assert labels == ["Ajouter les absents", "Remplacer les champs importés", "Annuler"]
+
+    view_en = ImportConfirm(object(), 123, 456, [{"id": 12, "xp": 1}], english=True)
+    labels_en = [item.label for item in view_en.children if isinstance(item, discord.ui.Button)]
+    assert labels_en == ["Add missing", "Replace imported fields", "Cancel"]
