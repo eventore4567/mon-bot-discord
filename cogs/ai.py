@@ -2814,7 +2814,7 @@ class Ai(commands.Cog, name="Ai"):
                 "content": [
                     {"type": "input_text", "text": prompt},
                     *(
-                        {"type": "input_image", "image_url": url, "detail": "low"}
+                        {"type": "input_image", "image_url": url, "detail": "high"}
                         for url in image_urls
                     ),
                 ],
