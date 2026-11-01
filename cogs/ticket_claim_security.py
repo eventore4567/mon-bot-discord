@@ -351,19 +351,24 @@ def install(bot: commands.Bot) -> None:
         participant_text = "\n".join(participants) or "Aucun participant disponible."
         member_ref = f"<@{int(ticket['user_id'])}> (`{int(ticket['user_id'])}`)"
         moderator_ref = f"<@{interaction.user.id}> (`{interaction.user.id}`)"
+        from . import language_runtime
+        english = await language_runtime.get_language(self.bot, guild.id) == language_runtime.LANG_EN
+        # Preserve the actual name and ID; a deleted Discord channel mention
+        # would otherwise render as "# unknown" after automatic removal.
+        safe_channel = f"#{channel.name} (`{channel.id}`)"
         log_embed = discord.Embed(
-            title="🔒 Fermeture du ticket",
+            title=(f"Ticket #{ticket_id} closed" if english else f"Ticket n°{ticket_id} fermé"),
             description=(
-                f"**Modérateur :** {moderator_ref}\n"
-                f"**Membre :** {member_ref}\n"
-                f"**Création du ticket :** <t:{int(ticket['created_at'] or closed_at)}:R>\n"
-                f"**Raison :** {reason_text}\n\n"
-                f"**Participants :**\n{participant_text}"
-            )[:3900],
+                (f"**Channel:** {safe_channel}\\n"
+                 f"**Moderator:** {moderator_ref}\\n"
+                 f"**Reason:** {reason_text}" if english else
+                 f"**Salon :** {safe_channel}\\n"
+                 f"**Modérateur :** {moderator_ref}\\n"
+                 f"**Raison :** {reason_text}")
+            )[:1200],
             colour=discord.Colour(0xA05CFF),
             timestamp=discord.utils.utcnow(),
         )
-        log_embed.set_footer(text="SentriX")
         event_key = log_service.make_event_key(
             guild.id,
             "ticket_close",
