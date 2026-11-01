@@ -227,6 +227,7 @@ SUBCOMMAND_TIERS: dict[str, str] = {
 }
 
 DISCORD_PERMISSION_COMMANDS: dict[str, str] = {
+    "import-data": "manage_guild",
     # Le fil SentriX (cogs/trace.py) : relire une action du staff, comme on lit
     # le journal d'audit de Discord.
     "trace": "view_audit_log",
@@ -286,6 +287,8 @@ DISCORD_PERMISSION_COMMANDS: dict[str, str] = {
     "schedule-send": "manage_messages",
     "schedule-list": "manage_messages",
     "schedule-cancel": "manage_messages",
+    "sticky": "manage_messages",
+    "sticky add": "manage_messages",
     "sticky-set": "manage_messages",
     "sticky-every": "manage_messages",
     "sticky-off": "manage_messages",

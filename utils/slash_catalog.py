@@ -392,7 +392,7 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("role give", "giverole", "Give a role to a member."),
     _e("role remove", "removerole", "Remove a role from a member."),
     _e("role info", "info role", "Show information about a role."),
-    _e("role mass", "massrole", "Add or remove a role for every member."),
+    _e("role mass", "role mass", "Add or remove a role for members, bots or everyone."),
     _e("role menu", "rolepanel dropdown", "Post a self-role dropdown menu."),
     _e("role reactions", "rolepanel reaction", "Post a self-role reaction panel."),
     _e("role refresh", "rolepanel-refresh", "Refresh a role selection panel."),
@@ -484,6 +484,7 @@ CATALOG: tuple[SlashEntry, ...] = (
     # Fonctions de cogs/sentrix_plus.py : elles existaient, mais seulement en +,
     # et masquées de l'aide par apply_surface faute de classement (08/10/2026).
     _e("sticky set", "sticky-set", "Keep a message at the bottom of a channel."),
+    _e("sticky add", "sticky add", "Create a sticky in normal text or embed format."),
     _e("sticky frequency", "sticky-every", "Repost the sticky message every N messages."),
     _e("sticky off", "sticky-off", "Remove the sticky message from a channel."),
 
