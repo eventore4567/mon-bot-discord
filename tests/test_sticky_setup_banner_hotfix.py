@@ -15,13 +15,23 @@ def test_sticky_modes_preserve_existing_messages():
 
 
 def test_sticky_supports_multiple_channels_and_revisions():
-    source = inspect.getsource(SentriXPlus.sticky_add.callback)
-    assert "re.findall" in source
-    assert "len(ids) <= 5" in source
+    from cogs.sticky_setup_ui import StickySetupView, StickyTextModal
+    source = inspect.getsource(StickySetupView)
+    assert "max_values=5" in source
     assert "_sticky_store" in source
+    assert "send_modal(StickyTextModal(self))" in source
     assert hasattr(SentriXPlus, "sticky_edit")
     assert hasattr(SentriXPlus, "sticky_list")
     assert hasattr(SentriXPlus, "sticky_remove")
+
+
+def test_slash_sticky_has_native_fields_and_prefix_opens_minisetup():
+    from cogs.sticky_setup_ui import open_sticky_setup
+    assert "open_sticky_setup(ctx, self)" in inspect.getsource(SentriXPlus.sticky.callback)
+    params = inspect.signature(SentriXPlus.sticky_add.callback).parameters
+    assert {"channel", "format", "message", "channel_2"} <= set(params)
+    assert "Literal" in str(params["format"].annotation)
+    assert "StickySetupView" in inspect.getsource(open_sticky_setup)
 
 
 def test_embed_editor_banner_is_first_not_last():
