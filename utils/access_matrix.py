@@ -1061,12 +1061,9 @@ async def evaluate(bot, *, command_name: Any, author: Any, guild: Any) -> Access
             "guild-owner-only",
         )
 
-    # /setup est visible à tous. Il ne donne jamais accès directement :
-    # setup_control_center._can_setup vérifie les droits AVANT de construire
-    # l'interface et répond en privé aux utilisateurs non autorisés.
-    if name == "setup":
-        return AccessDecision(True, policy="setup:entrypoint-only")
-
+    # /setup est visible dans Discord pour tous, mais la matrice ne donne
+    # aucun droit à un membre sans les permissions requises. Le refus slash
+    # s'envoie en privé, avant toute création du panneau.
     # Les commandes personnalisées sont réservées aux administrateurs,
     # même si une règle de rôle a accordé la catégorie configuration.
     if name == "customcmd" and not (
