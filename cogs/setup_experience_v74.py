@@ -271,6 +271,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
 
     def __init__(self, bot: commands.Bot, guild: discord.Guild, author_id: int):
         super().__init__(bot, guild, author_id)
+        self._author_member = guild.get_member(int(author_id))
         self.moderation_role_id: int | None = None
         self.moderation_member_id: int | None = None
         self.moderation_profile = "moderator"
@@ -591,7 +592,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             return await setup_automation_extras.build_page(self, page)
         if page == "custom_commands":
             from . import setup_custom_commands
-            if not setup_custom_commands.is_admin(self, SimpleNamespace(user=self.guild.get_member(self.author_id), guild=self.guild)):
+            if not setup_custom_commands.is_admin(self, SimpleNamespace(user=self._author_member or self.guild.get_member(self.author_id), guild=self.guild)):
                 box = discord.ui.Container()
                 box.add_item(discord.ui.TextDisplay("# Commandes personnalisées\nSeuls les administrateurs peuvent créer et modifier des commandes personnalisées."))
                 self._add_navigation(box)
@@ -626,7 +627,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
     async def _build_setup_access(self) -> None:
         """Gestion déléguée : seuls les administrateurs configurent ces accès."""
         if not setup_ui._can_manage_setup_delegates(
-            self.guild.get_member(self.author_id), self.guild
+            self._author_member or self.guild.get_member(self.author_id), self.guild
         ):
             box = discord.ui.Container()
             box.add_item(discord.ui.TextDisplay(
@@ -1724,6 +1725,7 @@ async def _send_setup_v74(self, target):
         return await setup_ui._permission_error(target)
 
     view = SentriXSetupV74(self.bot, guild, member.id)
+    view._author_member = member
     await view.prepare()
 
     if isinstance(target, commands.Context):
