@@ -11,6 +11,7 @@ import logging
 import discord
 from discord.ext import commands
 from . import language_runtime
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.import-data")
 MAX_UPLOAD_SIZE = 1024 * 1024
@@ -176,7 +177,7 @@ class ImportData(commands.Cog):
         embed = discord.Embed(title="Data import · Preview" if english else
                                "Importation · Aperçu", description=description, color=discord.Colour.blurple())
         view = ImportConfirm(self.bot, ctx.guild.id, ctx.author.id, records, english)
-        await ctx.send(embed=embed, view=view, allowed_mentions=discord.AllowedMentions.none())
+        await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embed), view), allowed_mentions=discord.AllowedMentions.none())
 
 
 async def setup(bot: commands.Bot):
