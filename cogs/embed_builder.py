@@ -1008,15 +1008,20 @@ class EmbedBuilderView(discord.ui.View):
             value=f"Champs : {len(self.draft.fields)}/{MAX_FIELDS}\nLiens : {len(self.draft.buttons)}/{MAX_BUTTONS}",
             inline=True,
         )
-        if self.banner_enabled:
-            from utils.premium_log_banners import BANNER_FILENAME
-            status.set_image(url=f"attachment://{BANNER_FILENAME}")
+        # Le visuel dans status.set_image() apparaissait en BAS de l'embed,
+        # jamais au-dessus du titre. Un embed distinct le précède désormais.
         status.add_field(
             name="Brouillon",
             value=self.draft.template_name or "Non sauvegardé",
             inline=False,
         )
-        result = [status]
+        result = []
+        if self.banner_enabled:
+            from utils.premium_log_banners import BANNER_FILENAME
+            strip = discord.Embed(colour=discord.Colour(0x6C57CC))
+            strip.set_image(url=f"attachment://{BANNER_FILENAME}")
+            result.append(strip)
+        result.append(status)
         preview = self.draft.to_embed()
         if preview:
             result.append(preview)

@@ -16,15 +16,45 @@ from utils import sentrix_panels as panels
 logger = logging.getLogger("bot.import-data")
 MAX_UPLOAD_SIZE = 1024 * 1024
 MAX_USERS = 5000
-MAX_VALUE = 10 ** 12
+# UnbelievaBoat peut avoir des soldes bien au-dessus de 10**12.
+# SQLite utilise des INTEGER signés 64 bits. Garder 4e18 par portefeuille
+# et par banque garantit que (cash + bank) reste dans cet espace.
+MAX_XP_VALUE = 10 ** 12
+MAX_CURRENCY_VALUE = 4_000_000_000_000_000_000
+MAX_VALUE = MAX_XP_VALUE  # Compatibilité de l'ancien importeur.
 
 
-def parse_export(raw: bytes) -> list[dict]:
+class BalanceOverflowError(ValueError):
+    """Soldes au-delà de SQLite : adaptation EXPLICITE, jamais silencieuse."""
+
+    def __init__(self, maximum: int, divisor: int):
+        self.maximum = maximum
+        self.divisor = divisor
+        super().__init__(
+            "Un ou plusieurs soldes dépassent la capacité exacte de SentriX. "
+            f"Conversion proposée : division de TOUS les soldes par {divisor:,} "
+            "(avec arrondi inférieur), uniquement après confirmation."
+        )
+
+
+def _currency_divisor(maximum: int) -> int:
+    factor = 1
+    while maximum // factor > MAX_CURRENCY_VALUE:
+        factor *= 10
+    return factor
+
+
+def parse_export(raw: bytes, *, scale_currency: bool = False) -> list[dict]:
+    """Validate entire JSON before a write. Optionally scale oversized money.
+
+    Exact cash/bank values are preserved whenever they fit SQLite. Oversized
+    values require an explicit UI opt-in; never auto-truncate or silently cap.
+    """
     if len(raw) > MAX_UPLOAD_SIZE:
         raise ValueError("File exceeds the 1 MB limit.")
     try:
         payload = json.loads(raw.decode("utf-8-sig"))
-    except (UnicodeError, json.JSONDecodeError) as exc:
+    except (UnicodeError, json.JSONDecodeError, ValueError) as exc:
         raise ValueError("The file must be valid UTF-8 JSON.") from exc
     if not isinstance(payload, dict) or not isinstance(payload.get("users"), list):
         raise ValueError('Expected a JSON object with a "users" array.')
@@ -33,12 +63,13 @@ def parse_export(raw: bytes) -> list[dict]:
         raise ValueError("The export must contain between 1 and 5000 users.")
     seen = set()
     cleaned = []
+    maximum_money = 0
     for index, row in enumerate(rows, start=1):
         if not isinstance(row, dict):
             raise ValueError(f"Invalid record at position {index}.")
         try:
             user_id = int(row.get("id", row.get("user_id")))
-        except (ValueError, TypeError) as exc:
+        except (ValueError, TypeError, OverflowError) as exc:
             raise ValueError(f"Missing or invalid user ID at position {index}.") from exc
         if user_id <= 0 or user_id >= 2 ** 64 or user_id in seen:
             raise ValueError(f"Invalid or duplicate user ID at position {index}.")
@@ -50,13 +81,79 @@ def parse_export(raw: bytes) -> list[dict]:
             value = row[key]
             if isinstance(value, bool) or not isinstance(value, int):
                 raise ValueError(f"{key} must be an integer (user {user_id}).")
-            if value < 0 or value > (100000 if key == "level" else MAX_VALUE):
+            if value < 0 or (key == "level" and value > 100000) or (
+                key == "xp" and value > MAX_XP_VALUE
+            ):
                 raise ValueError(f"{key} is outside the allowed range (user {user_id}).")
             values[key] = value
+            if key in ("cash", "bank"):
+                maximum_money = max(maximum_money, value)
         if len(values) == 1:
             raise ValueError(f"User {user_id} has no supported data.")
         cleaned.append(values)
+
+    factor = _currency_divisor(maximum_money)
+    if factor > 1:
+        if not scale_currency:
+            raise BalanceOverflowError(maximum_money, factor)
+        for row in cleaned:
+            for field in ("cash", "bank"):
+                if field in row:
+                    row[field] //= factor
     return cleaned
+
+
+class BalanceScaleConsent(discord.ui.View):
+    """Two-stage confirmation: choose conversion, then preview, then import."""
+
+    def __init__(self, bot, guild_id: int, author_id: int, raw: bytes, divisor: int,
+                 maximum: int, english: bool):
+        super().__init__(timeout=180)
+        self.bot = bot
+        self.guild_id = guild_id
+        self.author_id = author_id
+        self.raw = raw
+        self.divisor = divisor
+        self.maximum = maximum
+        self.english = english
+        self.used = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if (self.used or interaction.guild_id != self.guild_id
+                or interaction.user.id != self.author_id
+                or not isinstance(interaction.user, discord.Member)
+                or not interaction.user.guild_permissions.manage_guild):
+            await interaction.response.send_message(
+                "Cette conversion ne vous appartient pas ou a déjà été traitée.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Adapter les soldes et voir l'aperçu",
+                       style=discord.ButtonStyle.primary)
+    async def convert(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.used = True
+        self.stop()
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        # The explicit click enables scaling. A SECOND confirmation is still
+        # necessary to write to the database.
+        rows = parse_export(self.raw, scale_currency=True)
+        embed, confirm = await _preview_records(
+            self.bot, self.guild_id, self.author_id, rows,
+            scaled_by=self.divisor, english=self.english,
+        )
+        await panels.envoyer(
+            interaction.followup,
+            panels.avec_composants(panels.depuis_embed(embed), confirm),
+            ephemere=True,
+        )
+
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.used = True
+        self.stop()
+        await interaction.response.edit_message(view=None)
 
 
 class ImportConfirm(discord.ui.View):
@@ -179,10 +276,35 @@ async def preview_attachment(bot, guild_id: int, author_id: int, attachment: dis
             or attachment.size > MAX_UPLOAD_SIZE):
         raise ValueError("Le fichier doit être un JSON de 1 Mo maximum.")
     try:
-        records = parse_export(await attachment.read())
+        raw = await attachment.read()
     except (discord.HTTPException, OSError) as exc:
         raise ValueError("Impossible de lire la pièce jointe.") from exc
     english = await language_runtime.get_language(bot, guild_id) == language_runtime.LANG_EN
+    try:
+        records = parse_export(raw)
+    except BalanceOverflowError as exc:
+        fmt = lambda n: f"{n:,}".replace(",", " ")
+        description = (
+            f"Le plus grand solde est de **{fmt(exc.maximum)}** pièces. "
+            "Le stocker directement ferait dépasser la capacité des entiers SQLite.\n"
+            f"Vous pouvez diviser **tous** les soldes cash et banque par "
+            f"**{fmt(exc.divisor)}**, avec arrondi inférieur. "
+            "Les montants sont donc modifiés, pas seulement affichés autrement.\n"
+            "Aucune donnée ne sera modifiée sans les deux validations successives. "
+            "Conservez le fichier d'export original."
+        )
+        embed = discord.Embed(title="Soldes trop élevés · Conversion facultative",
+                              description=description, colour=discord.Colour.orange())
+        return embed, BalanceScaleConsent(
+            bot, guild_id, author_id, raw, exc.divisor, exc.maximum, english,
+        )
+    return await _preview_records(bot, guild_id, author_id, records, english=english)
+
+
+async def _preview_records(bot, guild_id: int, author_id: int, records: list[dict],
+                           *, scaled_by: int = 1, english: bool | None = None):
+    if english is None:
+        english = await language_runtime.get_language(bot, guild_id) == language_runtime.LANG_EN
     levels = sum("xp" in row or "level" in row for row in records)
     economy = sum("cash" in row or "bank" in row for row in records)
     description = (
@@ -194,6 +316,12 @@ async def preview_attachment(bot, guild_id: int, author_id: int, attachment: dis
         "**Ajouter les absents** conserve les données actuelles. **Remplacer** modifie uniquement les champs présents dans le fichier.\n"
         "Aucune donnée n'est modifiée avant confirmation. Sauvegardez la base avant l'import."
     )
+    if scaled_by > 1:
+        description += (
+            "\n**Avertissement :** tous les soldes cash/banque de cet export ont été "
+            f"divisés par **{scaled_by:,}** (arrondi inférieur). "
+            "Les valeurs originales ne seront pas restaurées par SentriX."
+        )
     embed = discord.Embed(
         title="Data import · Preview" if english else "Importation · Aperçu",
         description=description,

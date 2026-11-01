@@ -63,6 +63,13 @@ async def _prepare_private_setup_interaction(interaction: discord.Interaction) -
             await raw_edit(interaction, **kwargs)
         else:
             await interaction.edit_original_response(**kwargs)
+        # Le message d'acquittement public n'a aucune raison de rester dans le
+        # salon. Il faut d'abord finaliser le defer (sinon le premier followup
+        # perd son caractère éphémère), PUIS supprimer cet original.
+        try:
+            await interaction.delete_original_response()
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            logger.warning("Impossible de retirer l'acquittement public de /setup.")
     return True
 
 

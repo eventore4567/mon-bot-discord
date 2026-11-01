@@ -9,7 +9,7 @@ import asyncio
 import logging
 import re
 import time
-from typing import Any
+from typing import Any, Literal
 
 import discord
 
@@ -534,128 +534,268 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
     # STICKY MESSAGES
     # ------------------------------------------------------------------
 
-    @commands.group(name="sticky", invoke_without_command=True)
-    @commands.guild_only()
-    @commands.has_guild_permissions(manage_messages=True)
-    async def sticky(self, ctx: commands.Context):
-        await ctx.send("Use `+sticky add <message>` to create a sticky in this channel.")
+    @staticmethod
+    def _sticky_decode(stored: str) -> tuple[str, str]:
+        value = str(stored or "")
+        for prefix, mode in (
+            ("__SENTRIX_BANNER__", "banner"),
+            ("__SENTRIX_EMBED__", "embed"),
+            ("__SENTRIX_TEXT__", "text"),
+        ):
+            if value.startswith(prefix):
+                return mode, value[len(prefix):]
+        return "text", value
 
-    @sticky.command(name="add")
-    @commands.guild_only()
-    @commands.has_guild_permissions(manage_messages=True)
-    async def sticky_add(self, ctx: commands.Context, *, message: str = ""):
-        """Create a sticky with a real text/embed choice, in the current channel."""
-        message = str(message or "").strip()
-        channel = ctx.channel
-        match = re.match(r"^<#(\d+)>\s+([\s\S]+)$", message)
-        if match:
-            channel = ctx.guild.get_channel(int(match.group(1)))
-            message = match.group(2).strip()
-        if not isinstance(channel, discord.TextChannel):
-            return await ctx.send("Choose a text channel.")
-        if not message or len(message) > 1700:
-            return await ctx.send("Usage: `+sticky add Your message` (max 1700 characters).")
+    @staticmethod
+    def _sticky_encode(content: str, mode: str) -> str:
+        prefix = {
+            "text": "__SENTRIX_TEXT__",
+            "embed": "__SENTRIX_EMBED__",
+            "banner": "__SENTRIX_BANNER__",
+        }.get(mode)
+        if prefix is None:
+            raise ValueError("Format sticky inconnu.")
+        return prefix + content
 
-        from . import language_runtime
-        english = await language_runtime.get_language(self.bot, ctx.guild.id) == language_runtime.LANG_EN
-        view = discord.ui.View(timeout=180)
-        plain = discord.ui.Button(
-            label="Normal text" if english else "Texte normal",
-            style=discord.ButtonStyle.primary,
-        )
-        embedded = discord.ui.Button(
-            label="Embed" if english else "Encadré (embed)",
-            style=discord.ButtonStyle.secondary,
-        )
+    async def _sticky_post(self, channel: discord.TextChannel, content: str, mode: str):
+        kwargs = {"allowed_mentions": discord.AllowedMentions.none()}
+        if mode == "text":
+            kwargs["content"] = content
+        elif mode == "embed":
+            kwargs["embed"] = discord.Embed(description=content)
+        elif mode == "banner":
+            # Deux embeds distincts : la bande 1200x24 précède réellement le
+            # texte, au lieu de se retrouver au bas de l'embed.
+            from utils.premium_log_banners import get_premium_log_banner, BANNER_FILENAME
+            strip = discord.Embed()
+            strip.set_image(url=f"attachment://{BANNER_FILENAME}")
+            kwargs["embeds"] = [strip, discord.Embed(description=content)]
+            kwargs["file"] = discord.File(str(get_premium_log_banner()), filename=BANNER_FILENAME)
+        else:
+            raise ValueError("Format sticky inconnu.")
+        return await channel.send(**kwargs)
 
-        async def choose(interaction: discord.Interaction, use_embed: bool):
-            if interaction.user.id != ctx.author.id:
-                return await interaction.response.send_message(
-                    "Only the author can choose this format." if english
-                    else "Seul l'auteur peut choisir le format.", ephemeral=True
-                )
-            if not interaction.user.guild_permissions.manage_messages:
-                return await interaction.response.send_message(
-                    "Manage Messages permission is required." if english
-                    else "La permission Gérer les messages est requise.", ephemeral=True
-                )
-            await interaction.response.edit_message(
-                content=("Sticky created." if english else "Sticky créé."), view=None
-            )
+    async def _sticky_store(self, guild_id: int, channel: discord.TextChannel, content: str, mode: str):
+        if len(content) > 1700 or not content.strip():
+            raise ValueError("Le sticky doit contenir entre 1 et 1700 caractères.")
+        lock = self._sticky_locks.setdefault(channel.id, asyncio.Lock())
+        async with lock:
             old = await self.bot.db.fetchone(
-                "SELECT message_id FROM sentrix_sticky WHERE channel_id=?", (channel.id,)
+                "SELECT message_id FROM sentrix_sticky WHERE channel_id=? AND guild_id=?",
+                (channel.id, guild_id),
             )
+            # Publier avant de remplacer l'ancien évite de perdre un sticky si
+            # Discord refuse les messages ou les pièces jointes.
+            new = await self._sticky_post(channel, content, mode)
+            try:
+                await self.bot.db.execute(
+                    "INSERT OR REPLACE INTO sentrix_sticky"
+                    "(channel_id,guild_id,content,message_id,every_messages,counter) "
+                    "VALUES(?,?,?,?,1,0)",
+                    (channel.id, guild_id, self._sticky_encode(content, mode), new.id),
+                )
+            except Exception:
+                try:
+                    await new.delete()
+                except discord.HTTPException:
+                    pass
+                raise
+            self._no_sticky.pop(channel.id, None)
             if old and old["message_id"]:
                 try:
                     previous = await channel.fetch_message(int(old["message_id"]))
                     await previous.delete()
                 except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                     pass
+
+
+    @commands.group(name="sticky", invoke_without_command=True)
+    @commands.guild_only()
+    @commands.has_guild_permissions(manage_messages=True)
+    async def sticky(self, ctx: commands.Context):
+        """Le préfixe + ouvre un mini setup avec bannière et menus Discord."""
+        from .sticky_setup_ui import open_sticky_setup
+        await open_sticky_setup(ctx, self)
+
+    @sticky.command(name="add")
+    @commands.guild_only()
+    @commands.has_guild_permissions(manage_messages=True)
+    async def sticky_add(
+        self, ctx: commands.Context,
+        channel: discord.TextChannel,
+        format: Literal["texte", "embed", "banniere"],
+        message: str,
+        channel_2: discord.TextChannel | None = None,
+        channel_3: discord.TextChannel | None = None,
+        channel_4: discord.TextChannel | None = None,
+        channel_5: discord.TextChannel | None = None,
+    ):
+        """Champs /sticky add : salon, format, message et autres salons facultatifs."""
+        await self._sticky_slash_apply(
+            ctx, "add", channel, format, message,
+            [channel_2, channel_3, channel_4, channel_5],
+        )
+
+    @sticky.command(name="edit")
+    @commands.guild_only()
+    @commands.has_guild_permissions(manage_messages=True)
+    async def sticky_edit(
+        self, ctx: commands.Context,
+        channel: discord.TextChannel,
+        format: Literal["texte", "embed", "banniere"],
+        message: str,
+        channel_2: discord.TextChannel | None = None,
+        channel_3: discord.TextChannel | None = None,
+        channel_4: discord.TextChannel | None = None,
+        channel_5: discord.TextChannel | None = None,
+    ):
+        """Champs /sticky edit : salons, format et nouveau texte."""
+        await self._sticky_slash_apply(
+            ctx, "edit", channel, format, message,
+            [channel_2, channel_3, channel_4, channel_5],
+        )
+
+    async def _sticky_slash_apply(
+        self, ctx: commands.Context, action: str,
+        channel: discord.TextChannel, mode: str, content: str,
+        extra_channels: list[discord.TextChannel | None],
+    ):
+        mode = {"texte": "text", "embed": "embed", "banniere": "banner"}.get(mode, mode)
+        channels = list(dict.fromkeys(c for c in [channel, *extra_channels] if c is not None))
+        if not channels or len(channels) > 5:
+            return await ctx.send("Choisissez entre 1 et 5 salons.", ephemeral=bool(ctx.interaction))
+        if not 1 <= len(str(content).strip()) <= 1700:
+            return await ctx.send("Le texte doit contenir 1 à 1700 caractères.", ephemeral=bool(ctx.interaction))
+        if ctx.interaction:
+            await ctx.defer(ephemeral=True)
+        successes, errors = [], []
+        for target in channels:
+            if not isinstance(target, discord.TextChannel) or target.guild.id != ctx.guild.id:
+                errors.append("Salon invalide")
+                continue
+            bot_perms = target.permissions_for(ctx.guild.me)
+            user_perms = target.permissions_for(ctx.author)
+            if not (
+                user_perms.manage_messages and bot_perms.view_channel
+                and bot_perms.send_messages and bot_perms.manage_messages
+                and (mode == "text" or bot_perms.embed_links)
+                and (mode != "banner" or bot_perms.attach_files)
+            ):
+                errors.append(target.mention)
+                continue
             try:
-                sent = await channel.send(
-                    embed=discord.Embed(description=message) if use_embed else None,
-                    content=None if use_embed else message,
-                    allowed_mentions=discord.AllowedMentions.none(),
-                )
-            except (discord.Forbidden, discord.HTTPException):
-                return await interaction.followup.send(
-                    "Cannot send a sticky to this channel." if english else
-                    "Impossible de publier le sticky dans ce salon.", ephemeral=True
-                )
-            stored = ("__SENTRIX_EMBED__" if use_embed else "__SENTRIX_TEXT__") + message
-            await self.bot.db.execute(
-                "INSERT OR REPLACE INTO sentrix_sticky(channel_id,guild_id,content,message_id,every_messages,counter) VALUES(?,?,?,?,1,0)",
-                (channel.id, ctx.guild.id, stored, sent.id),
-            )
-            self._no_sticky.pop(int(channel.id), None)
-            view.stop()
-
-        async def on_plain(interaction):
-            await choose(interaction, False)
-
-        async def on_embed(interaction):
-            await choose(interaction, True)
-
-        plain.callback = on_plain
-        embedded.callback = on_embed
-        view.add_item(plain)
-        view.add_item(embedded)
+                if action == "edit":
+                    existing = await self.bot.db.fetchone(
+                        "SELECT channel_id FROM sentrix_sticky WHERE guild_id=? AND channel_id=?",
+                        (ctx.guild.id, target.id),
+                    )
+                    if not existing:
+                        errors.append(target.mention)
+                        continue
+                await self._sticky_store(ctx.guild.id, target, str(content).strip(), mode)
+                successes.append(target.mention)
+            except (ValueError, OSError, discord.HTTPException):
+                logger.exception("Échec de mise à jour sticky dans %s", target.id)
+                errors.append(target.mention)
+        result = f"{len(successes)} salon(s) mis à jour."
+        if errors:
+            result += "\nÉchec : " + ", ".join(errors)
         await ctx.send(
-            ("Choose the sticky format for " if english else "Choisissez le format du sticky dans ")
-            + channel.mention + ":", view=view,
+            result, ephemeral=bool(ctx.interaction),
             allowed_mentions=discord.AllowedMentions.none(),
         )
+
+    @sticky.command(name="list")
+    @commands.guild_only()
+    @commands.has_guild_permissions(manage_messages=True)
+    async def sticky_list(self, ctx: commands.Context):
+        rows = await self.bot.db.fetchall(
+            "SELECT channel_id,content FROM sentrix_sticky WHERE guild_id=? ORDER BY channel_id LIMIT 30",
+            (ctx.guild.id,),
+        )
+        lines = []
+        for row in rows:
+            mode, content = self._sticky_decode(row["content"])
+            channel = ctx.guild.get_channel(int(row["channel_id"]))
+            name = channel.mention if channel else f"Salon {row['channel_id']}"
+            lines.append(f"{name} · {mode} · {content[:70]}")
+        await ctx.send(
+            "\n".join(lines) if lines else "Aucun sticky configuré.",
+            ephemeral=bool(ctx.interaction), allowed_mentions=discord.AllowedMentions.none()
+        )
+
+    @sticky.command(name="remove")
+    @commands.guild_only()
+    @commands.has_guild_permissions(manage_messages=True)
+    async def sticky_remove(self, ctx: commands.Context, channel: discord.TextChannel):
+        if not channel.permissions_for(ctx.author).manage_messages:
+            return await ctx.send("Permission insuffisante dans ce salon.", ephemeral=bool(ctx.interaction))
+        await self._sticky_delete(ctx.guild.id, channel)
+        await ctx.send(
+            f"Sticky supprimé dans {channel.mention}.", ephemeral=bool(ctx.interaction),
+            allowed_mentions=discord.AllowedMentions.none()
+        )
+
+    async def _sticky_delete(self, guild_id: int, channel: discord.TextChannel) -> None:
+        lock = self._sticky_locks.setdefault(channel.id, asyncio.Lock())
+        async with lock:
+            row = await self.bot.db.fetchone(
+                "SELECT message_id FROM sentrix_sticky WHERE guild_id=? AND channel_id=?",
+                (guild_id, channel.id),
+            )
+            await self.bot.db.execute(
+                "DELETE FROM sentrix_sticky WHERE guild_id=? AND channel_id=?",
+                (guild_id, channel.id),
+            )
+            self._no_sticky[int(channel.id)] = True
+            if row and row["message_id"]:
+                try:
+                    await (await channel.fetch_message(int(row["message_id"]))).delete()
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    pass
 
     @commands.command(name="sticky-set")
     @commands.guild_only()
     @commands.has_guild_permissions(manage_messages=True)
     async def sticky_set(self, ctx: commands.Context, channel: discord.TextChannel, *, message: str):
-        """Crée un message sticky : +sticky-set #annonces texte"""
-        content = str(message).strip()
-        if not content or len(content) > 1700:
-            return await ctx.send("Sticky must contain between 1 and 1700 characters.")
-        old = await self.bot.db.fetchone("SELECT message_id FROM sentrix_sticky WHERE channel_id=?", (channel.id,))
-        if old and old["message_id"]:
-            try:
-                previous = await channel.fetch_message(int(old["message_id"]))
-                await previous.delete()
-            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                pass
-        # "embed:" selects an embed; plain text is the default.
-        use_embed = content.lower().startswith("embed:")
-        content = content[6:].strip() if use_embed else content
-        if content.lower().startswith("text:"):
-            content = content[5:].strip()
-        if not content:
-            return await ctx.send("Sticky content cannot be empty.")
-        stored = ("__SENTRIX_EMBED__" if use_embed else "__SENTRIX_TEXT__") + content
-        sent = await channel.send(embed=discord.Embed(description=content) if use_embed else None, content=None if use_embed else content, allowed_mentions=discord.AllowedMentions.none())
-        await self.bot.db.execute(
-            "INSERT OR REPLACE INTO sentrix_sticky(channel_id,guild_id,content,message_id,every_messages,counter) VALUES(?,?,?,?,1,0)",
-            (channel.id, ctx.guild.id, stored, sent.id),
+        """Compatibilité /sticky set et +sticky-set : texte:, embed: ou banner:."""
+        raw = str(message or "").strip()
+        mode = None
+        for prefix, selected in (("banner:", "banner"), ("embed:", "embed"), ("text:", "text")):
+            if raw.casefold().startswith(prefix):
+                mode, raw = selected, raw[len(prefix):].strip()
+                break
+        # /sticky set #salon texte n'impose plus le mode texte par défaut :
+        # l'utilisateur choisit en boutons, avec ou sans bandeau.
+        if mode is None and raw:
+            # L'ancien /sticky set ne doit pas exiger un préfixe text:/embed: :
+            # le mini panneau permet de choisir explicitement le format.
+            from .sticky_setup_ui import StickySetupView
+            setup_view = StickySetupView(self, ctx.guild.id, ctx.author.id, default_channel=channel)
+            setup_view.content = raw
+            panel = panels.Panneau(
+                titre="Sticky · format", kind="moderation", banniere=True,
+                sous_titre="Choisissez les salons et le format avant la publication.",
+                sections=[panels.Section("Texte", texte=raw[:350])],
+            )
+            return await panels.envoyer(
+                ctx, panels.avec_composants(panel, setup_view),
+                ephemere=bool(ctx.interaction),
+            )
+        if not raw or len(raw) > 1700:
+            return await ctx.send("Indiquez un message de 1 à 1700 caractères.")
+        if not channel.permissions_for(ctx.author).manage_messages:
+            return await ctx.send("Permission Gérer les messages requise dans ce salon.")
+        try:
+            await self._sticky_store(ctx.guild.id, channel, raw, mode)
+        except (discord.HTTPException, ValueError, OSError):
+            logger.exception("Impossible de configurer le sticky dans %s", channel.id)
+            return await ctx.send("Impossible de publier le sticky dans ce salon.")
+        await ctx.send(
+            f"Sticky configuré dans {channel.mention} ({mode}). "
+            "Pour le choix interactif : +sticky add #salon Texte.",
+            allowed_mentions=discord.AllowedMentions.none(),
         )
-        self._no_sticky.pop(int(channel.id), None)
-        await panels.envoyer(ctx, _reponse("Message sticky", f'Sticky enabled in {channel.mention}. It will appear after each new message. Use embed: or text: before the message to choose its format.', kind="success"))
 
     @commands.command(name="sticky-every")
     @commands.guild_only()
@@ -729,15 +869,8 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
                 except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                     pass
             try:
-                stored = str(row["content"])
-                use_embed = stored.startswith("__SENTRIX_EMBED__")
-                if stored.startswith("__SENTRIX_EMBED__"):
-                    displayed = stored[len("__SENTRIX_EMBED__"):]
-                elif stored.startswith("__SENTRIX_TEXT__"):
-                    displayed = stored[len("__SENTRIX_TEXT__"):]
-                else:
-                    displayed = stored  # Existing sticky records remain compatible.
-                sticky = await message.channel.send(embed=discord.Embed(description=displayed) if use_embed else None, content=None if use_embed else displayed, allowed_mentions=discord.AllowedMentions.none())
+                mode, displayed = self._sticky_decode(row["content"])
+                sticky = await self._sticky_post(message.channel, displayed, mode)
             except (discord.Forbidden, discord.HTTPException):
                 return
             await self.bot.db.execute(
