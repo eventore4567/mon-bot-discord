@@ -172,10 +172,21 @@ async def api_commands_get(dashboard, request: web.Request):
     return web.json_response({"ok": True, "items": await service.list_custom_commands(guild.id)})
 
 
+def _custom_admin(guild, session) -> bool:
+    user_id = int(session["user"]["id"])
+    member = guild.get_member(user_id)
+    return bool(
+        guild.owner_id == user_id
+        or (member is not None and member.guild_permissions.administrator)
+    )
+
+
 async def api_commands_post(dashboard, request: web.Request):
     session, guild, service, error = await _admin_ctx(dashboard, request, write=True)
     if error:
         return error
+    if not _custom_admin(guild, session):
+        return dashboard._json_error("Seuls les administrateurs peuvent gérer les commandes personnalisées.", 403)
     try:
         item = await service.save_custom_command(guild, int(session["user"]["id"]), await _payload(request))
     except (TypeError, ValueError) as exc:
@@ -187,6 +198,8 @@ async def api_command_delete(dashboard, request: web.Request):
     session, guild, service, error = await _admin_ctx(dashboard, request, write=True)
     if error:
         return error
+    if not _custom_admin(guild, session):
+        return dashboard._json_error("Seuls les administrateurs peuvent gérer les commandes personnalisées.", 403)
     try:
         await service.delete_custom_command(guild.id, int(session["user"]["id"]), int(request.match_info["item_id"]))
     except (TypeError, ValueError) as exc:
