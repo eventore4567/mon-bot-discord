@@ -28,20 +28,22 @@ async def test_slash_setup_ne_defer_jamais_publiquement():
     command = SimpleNamespace(qualified_name="setup")
     await _invoke_original(bot, command, interaction, (), {})
     setup.send_setup.assert_awaited_once_with(interaction)
-    response.defer.assert_not_awaited()
+    response.defer.assert_awaited_once_with(ephemeral=True, thinking=True)
     response.send_message.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_slash_setup_indisponible_est_ephemere():
     response = SimpleNamespace(defer=AsyncMock(), send_message=AsyncMock())
-    interaction = SimpleNamespace(response=response)
+    followup = SimpleNamespace(send=AsyncMock())
+    interaction = SimpleNamespace(response=response, followup=followup)
     bot = SimpleNamespace(get_cog=lambda _name: None)
     await _invoke_original(bot, SimpleNamespace(qualified_name="setup"), interaction, (), {})
-    response.send_message.assert_awaited_once_with(
+    followup.send.assert_awaited_once_with(
         "Configuration momentanément indisponible.", ephemeral=True
     )
-    response.defer.assert_not_awaited()
+    response.defer.assert_awaited_once_with(ephemeral=True, thinking=True)
+    response.send_message.assert_not_awaited()
 
 
 def test_setup_inclut_les_etats_et_la_banniere():

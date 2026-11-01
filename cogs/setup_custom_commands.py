@@ -100,7 +100,11 @@ class CommandTextModal(discord.ui.Modal):
             saved = await platform.save_custom_command(
                 self.shell.guild, interaction.user.id,
                 {"id": int(self.existing["id"]) if self.existing else 0,
-                 "name": name, "response": str(self.texte.value or "")},
+                 "name": name, "response": str(self.texte.value or ""),
+                 "embed_title": str(self.existing["embed_title"]) if self.existing else "",
+                 "embed_color": int(self.existing["embed_color"]) if self.existing else 0x6C57CC,
+                 "ping_role_id": int(self.existing["ping_role_id"]) if self.existing else 0,
+                 "enabled": bool(self.existing["enabled"]) if self.existing else True},
             )
         except ValueError as exc:
             return await notify(interaction, f"Commande refusée : {exc}")
@@ -120,41 +124,103 @@ class PrefixModal(discord.ui.Modal, title="Préfixe des commandes personnalisée
         if not value or value.startswith("/") or any(ch.isspace() for ch in value):
             return await notify(interaction, "Préfixe invalide : 1 à 3 caractères, sans espaces ni slash.")
         await self.shell.bot.db.set_guild_config(self.shell.guild.id, "prefix", value)
-        await notify(interaction, "Préfixe enregistré. Actualisez le panneau pour voir la nouvelle valeur.")
+        # Éviter le cache périmé : + reste actif dans tous les cas.
+        self.shell.bot.prefix_cache[self.shell.guild.id] = value
+        await notify(interaction, "Préfixe personnalisé enregistré. Le préfixe + reste disponible.")
+
+
+async def enregistrer_action(shell, name: str, kind: str, value: int, seconds: int) -> None:
+    """Stockage partagé par le formulaire numérique et le sélecteur de rôles."""
+    row = await shell.bot.db.fetchone(
+        "SELECT name FROM platform_custom_commands WHERE guild_id=? AND name=?",
+        (shell.guild.id, name),
+    )
+    if not row:
+        raise ValueError("Cette commande a été supprimée.")
+    from cogs.custom_commands import actions_de, MAX_ACTIONS
+    actions = await actions_de(shell.bot.db, shell.guild.id, name)
+    if len(actions) >= MAX_ACTIONS:
+        raise ValueError("Limite de 10 actions par commande atteinte.")
+    await shell.bot.db.execute(
+        "INSERT INTO custom_command_actions(guild_id,name,kind,value,duration_s) VALUES(?,?,?,?,?)",
+        (shell.guild.id, name, kind, value, seconds),
+    )
 
 
 class ActionModal(discord.ui.Modal):
-    valeur = discord.ui.TextInput(label="Rôle (mention/ID) ou montant", placeholder="123456789 ou 100", max_length=40)
-    duree = discord.ui.TextInput(label="Durée du rôle temporaire (si concerné)", required=False,
-                                 max_length=20, placeholder="1h, 7d")
-
+    """Argent et expérience : aucun champ rôle inutile."""
     def __init__(self, shell, name: str, kind: str, module_states: dict):
         super().__init__(title=KINDS[kind])
         self.shell, self.name, self.kind, self.states = shell, name, kind, module_states
+        self.valeur = discord.ui.TextInput(
+            label="Montant" if kind == "money" else "Points d'expérience",
+            placeholder="Exemple : 100", max_length=9,
+            min_length=1,
+        )
+        self.add_item(self.valeur)
 
     async def on_submit(self, interaction: discord.Interaction):
-        row = await self.shell.bot.db.fetchone(
-            "SELECT name FROM platform_custom_commands WHERE guild_id=? AND name=?",
-            (self.shell.guild.id, self.name),
-        )
-        if not row:
-            return await notify(interaction, "Cette commande a été supprimée.")
-        from cogs.custom_commands import actions_de, MAX_ACTIONS
-        actions = await actions_de(self.shell.bot.db, self.shell.guild.id, self.name)
-        if len(actions) >= MAX_ACTIONS:
-            return await notify(interaction, "Limite de 10 actions par commande atteinte.")
         try:
             value, seconds = parse_action(
-                self.kind, str(self.valeur.value or ""), str(self.duree.value or ""),
+                self.kind, str(self.valeur.value or ""), "",
                 self.shell.guild, self.states,
             )
+            await enregistrer_action(self.shell, self.name, self.kind, value, seconds)
         except ValueError as exc:
             return await notify(interaction, str(exc))
-        await self.shell.bot.db.execute(
-            "INSERT INTO custom_command_actions(guild_id,name,kind,value,duration_s) VALUES(?,?,?,?,?)",
-            (self.shell.guild.id, self.name, self.kind, value, seconds),
+        await notify(interaction, "Action ajoutée. Actualise le panneau pour la voir.")
+
+
+class DureeRoleModal(discord.ui.Modal, title="Durée du rôle temporaire"):
+    def __init__(self, shell, name: str, role_id: int, states: dict):
+        super().__init__()
+        self.shell, self.name, self.role_id, self.states = shell, name, role_id, states
+        self.duree = discord.ui.TextInput(
+            label="Durée", placeholder="10m, 1h ou 7d", max_length=20,
         )
-        await notify(interaction, "Action ajoutée. Vous pouvez en ajouter une autre ou actualiser le panneau.")
+        self.add_item(self.duree)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            value, seconds = parse_action(
+                "role_temp", str(self.role_id), str(self.duree.value),
+                self.shell.guild, self.states,
+            )
+            await enregistrer_action(self.shell, self.name, "role_temp", value, seconds)
+        except ValueError as exc:
+            return await notify(interaction, str(exc))
+        await notify(interaction, "Rôle temporaire ajouté à la commande.")
+
+
+class ChoisirRoleAction(discord.ui.View):
+    """Le menu natif Discord présente les vrais rôles sans demander d'ID."""
+    def __init__(self, shell, name: str, kind: str, states: dict):
+        super().__init__(timeout=180)
+        self.shell, self.name, self.kind, self.states = shell, name, kind, states
+        select = discord.ui.RoleSelect(
+            placeholder="Choisir le rôle à ajouter ou retirer…",
+            min_values=1, max_values=1,
+        )
+
+        async def selection(interaction: discord.Interaction):
+            if interaction.user.id != shell.author_id:
+                return await notify(interaction, "Seul l'auteur du panneau peut choisir un rôle.")
+            role = select.values[0]
+            if kind == "role_temp":
+                return await interaction.response.send_modal(
+                    DureeRoleModal(shell, name, role.id, states)
+                )
+            try:
+                value, seconds = parse_action(
+                    kind, str(role.id), "", shell.guild, states,
+                )
+                await enregistrer_action(shell, name, kind, value, seconds)
+            except ValueError as exc:
+                return await notify(interaction, str(exc))
+            return await notify(interaction, f"Action enregistrée pour {role.mention}.")
+
+        select.callback = selection
+        self.add_item(select)
 
 
 async def build_page(shell) -> None:
@@ -206,7 +272,9 @@ async def build_page(shell) -> None:
         ) or "Aucune action ajoutée."
         container.add_item(discord.ui.TextDisplay(
             f"### {prefix}{selected['name']}\n"
-            f"**Message :** {str(selected['response'])[:250]}\n"
+            f"**Format :** {'Embed Discord' if selected['embed_title'] else 'Texte simple'}\n"
+            f"**Ping :** {(shell.guild.get_role(int(selected['ping_role_id'])).mention if selected['ping_role_id'] and shell.guild.get_role(int(selected['ping_role_id'])) else 'Aucun')}\n"
+            f"**Message :** {str(selected['response'])[:250]}\n\n"
             f"**Actions ({len(action_rows)}/10) :**\n{details[:1300]}"
         ))
     else:
@@ -278,6 +346,15 @@ async def build_page(shell) -> None:
                 if module_states.get(required) != "enabled":
                     return await notify(interaction,
                                         "Activez d'abord le système d'économie ou de niveaux dans /setup.")
+            if kind in ROLE_KINDS:
+                return await interaction.response.send_message(
+                    "Choisis un rôle ci-dessous. SentriX vérifie les permissions avant l'enregistrement.",
+                    view=ChoisirRoleAction(
+                        shell, str(selected["name"]), kind, module_states,
+                    ),
+                    ephemeral=True,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
             await interaction.response.send_modal(
                 ActionModal(shell, str(selected["name"]), kind, module_states),
             )
@@ -296,6 +373,74 @@ async def build_page(shell) -> None:
             await shell.refresh(interaction)
         clear_actions.callback = clear
         container.add_item(discord.ui.ActionRow(clear_actions))
+
+    # Le modèle platform_custom_commands dispose déjà de embed_title et
+    # embed_color : aucune migration, aucun nouveau message de configuration.
+    format_button = discord.ui.Button(
+        label=("Mode : embed" if selected and selected["embed_title"] else "Mode : texte"),
+        style=discord.ButtonStyle.secondary, disabled=selected is None,
+    )
+
+    async def toggle_format(interaction):
+        row = await selected_row(shell)
+        if row is None:
+            return await notify(interaction, "Choisis d'abord une commande.")
+        platform = shell.bot.get_cog("PlatformV4")
+        if platform is None:
+            return await notify(interaction, "Créateur de commandes indisponible.")
+        try:
+            await platform.save_custom_command(
+                shell.guild, interaction.user.id,
+                {
+                    "id": row["id"], "name": row["name"],
+                    "response": row["response"],
+                    "embed_title": "" if row["embed_title"] else row["name"].capitalize(),
+                    "embed_color": row["embed_color"],
+                    "ping_role_id": row["ping_role_id"],
+                    "enabled": bool(row["enabled"]),
+                },
+            )
+        except ValueError as exc:
+            return await notify(interaction, str(exc))
+        await shell.refresh(interaction)
+
+    format_button.callback = toggle_format
+    container.add_item(discord.ui.ActionRow(format_button))
+
+    # RoleSelect affiche les rôles existants, sans demander aux admins de
+    # chercher un ID dans le mode développeur. Le ping reste OFF par défaut.
+    if selected:
+        ping_select = discord.ui.RoleSelect(
+            placeholder="Rôle à mentionner (facultatif)",
+            min_values=0, max_values=1,
+        )
+
+        async def change_ping(interaction):
+            if interaction.user.id != shell.author_id:
+                return await notify(interaction, "Ce panneau ne t'appartient pas.")
+            row = await selected_row(shell)
+            if row is None:
+                return await notify(interaction, "Commande supprimée.")
+            new_role = ping_select.values[0] if ping_select.values else None
+            platform = shell.bot.get_cog("PlatformV4")
+            if platform is None:
+                return await notify(interaction, "Moteur indisponible.")
+            try:
+                await platform.save_custom_command(
+                    shell.guild, interaction.user.id,
+                    {
+                        "id": row["id"], "name": row["name"], "response": row["response"],
+                        "embed_title": row["embed_title"], "embed_color": row["embed_color"],
+                        "ping_role_id": new_role.id if new_role is not None else 0,
+                        "enabled": bool(row["enabled"]),
+                    },
+                )
+            except ValueError as exc:
+                return await notify(interaction, str(exc))
+            await shell.refresh(interaction)
+
+        ping_select.callback = change_ping
+        container.add_item(discord.ui.ActionRow(ping_select))
 
     prefix_button = discord.ui.Button(label="Préfixe", style=discord.ButtonStyle.secondary)
     trigger_button = discord.ui.Button(
