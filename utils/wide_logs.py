@@ -617,7 +617,7 @@ class WideLogView(discord.ui.LayoutView):
                          "ticket_delete": "Ticket supprimé", "ticket_claim": "Ticket pris en charge",
                          "ticket_reopen": "Ticket rouvert"}
             title = (labels_en if english else labels_fr).get(str(log_type), "Ticket")
-            number = re.search(r"#(\\d+)", str(embed.title or ""))
+            number = re.search(r"#(\d+)", str(embed.title or ""))
             heading = f"**{title}{' · #' + number.group(1) if number else ''}**"
             container.add_item(discord.ui.TextDisplay(heading))
             compact = []
@@ -638,12 +638,17 @@ class WideLogView(discord.ui.LayoutView):
                     if stripped in seen:
                         continue
                     seen.add(stripped)
+                    if english:
+                        for french, translated in (("Raison", "Reason"), ("Modérateur", "Moderator"),
+                                                   ("Salon", "Channel"), ("Durée", "Duration"),
+                                                   ("Fermé par", "Closed by")):
+                            stripped = stripped.replace(french, translated)
                     compact.append(stripped[:220])
                 if len(compact) >= 5:
                     break
             if not compact:
                 compact = [("Ticket event recorded." if english else "Événement de ticket enregistré.")]
-            container.add_item(discord.ui.TextDisplay("\\n".join(compact)[:1100]))
+            container.add_item(discord.ui.TextDisplay("\n".join(compact)[:1100]))
             for row in build_rows(old_view):
                 container.add_item(row)
             self.add_item(container)
