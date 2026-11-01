@@ -753,14 +753,64 @@ RETIRED: dict[str, str] = {
     "sentrixpro welcome": "welcome lives in /setup",
 }
 
+
+# Menu / plus lisible, choisi explicitement le 31/10/2026.
+# Les anciennes commandes métier restent en + et dans les modules : leur
+# absence du catalogue slash ne supprime ni leurs callbacks ni leurs données.
+# Conserver toute la sécurité, la modération, les tickets et les 40+ jeux.
+# /setup est le seul endroit public pour la configuration générale.
+_MENU_SIMPLIFIE_KEEP: dict[str, frozenset[str]] = {
+    "config": frozenset(()),
+    "market": frozenset(()),
+    "counter": frozenset(()),
+    "starboard": frozenset(()),
+    "fun": frozenset({"hug", "pat", "highfive", "aura", "scan"}),
+    "economy": frozenset({"balance", "daily", "weekly", "work", "pay", "deposit", "withdraw", "inventory", "leaderboard", "give", "reset"}),
+    "levels": frozenset({"rank", "leaderboard", "xp-set", "xp-add", "role-add", "role-remove", "check"}),
+    "shop": frozenset({"view", "buy", "sell", "panel", "roles"}),
+    "rep": frozenset({"give", "view", "leaderboard"}),
+    "profile": frozenset({"view", "card", "bio", "badges", "trust"}),
+    "user": frozenset({"info", "avatar", "invites", "dm"}),
+    "server": frozenset({"info", "members", "channel", "emojis", "health", "audit", "metrics"}),
+    "role": frozenset({"give", "remove", "info", "mass", "menu", "buttons list"}),
+    "verification": frozenset({"captcha", "status", "guide", "restore", "review"}),
+    "embeds": frozenset({"create", "list", "edit", "send", "delete"}),
+    "giveaway": frozenset({"create", "end", "reroll", "cancel", "list", "panel"}),
+    "events": frozenset({"list", "join", "leave", "create", "cancel", "announce", "tournaments"}),
+    "notifications": frozenset({"add", "list", "remove"}),
+    "sticky": frozenset({"set", "off"}),
+    "voice": frozenset({"setup", "off", "rename", "lock", "unlock"}),
+    "ai": frozenset({"ask", "search", "image", "code", "explain", "summarize", "reset"}),
+    "bot": frozenset({"info", "feedback", "bug", "privacy"}),
+    "staff": frozenset({"note", "history", "proof", "incident", "watch", "center", "handover", "emergency", "audit", "report", "remind", "diagnosis"}),
+    "invites": frozenset({"members", "stats", "rank", "history", "sync", "bonus"}),
+    "music": frozenset({"play", "pause", "resume", "skip", "stop", "queue", "playlist create", "playlist add", "playlist list", "playlist play", "shuffle", "loop", "volume", "autoplay", "now-playing", "join", "leave"}),
+    "games": frozenset({"today", "history", "leaderboard", "profile"}),
+}
+
+def _masquee_par_menu_simplifie(entree: SlashEntry) -> bool:
+    racine, _, feuille = entree.path.partition(" ")
+    if racine not in _MENU_SIMPLIFIE_KEEP:
+        return False
+    return feuille not in _MENU_SIMPLIFIE_KEEP[racine]
+
+
 # Masquées faute d'usage réel (utils/unused_commands.py, décision du 16/10/2026) :
 # elles quittent le menu « / » mais restent utilisables en préfixe.
-_MASQUEES_DU_MENU = tuple(e for e in CATALOG if _unused.masquee(e.source))
-CATALOG = tuple(e for e in CATALOG if not _unused.masquee(e.source))
+_MASQUEES_DU_MENU = tuple(
+    e for e in CATALOG
+    if _unused.masquee(e.source) or _masquee_par_menu_simplifie(e)
+)
+CATALOG = tuple(
+    e for e in CATALOG
+    if not _unused.masquee(e.source) and not _masquee_par_menu_simplifie(e)
+)
 for _entree in _MASQUEES_DU_MENU:
     RETIRED.setdefault(
         _entree.source,
-        f"unused from {_unused.PERIODE[0]} to {_unused.PERIODE[1]} (usage report)",
+        ("menu / simplifié ; fonction conservée en + et dans son module"
+         if _masquee_par_menu_simplifie(_entree)
+         else f"unused from {_unused.PERIODE[0]} to {_unused.PERIODE[1]} (usage report)"),
     )
 del _entree
 
