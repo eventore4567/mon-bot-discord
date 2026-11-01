@@ -67,9 +67,16 @@ class ImportConfirm(discord.ui.View):
         self.author_id = author_id
         self.records = records
         self.english = english
-        self.merge.label = "Add missing" if english else "Ajouter les absents"
-        self.replace.label = "Replace imported fields" if english else "Remplacer les champs importés"
-        self.cancel.label = "Cancel" if english else "Annuler"
+        # Decorated callbacks (self.merge/self.replace/self.cancel) are methods,
+        # not Button objects in discord.py. Update the actual View children.
+        labels = {
+            "Add missing": "Add missing" if english else "Ajouter les absents",
+            "Replace imported fields": "Replace imported fields" if english else "Remplacer les champs importés",
+            "Cancel": "Cancel" if english else "Annuler",
+        }
+        for item in self.children:
+            if isinstance(item, discord.ui.Button) and item.label in labels:
+                item.label = labels[item.label]
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         user = interaction.user
