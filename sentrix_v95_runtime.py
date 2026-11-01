@@ -439,7 +439,16 @@ async def _invoke_original(
             return await interaction.followup.send(
                 "Configuration momentanément indisponible.", ephemeral=True,
             )
-        return await setup.send_setup(interaction)
+        # Cette réponse a été defer(ephemeral=True) par V95. La dernière
+        # couche de /setup doit pouvoir le confirmer sans appeler
+        # original_response(), qui n'est pas toujours récupérable pour un
+        # message éphémère.
+        from cogs.setup_invitations import _KNOWN_PRIVATE_SETUP_ACK
+        known = _KNOWN_PRIVATE_SETUP_ACK.set(True)
+        try:
+            return await setup.send_setup(interaction)
+        finally:
+            _KNOWN_PRIVATE_SETUP_ACK.reset(known)
 
     if not interaction.response.is_done():
         await interaction.response.defer(thinking=True)
