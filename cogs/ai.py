@@ -2412,8 +2412,9 @@ class Ai(commands.Cog, name="Ai"):
         # une image volontairement présentée à SentriX. On ne récupère JAMAIS
         # les images des autres messages du salon sans demande explicite.
         attachments = list(message.attachments)
-        if not attachments and message.reference is not None:
-            cible = getattr(message.reference, "resolved", None)
+        reference = getattr(message, "reference", None)
+        if not attachments and reference is not None:
+            cible = getattr(reference, "resolved", None)
             if isinstance(cible, discord.Message):
                 attachments = list(cible.attachments)
         if not question:
@@ -2444,10 +2445,16 @@ class Ai(commands.Cog, name="Ai"):
             return
 
         async with message.channel.typing():
-            await self.send_sentrix_reply(
-                message.channel, message.author, question,
-                reply_to=message, attachments=attachments,
-            )
+            if attachments:
+                await self.send_sentrix_reply(
+                    message.channel, message.author, question,
+                    reply_to=message, attachments=attachments,
+                )
+            else:
+                await self.send_sentrix_reply(
+                    message.channel, message.author, question,
+                    reply_to=message,
+                )
 
     @commands.hybrid_command(name="ask", description="Poser une question à l'IA.")
     @app_commands.describe(question="Votre question pour l'IA")
