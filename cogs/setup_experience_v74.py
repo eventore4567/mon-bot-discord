@@ -416,6 +416,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             "notifications": "notification",
             "music": "musique",
             "ai": "ai",
+            "invitations": "tracking",
         }
         modules = [
             discord.SelectOption(
@@ -427,7 +428,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
                     else "Désactivé"
                 ),
                 emoji=(
-                    sentrix_emojis.partiel(categories_emoji[key])
+                    sentrix_emojis.partiel(categories_emoji.get(key, ""))
                     or CATEGORY_META[key][0]
                 ),
             )
