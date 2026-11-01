@@ -189,6 +189,13 @@ def _install_ai_pipeline_upgrade(bot: commands.Bot) -> None:
         if await _is_blacklisted(self.bot, author.id):
             return await _send(embed=embeds.error("Vous n'êtes pas autorisé à utiliser ce bot."))
 
+        # V5 est le DERNIER remplacement du moteur conversationnel. Ne pas
+        # laisser une demande « recréer une capture Discord » devenir une
+        # réponse textuelle gigantesque en SVG ou une action sur #général.
+        from utils.ai_image_intents import is_image_creation_request
+        if reply_to is not None and is_image_creation_request(question):
+            return await self._send_generated_image_natural(reply_to, question)
+
         guild = getattr(destination, "guild", None)
         if guild is None:
             guild = getattr(getattr(destination, "channel", None), "guild", None)
@@ -306,6 +313,10 @@ def _install_reply_and_dm_conversations(bot: commands.Bot) -> None:
             if ai_cog is None:
                 return
             try:
+                from utils.ai_image_intents import is_image_creation_request
+                if is_image_creation_request(content):
+                    await ai_cog._send_generated_image_natural(message, content)
+                    return
                 async with message.channel.typing():
                     await ai_cog.send_sentrix_reply(message.channel, message.author, content, reply_to=message)
             except Exception:

@@ -2293,12 +2293,153 @@ class Ai(commands.Cog, name="Ai"):
 
     def _dynamic_command_needs_confirmation(self, command_line: str, prefix: str) -> bool:
         return ai_command_router.command_needs_confirmation(command_line, prefix)
+    async def _send_generated_image_natural(
+        self, message: discord.Message, description: str,
+    ) -> bool:
+        """Répondre avec une VRAIE image jointe, jamais du SVG ni du code.
+
+        La demande est explicitement une création visuelle, et n'est donc
+        jamais soumise au routeur qui peut modifier un salon Discord.
+        """
+        from PIL import Image, ImageOps
+        from utils.ai_image_intents import is_image_creation_request, requested_image_size
+
+        if not is_image_creation_request(description):
+            return False
+
+        reply_kwargs = {
+            "mention_author": False,
+            "allowed_mentions": discord.AllowedMentions.none(),
+        }
+
+        async def reply(text: str, *, file: discord.File | None = None):
+            kwargs = dict(reply_kwargs)
+            if file is not None:
+                kwargs["file"] = file
+            try:
+                return await message.reply(content=text[:1800], **kwargs)
+            except discord.HTTPException:
+                # Une référence Discord supprimée ne doit pas bloquer le fichier.
+                kwargs.pop("mention_author", None)
+                return await message.channel.send(
+                    content=text[:1800], **kwargs,
+                )
+
+        guild_id = getattr(getattr(message, "guild", None), "id", None)
+        channel_id = getattr(message.channel, "id", None)
+        user_id = message.author.id
+        max_length = 3200
+        if guild_id is not None:
+            settings = await ai_service.get_settings(self.bot, guild_id)
+            if not settings["enabled"]:
+                await reply("L'IA est désactivée sur ce serveur.")
+                return True
+            if not ai_service.is_channel_allowed(settings, channel_id):
+                await reply("L'IA n'est pas autorisée dans ce salon.")
+                return True
+            roles = [role.id for role in getattr(message.author, "roles", ())]
+            if not ai_service.is_role_allowed(settings, roles):
+                await reply("Tu n'as pas le rôle nécessaire pour utiliser l'IA.")
+                return True
+            if await self._channel_blocks_ai(guild_id, channel_id):
+                await reply("L'IA n'est pas autorisée dans ce salon.")
+                return True
+            max_length = int(settings.get("max_question_length") or 3200)
+
+        problem = ai_service.moderate_input(description, max_length=max_length)
+        if problem:
+            await reply(str(problem))
+            return True
+
+        # La commande +image limite déjà à un appel par personne / 300 s.
+        # Appliquer la même limite au langage naturel, sous verrou, pour ne
+        # jamais facturer deux créations lors de messages simultanés.
+        key = (guild_id, user_id)
+        if not hasattr(self, "_natural_image_locks"):
+            self._natural_image_locks = {}
+            self._natural_image_recent = {}
+        lock = self._natural_image_locks.setdefault(key, asyncio.Lock())
+        async with lock:
+            since = time.monotonic() - self._natural_image_recent.get(key, -1e10)
+            if since < 300:
+                await reply(
+                    f"Une création d'image est déjà en cours ou récente. "
+                    f"Réessaie dans {int(300 - since) + 1} secondes."
+                )
+                return True
+            if guild_id is not None:
+                used = await ai_service.get_daily_usage(self.bot, guild_id, user_id)
+                if used >= settings["daily_limit"]:
+                    await reply("Tu as atteint la limite quotidienne d'utilisation de l'IA.")
+                    return True
+
+            self._natural_image_recent[key] = time.monotonic()
+            try:
+                async with message.channel.typing():
+                    image_result = await ai_service.generate_image(
+                        description[:3200], guild_id=guild_id,
+                        channel_id=channel_id, user_id=user_id,
+                    )
+            except Exception:
+                logger.exception("Création image naturelle en erreur guild=%s", guild_id)
+                await reply("Je n'ai pas pu générer l'image. Réessaie plus tard.")
+                return True
+
+            if not image_result.ok:
+                await reply(ai_service.error_message(image_result.error))
+                return True
+
+            try:
+                dimensions = requested_image_size(description)
+                with Image.open(io.BytesIO(image_result.data)) as source:
+                    if dimensions:
+                        visual = ImageOps.fit(
+                            source.convert("RGB"), dimensions,
+                            method=Image.Resampling.LANCZOS,
+                        )
+                    else:
+                        visual = source.convert("RGB")
+                    width, height = visual.size
+                    encoded = None
+                    for quality in (88, 78, 68, 55):
+                        output = io.BytesIO()
+                        visual.save(output, "JPEG", quality=quality, optimize=True)
+                        if output.tell() <= 7_500_000:
+                            encoded = output.getvalue()
+                            break
+                    if encoded is None:
+                        raise ValueError("Fichier image trop lourd pour Discord")
+            except (OSError, ValueError):
+                logger.exception("Fichier image naturelle non exploitable guild=%s", guild_id)
+                await reply("L'image a été générée, mais son fichier est illisible ou trop lourd.")
+                return True
+
+            image_file = discord.File(
+                io.BytesIO(encoded), filename=f"sentrix-image-{width}x{height}.jpg",
+            )
+            await reply(f"Image créée · {width} × {height}", file=image_file)
+            if guild_id is not None:
+                try:
+                    await ai_service.record_usage(
+                        self.bot, guild_id, user_id, tokens_estimate=0,
+                    )
+                except Exception:
+                    logger.exception("Compteur image non mis à jour guild=%s", guild_id)
+            return True
+
     async def _invoke_natural_command(
         self,
         message: discord.Message,
         question: str,
         prefix: str,
     ) -> bool:
+        # Une description de capture ou de visuel est une création d'image,
+        # JAMAIS une action de permissions. Ne pas lire le mot « salon » du
+        # prompt comme une demande de rendre un salon visible.
+        from utils.ai_image_intents import is_image_creation_request
+        if is_image_creation_request(question):
+            return await self._send_generated_image_natural(message, question)
+
         # 1) Une réponse courte peut compléter une action commencée juste avant.
         pending = self._take_pending(message)
         if pending is not None:
@@ -2511,8 +2652,14 @@ class Ai(commands.Cog, name="Ai"):
                         _PENDING_IMAGE_FOLLOWUPS.pop(key, None)
 
         try:
-            # Une image à comprendre n'est PAS une commande naturelle. Sinon
-            # « SentriX regarde mon image » peut tomber dans le routeur actions.
+            # Une création visuelle avec OU sans pièce jointe doit passer par
+            # le moteur d'image, même si sa description contient « salon »,
+            # « fermer », « visible », « permissions » et autres mots d'action.
+            from utils.ai_image_intents import is_image_creation_request
+            if is_image_creation_request(question):
+                await self._send_generated_image_natural(message, question)
+                return
+            # Une image à comprendre n'est PAS une commande naturelle.
             if not attachments and await self._invoke_natural_command(message, question, prefix):
                 return
         except Exception:

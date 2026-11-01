@@ -1435,7 +1435,13 @@ def _ticket_one_line(value: object, *, max_chars: int = 400) -> str:
 
 
 def ticket_close_blocks(embed: discord.Embed, language: str = "fr") -> list[str]:
-    """Blocs Discord épurés : dossier, acteurs, temps, motif, chronologie."""
+    """Fermeture lisible en un coup d'œil ; ne jamais inventer de staff.
+
+    La source durable (ticket_events) conserve le détail des opérations.
+    Le panneau public de logs n'a besoin que d'identifier qui, quoi, quand
+    et pourquoi. Les lignes de « non prise en charge » ne sont pas
+    dupliquées dans trois sections.
+    """
     exact = lambda *names: _field_value_exact(embed, *names)
     ticket = _ticket_one_line(exact("Ticket"), max_chars=100)
     salon = _ticket_one_line(exact("Salon"), max_chars=190)
@@ -1451,50 +1457,81 @@ def ticket_close_blocks(embed: discord.Embed, language: str = "fr") -> list[str]
     historique = str(exact("Historique") or "").strip()[:940]
     reference = _ticket_one_line(exact("Référence"), max_chars=75)
 
-    blocs = [
-        "\n".join((
-            "**🎫  Dossier du ticket**",
-            f"{ticket}  ·  {salon}",
-            "",
-            f"**Ouvert par**  {demandeur}",
-            f"**Fermé par**  {ferme_par}",
-        )),
-        "\n".join((
-            "**🕒  Horaires & durée**",
-            f"**Ouverture :** {ouvert}",
-            f"**Fermeture :** {ferme}",
-            f"**Durée totale :** {duree}",
-            f"**Avant prise en charge :** {delai}",
-        )),
-        "\n".join((
-            "**👥  Équipe de support**",
-            f"**Responsable à la clôture :** {titulaire}",
-            f"**Intervenants :** {equipe}",
-        )),
-        "**📝  Motif de fermeture**\n" + discord.utils.escape_markdown(motif),
-    ]
-    if language == "en":
-        blocs = [
+    english = language == "en"
+    unclaimed = titulaire.casefold() in {
+        "non pris en charge", "not claimed", "non renseigné", "unavailable",
+    }
+    # Un ticket clôturé par le DEMANDEUR n'a pas automatiquement été pris
+    # en charge par lui ; seuls l'audit claim et le champ claimed_by prouvent
+    # une intervention staff.
+    if english:
+        blocks = [
             "\n".join((
-                "**🎫  Ticket record**", f"{ticket}  ·  {salon}", "",
-                f"**Opened by**  {demandeur}", f"**Closed by**  {ferme_par}",
+                "**🎫  Ticket record**",
+                f"{ticket} · {salon}",
+                f"**Opened by**  {demandeur}  ·  **Closed by**  {ferme_par}",
             )),
             "\n".join((
                 "**🕒  Times & duration**",
-                f"**Opened:** {ouvert}", f"**Closed:** {ferme}",
-                f"**Total duration:** {duree}", f"**Time to first claim:** {delai}",
+                f"**Opened:** {ouvert}  ·  **Closed:** {ferme}",
+                f"**Duration:** {duree}",
+            )),
+        ]
+        if unclaimed:
+            blocks.append("**👥  Support team**\nNot claimed")
+        else:
+            team = ["**👥  Support team**", f"**Handler:** {titulaire}"]
+            if equipe not in {"No staff member recorded", "Non renseigné"} and equipe not in titulaire:
+                team.append(f"**Staff involved:** {equipe}")
+            if delai not in {"No claim recorded", "Unavailable", "Non renseigné"}:
+                team.append(f"**First claim:** {delai} after opening")
+            blocks.append("\n".join(team))
+        blocks.append("**📝  Closing reason**\n" + discord.utils.escape_markdown(motif))
+    else:
+        blocks = [
+            "\n".join((
+                "**🎫  Dossier du ticket**",
+                f"{ticket} · {salon}",
+                f"**Ouvert par**  {demandeur}  ·  **Fermé par**  {ferme_par}",
             )),
             "\n".join((
-                "**👥  Support team**",
-                f"**Handler at closure:** {titulaire}", f"**Staff involved:** {equipe}",
+                "**🕒  Horaires & durée**",
+                f"**Ouverture :** {ouvert}  ·  **Fermeture :** {ferme}",
+                f"**Durée totale :** {duree}",
             )),
-            "**📝  Closing reason**\n" + discord.utils.escape_markdown(motif),
         ]
-    if historique:
-        blocs.append(("**🧭  Recent actions**\n" if language == "en" else "**🧭  Dernières actions**\n") + historique)
-    if reference:
-        blocs.append(f"-# {'Tracking reference' if language == 'en' else 'Référence de suivi'} : {reference}")
-    return blocs
+        if unclaimed:
+            blocks.append("**👥  Équipe de support**\nAucune prise en charge enregistrée")
+        else:
+            team = ["**👥  Équipe de support**", f"**Responsable :** {titulaire}"]
+            if equipe not in {"Aucun membre du staff enregistré", "Non renseigné"} and equipe not in titulaire:
+                team.append(f"**Intervenants :** {equipe}")
+            if delai not in {"Aucune prise en charge enregistrée", "Durée indisponible", "Non renseigné"}:
+                team.append(f"**Première prise :** {delai} après l'ouverture")
+            blocks.append("\n".join(team))
+        blocks.append("**📝  Motif de fermeture**\n" + discord.utils.escape_markdown(motif))
+
+    # Une chronologie ouverture+fermeture ne répète que les identités déjà
+    # affichées. Garder les actions vraiment informatives (claim/transfert,
+    # ajout membre, réouverture) pour les dossiers qui en ont.
+    actions = [
+        line for line in historique.splitlines()
+        if any(word in line.casefold() for word in (
+            "prise en charge", "claim", "transfert", "transfer",
+            "membre ajouté", "membre retiré", "member added", "member removed",
+            "renommage", "renamed", "réouverture", "reopened", "note interne",
+        ))
+    ]
+    if actions:
+        blocks.append(
+            ("**🧭  Recent actions**\n" if english else "**🧭  Dernières actions**\n")
+            + "\n".join(actions[-3:])[:660]
+        )
+    if reference and reference != "Non renseigné":
+        blocks.append(
+            f"-# {'Tracking reference' if english else 'Référence'} : {reference}"
+        )
+    return blocks
 
 
 def _ticket_general_blocks(

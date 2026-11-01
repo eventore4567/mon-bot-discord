@@ -93,6 +93,7 @@ RUN python -m pytest -q \
     tests/test_guild_departure_notify.py \
     tests/test_verification_panel_recovery.py \
     tests/test_ai_disable_guard_loading.py \
+    tests/test_ai_natural_image_ticket_compact_v128.py \
     tests/test_ai_native_discord_reply_v5.py \
     tests/test_ai_actions_permissions.py \
     tests/test_music_matcher.py \
