@@ -354,11 +354,11 @@ class CustomCommandAccessView(discord.ui.View):
         ]
         everyone = any(item["subject_type"] == "everyone" for item in self.grants)
         return (
-            f"**Autorisations de la commande \`{self.command_name}\`**\\n\\n"
-            "**Propriétaire et administrateurs :** toujours autorisés\\n"
-            f"**Tout le monde :** {'autorisé' if everyone else 'non autorisé'}\\n"
-            f"**Rôles :** {', '.join(roles[:15]) if roles else 'Aucun'}\\n"
-            f"**Membres :** {', '.join(users[:15]) if users else 'Aucun'}\\n\\n"
+            f"**Autorisations de la commande \`{self.command_name}\`**\n\n"
+            "**Propriétaire et administrateurs :** toujours autorisés\n"
+            f"**Tout le monde :** {'autorisé' if everyone else 'non autorisé'}\n"
+            f"**Rôles :** {', '.join(roles[:15]) if roles else 'Aucun'}\n"
+            f"**Membres :** {', '.join(users[:15]) if users else 'Aucun'}\n\n"
             "Si un membre n'est pas autorisé, SentriX ignore entièrement sa commande."
         )
 
@@ -454,8 +454,8 @@ async def build_page(shell) -> None:
             f"**Format :** {'Embed Discord' if selected['embed_title'] else 'Texte simple'}\n"
             f"**Ping :** {(shell.guild.get_role(int(selected['ping_role_id'])).mention if selected['ping_role_id'] and shell.guild.get_role(int(selected['ping_role_id'])) else 'Aucun')}\n"
             f"**Message :** {str(selected['response'])[:250]}\n\n"
-            f"**Exécution autorisée :** {permission_label}\\n"
-            f"**Actions ({len(action_rows)}/10) :**\\n{details[:1200]}"
+            f"**Exécution autorisée :** {permission_label}\n"
+            f"**Actions ({len(action_rows)}/10) :**\n{details[:1200]}"
         ))
     else:
         container.add_item(discord.ui.TextDisplay("Aucune commande. Choisissez **Créer**."))
