@@ -51,10 +51,6 @@ PUBLIC_COMMANDS = frozenset({
     # alors qu'elle venait d'être publiée pour tout le monde. Renommer une
     # racine sans la reclasser la fait tomber en fail-closed, et c'est
     # exactement ce qui est arrivé à « test-events » dans le même lot.
-    # Accueil public de +setup / /setup. Le rendu pour un membre sans droits
-    # est strictement en lecture seule ; seules les interactions du staff
-    # passent _can_setup et peuvent modifier la configuration.
-    "setup",
     "help", "aide", "ping", "avatar", "info", "userinfo", "status", "about", "profile-card",
     "channelinfo", "membercount", "emoji-list", "poll", "remind",
     "reminder-list", "reminder-cancel", "translate", "weather", "suggest",
@@ -1026,6 +1022,16 @@ async def evaluate(bot, *, command_name: Any, author: Any, guild: Any) -> Access
             return AccessDecision(True, policy="public-dm")
         return _deny("Cette commande doit être utilisée dans un serveur.", "guild-required")
     guild_id = int(guild_id)
+
+    # Setup n'est PAS une commande administrative ouverte au public :
+    # l'ENTRÉE est consultable, mais le rendu pour un membre non staff est
+    # exclusivement statique. Conserver le classement "configuration" dans
+    # la matrice évite un conflit de niveaux et protège chaque mutation.
+    # Le Cog Setup applique _can_setup avant de construire le moindre contrôle
+    # interactif. Cette exception ne s'applique qu'à l'entrée, pas aux autres
+    # commandes de configuration ni aux sous-commandes.
+    if name == "setup":
+        return AccessDecision(True, policy="setup:readonly-entry")
 
     # (4) module désactivé
     module = module_for_command(name)
