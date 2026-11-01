@@ -259,6 +259,8 @@ DISCORD_PERMISSION_COMMANDS = {
     "unquarantine": "moderate_members",
     "clear": "manage_messages",
     "say": "manage_messages",
+    "sticky": "manage_messages",
+    "sticky add": "manage_messages",
     "embed-create": "manage_messages",
     "presentation": "manage_guild",
     "slowmode": "manage_channels",
