@@ -1,4 +1,4 @@
-"""Contrats production : slash /setup éphémère, états et pack d'emojis stable."""
+"""Contrats production : slash /setup public avec permissions, états et pack d'emojis stable."""
 from __future__ import annotations
 
 import ast
@@ -19,8 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.mark.asyncio
-async def test_slash_setup_ne_defer_jamais_publiquement():
-    """Le vrai catalogue /setup contourne le Context préfixé et son defer public."""
+async def test_slash_setup_est_public_et_defer_avant_envoi():
+    """Le vrai catalogue /setup publie un panneau visible dans le salon."""
     response = SimpleNamespace(defer=AsyncMock(), send_message=AsyncMock(), is_done=lambda: False)
     interaction = SimpleNamespace(response=response)
     setup = SimpleNamespace(send_setup=AsyncMock())
@@ -28,7 +28,7 @@ async def test_slash_setup_ne_defer_jamais_publiquement():
     command = SimpleNamespace(qualified_name="setup")
     await _invoke_original(bot, command, interaction, (), {})
     setup.send_setup.assert_awaited_once_with(interaction)
-    response.defer.assert_awaited_once_with(ephemeral=True, thinking=True)
+    response.defer.assert_awaited_once_with(ephemeral=False, thinking=True)
     response.send_message.assert_not_awaited()
 
 
@@ -42,7 +42,7 @@ async def test_slash_setup_indisponible_est_ephemere():
     followup.send.assert_awaited_once_with(
         "Configuration momentanément indisponible.", ephemeral=True
     )
-    response.defer.assert_awaited_once_with(ephemeral=True, thinking=True)
+    response.defer.assert_awaited_once_with(ephemeral=False, thinking=True)
     response.send_message.assert_not_awaited()
 
 
@@ -71,14 +71,14 @@ def test_lintercepteur_setup_se_compile():
     ast.parse((ROOT / "sentrix_v95_runtime.py").read_text())
 
 
-def test_derniere_couche_invitations_ne_rend_jamais_setup_public():
+def test_derniere_couche_invitations_ne_retablit_pas_setup_prive():
     source = (ROOT / "cogs/setup_invitations.py").read_text()
     start = source.index("    async def final_send_setup(")
     end = source.index("    current = setup_ui.OfficialSetup.send_setup", start)
     transport = source[start:end]
-    assert "ephemere=True" in transport
-    assert "delete_after=15" in transport
-    assert "panels.envoyer(target, view)" not in transport
+    assert "ephemere=False" in transport
+    assert "delete_after=15" not in transport
+    assert "panels.envoyer(target, view, ephemere=False)" in transport
     assert "target = target.interaction" in transport
 
 
