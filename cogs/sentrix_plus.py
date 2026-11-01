@@ -623,7 +623,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
     async def sticky_add(
         self, ctx: commands.Context,
         channel: discord.TextChannel,
-        format: Literal["text", "embed", "banner"],
+        format: Literal["texte", "embed", "banniere"],
         message: str,
         channel_2: discord.TextChannel | None = None,
         channel_3: discord.TextChannel | None = None,
@@ -642,7 +642,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
     async def sticky_edit(
         self, ctx: commands.Context,
         channel: discord.TextChannel,
-        format: Literal["text", "embed", "banner"],
+        format: Literal["texte", "embed", "banniere"],
         message: str,
         channel_2: discord.TextChannel | None = None,
         channel_3: discord.TextChannel | None = None,
@@ -660,6 +660,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
         channel: discord.TextChannel, mode: str, content: str,
         extra_channels: list[discord.TextChannel | None],
     ):
+        mode = {"texte": "text", "embed": "embed", "banniere": "banner"}.get(mode, mode)
         channels = list(dict.fromkeys(c for c in [channel, *extra_channels] if c is not None))
         if not channels or len(channels) > 5:
             return await ctx.send("Choisissez entre 1 et 5 salons.", ephemeral=bool(ctx.interaction))
