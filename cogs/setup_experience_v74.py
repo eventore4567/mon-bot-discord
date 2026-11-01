@@ -455,6 +455,10 @@ class SentriXSetupV74(v73.SentriXSetupV73):
              "Texte, images, couleurs et boutons"),
             ("custom_commands", "Commandes personnalisées", "tools",
              "Créer ses propres commandes"),
+            ("prefixes", "Préfixes", "settings",
+             "Préfixes officiels et personnalisés, séparés"),
+            ("setup_access", "Accès au setup", "role",
+             "Choisir les rôles et les membres autorisés"),
             ("snippets", "Messages enregistrés", "message",
              "Préparer des messages à réutiliser"),
             ("recurring_messages", "Messages programmés", "calendar",
@@ -587,7 +591,18 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             return await setup_automation_extras.build_page(self, page)
         if page == "custom_commands":
             from . import setup_custom_commands
+            if not setup_custom_commands.is_admin(self, SimpleNamespace(user=self.guild.get_member(self.author_id), guild=self.guild)):
+                box = discord.ui.Container()
+                box.add_item(discord.ui.TextDisplay("# Commandes personnalisées\\nSeuls les administrateurs peuvent créer et modifier des commandes personnalisées."))
+                self._add_navigation(box)
+                self.add_item(box)
+                return
             return await setup_custom_commands.build_page(self)
+        if page == "prefixes":
+            from . import setup_custom_commands
+            return await setup_custom_commands.build_prefix_page(self)
+        if page == "setup_access":
+            return await self._build_setup_access()
         if page == "rules_access":
             return await self._build_rules_access()
         if page == "automation":
@@ -607,6 +622,65 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         if page == "roles":
             return await self._build_roles()
         return await super()._build_page(page)
+
+    async def _build_setup_access(self) -> None:
+        """Gestion déléguée : seuls les administrateurs configurent ces accès."""
+        if not setup_ui._can_manage_setup_delegates(
+            self.guild.get_member(self.author_id), self.guild
+        ):
+            box = discord.ui.Container()
+            box.add_item(discord.ui.TextDisplay(
+                "# Accès au setup\\nSeuls les administrateurs peuvent attribuer ces accès."
+            ))
+            self._add_navigation(box)
+            self.add_item(box)
+            return
+        rows = await setup_ui._setup_delegates(self.bot, self.guild.id)
+        saved = []
+        for record in rows:
+            kind, sid = str(record["subject_type"]), int(record["subject_id"])
+            saved.append(f"<@&{sid}>" if kind == "role" else f"<@{sid}>")
+        box = discord.ui.Container(accent_colour=0x6C57CC)
+        v73.poser_banniere(box)
+        box.add_item(discord.ui.TextDisplay(
+            "# Autorisations /setup\\n"
+            "Le propriétaire et les administrateurs ont automatiquement accès. "
+            "Tu peux autoriser d'autres rôles ou membres ci-dessous. "
+            "Le panneau reste privé pour chaque utilisateur.\\n\\n"
+            "**Accès délégués :** " + (", ".join(saved[:25]) if saved else "Aucun")
+        ))
+
+        async def apply(interaction, kind, selection, enabled):
+            if not setup_ui._can_manage_setup_delegates(interaction.user, interaction.guild):
+                return await interaction.response.send_message(
+                    "Seuls les administrateurs peuvent modifier ces accès.", ephemeral=True
+                )
+            target = selection.values[0] if selection.values else None
+            if target is None:
+                return await interaction.response.send_message("Aucune sélection.", ephemeral=True)
+            if kind == "role" and (target.is_default() or target.managed):
+                return await interaction.response.send_message(
+                    "Ce rôle ne peut pas être sélectionné.", ephemeral=True
+                )
+            await interaction.response.defer()
+            await setup_ui._set_setup_delegate(
+                self.bot, self.guild.id, kind, target.id, interaction.user.id,
+                enabled=enabled,
+            )
+            await self.refresh(interaction)
+
+        role_add = discord.ui.RoleSelect(placeholder="Autoriser un rôle", min_values=1, max_values=1)
+        role_remove = discord.ui.RoleSelect(placeholder="Retirer un rôle autorisé", min_values=1, max_values=1)
+        user_add = discord.ui.UserSelect(placeholder="Autoriser un membre", min_values=1, max_values=1)
+        user_remove = discord.ui.UserSelect(placeholder="Retirer un membre autorisé", min_values=1, max_values=1)
+        role_add.callback = lambda interaction: apply(interaction, "role", role_add, True)
+        role_remove.callback = lambda interaction: apply(interaction, "role", role_remove, False)
+        user_add.callback = lambda interaction: apply(interaction, "user", user_add, True)
+        user_remove.callback = lambda interaction: apply(interaction, "user", user_remove, False)
+        for menu in (role_add, role_remove, user_add, user_remove):
+            box.add_item(discord.ui.ActionRow(menu))
+        self._add_navigation(box)
+        self.add_item(box)
 
     async def _build_roles(self) -> None:
         """Rôles automatiques : chaque règle « action → rôle » au même endroit.
