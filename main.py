@@ -59,6 +59,7 @@ EXTENSIONS = [
     "cogs.ai",
     "cogs.economy",
     "cogs.levels",
+    "cogs.import_data",
     "cogs.minigames",
     "cogs.games_economy",
     "cogs.music",
