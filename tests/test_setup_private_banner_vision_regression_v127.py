@@ -142,17 +142,22 @@ async def test_slash_setup_ack_private_and_recover_unknown_deferred_without_publ
     fresh.delete_original_response.assert_not_awaited()
 
     # Régression des captures : un autre chemin avait déjà consommé /setup.
-    # On supprime son original (éventuellement PUBLIC), puis on envoie un
-    # NOUVEAU followup éphémère. Plus de demande « relance /setup ».
+    # On FINALISE son original public avec un texte neutre sans le supprimer,
+    # puis on envoie un NOUVEAU followup éphémère.
     old_defer = SimpleNamespace(
         response=SimpleNamespace(
             is_done=lambda: True,
             type=discord.InteractionResponseType.deferred_channel_message,
         ),
         delete_original_response=AsyncMock(),
+        edit_original_response=AsyncMock(),
     )
     assert await _prepare_private_setup_interaction(old_defer) is True
-    old_defer.delete_original_response.assert_awaited_once()
+    old_defer.delete_original_response.assert_not_awaited()
+    old_defer.edit_original_response.assert_awaited_once_with(
+        content="Ton panneau de configuration s'ouvre en privé.",
+        embed=None, view=None,
+    )
 
     private = SimpleNamespace(
         response=SimpleNamespace(
