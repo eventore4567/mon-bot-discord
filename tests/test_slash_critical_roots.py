@@ -11,3 +11,10 @@ def test_critical_slash_commands_are_reservations():
 def test_rps_is_preferred_over_optional_legacy_commands():
     assert "rps" in slash_command_budget._preferred_names()
     assert "rps" not in slash_command_budget._excluded_names()
+
+def test_role_mass_kept_by_final_slash_group_rebuilder():
+    from sentrix_command_surface_v110 import STANDARD_GROUPED_SLASH
+
+    assert STANDARD_GROUPED_SLASH["role mass"] == ("role", "mass")
+    assert STANDARD_GROUPED_SLASH["giverole"] == ("role", "give")
+    assert STANDARD_GROUPED_SLASH["removerole"] == ("role", "remove")
