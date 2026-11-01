@@ -45,13 +45,18 @@ def install(bot: commands.Bot, owner: "CustomCommandFailsafeV11 | None" = None) 
         ):
             if message.guild and not message.author.bot:
                 try:
-                    conf = await bot.db.get_guild_config(message.guild.id)
-                    prefix = str(conf["prefix"] or "+") if conf else "+"
+                    from utils.command_prefixes import get_custom_prefix
+                    prefix = await get_custom_prefix(bot, message.guild.id)
                 except Exception:
-                    prefix = "+"
+                    prefix = None
 
-                if (message.content or "").startswith(prefix):
+                if prefix and (message.content or "").startswith(prefix):
                     raw_name = (message.content[len(prefix):].split(maxsplit=1) or [""])[0].casefold()
+                    # Les commandes natives gardent leur propre préfixe.
+                    # Ne pas bloquer, compter ni déclencher une commande
+                    # personnalisée homonyme d'une commande officielle.
+                    if bot.get_command(raw_name):
+                        return await _original(message)
                     try:
                         row = (
                             await bot.db.fetchone(
