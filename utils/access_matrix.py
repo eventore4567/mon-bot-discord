@@ -1061,6 +1061,22 @@ async def evaluate(bot, *, command_name: Any, author: Any, guild: Any) -> Access
             "guild-owner-only",
         )
 
+    # /setup est visible à tous. Il ne donne jamais accès directement :
+    # setup_control_center._can_setup vérifie les droits AVANT de construire
+    # l'interface et répond en privé aux utilisateurs non autorisés.
+    if name == "setup":
+        return AccessDecision(True, policy="setup:entrypoint-only")
+
+    # Les commandes personnalisées sont réservées aux administrateurs,
+    # même si une règle de rôle a accordé la catégorie configuration.
+    if name == "customcmd" and not (
+        _is_guild_owner(author, guild) or _is_administrator(author)
+    ):
+        return _deny(
+            "Seuls les administrateurs peuvent gérer les commandes personnalisées.",
+            "customcmd:administrator",
+        )
+
     # Recovery exception: an explicit deny may restrict the guild owner for
     # dangerous commands, but +setup and /setup must always stay reachable so
     # the owner can repair the permission matrix.
