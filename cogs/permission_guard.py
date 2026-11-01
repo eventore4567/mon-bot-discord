@@ -80,6 +80,12 @@ def _default_permissions_for(name: str) -> discord.Permissions | None:
     """
     from cogs.permission_setup_hardening_v65 import CATEGORY_REQUIRED_PERMISSION
 
+    if name == "setup":
+        # Le refus est affiché par le /setup, en réponse éphémère.
+        return None
+    if name == "customcmd":
+        return discord.Permissions(administrator=True)
+
     tier = access_matrix.access_tier(name)
     if tier == "public":
         return None
