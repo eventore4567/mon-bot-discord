@@ -651,33 +651,46 @@ class PlatformV4(commands.Cog):
     async def on_message(self, message: discord.Message):
         if not message.guild or message.author.bot or not message.content:
             return
-        # Réutilise cet écouteur existant, pas de listener supplémentaire.
-        try:
-            from cogs.word_reactions import react_for_message
-            await react_for_message(self.bot, message)
-        except Exception:
-            logger.exception("Réactions automatiques impossibles guild=%s", message.guild.id)
+        # Le système de réactions automatiques est indépendant. Il reste actif
+        # sur les messages ordinaires, mais pas lorsqu'une commande personnalisée
+        # est reconnue et que son auteur n'a pas le droit de la lancer.
+        async def react_normally():
+            try:
+                from cogs.word_reactions import react_for_message
+                await react_for_message(self.bot, message)
+            except Exception:
+                logger.exception("Réactions automatiques impossibles guild=%s", message.guild.id)
+
         from utils.command_prefixes import get_custom_prefix
-        prefix = await get_custom_prefix(self.bot, message.guild.id)
-        # Ne jamais réinterpréter ici le préfixe officiel ou celui d'un autre
-        # module. Il ne déclenche QUE les commandes créées par le serveur.
+        try:
+            prefix = await get_custom_prefix(self.bot, message.guild.id)
+        except Exception:
+            logger.exception("Préfixe personnalisé illisible guild=%s", message.guild.id)
+            await react_normally()
+            return
+        # Ce préfixe déclenche uniquement les commandes personnalisées.
         matched = prefix if message.content.startswith(prefix) else None
         if matched is None:
+            await react_normally()
             return
         raw = message.content[len(matched):].strip()
         if not raw:
+            await react_normally()
             return
         name, _, args = raw.partition(" ")
         name = name.lower()
         if self.bot.get_command(name):
+            await react_normally()
             return
         row = await self.bot.db.fetchone(
-            "SELECT * FROM platform_custom_commands WHERE guild_id=? AND name=? AND enabled=1", (message.guild.id, name)
+            "SELECT * FROM platform_custom_commands WHERE guild_id=? AND name=? AND enabled=1",
+            (message.guild.id, name),
         )
         if not row:
+            await react_normally()
             return
-        # Refus silencieux et sans effet secondaire : pas de message, sanction,
-        # argent, XP, ping ou suppression du message d'origine.
+        # Vérifier AVANT toute réponse, réaction, ping, XP, argent, rôle ou
+        # suppression de message. Un refus est entièrement silencieux.
         try:
             if not await self.can_run_custom_command(
                 message.guild, message.author, int(row["id"])
@@ -689,6 +702,7 @@ class PlatformV4(commands.Cog):
                 message.guild.id, row["id"],
             )
             return
+        await react_normally()
         # Actions (rôles, rôle temporaire, argent, XP) et suppression du message
         # déclencheur : cogs/custom_commands (30/10/2026).
         try:
