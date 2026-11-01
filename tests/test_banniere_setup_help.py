@@ -203,7 +203,7 @@ def test_setup_invitations_ne_peut_plus_oublier_banner_config():
     debut = source.index("async def final_send_setup")
     fin = source.index("current = setup_ui.OfficialSetup.send_setup", debut)
     envoi = source[debut:fin]
-    assert "return await panels.envoyer(target, view, ephemere=False)" in envoi
+    assert "return await panels.envoyer(target, view, ephemere=True)" in envoi
     assert "target.send(view=view" not in envoi
     assert "target.followup.send(view=view" not in envoi
     assert "target.response.send_message(view=view" not in envoi
