@@ -96,8 +96,10 @@ def test_final_setup_private_from_first_interaction_ack():
     assert "Aucun panneau public n'a été envoyé" not in code
     assert "return await panels.envoyer(target.followup, view, ephemere=True)" in code
     assert "return await panels.envoyer(target, view, ephemere=True)" in code
-    assert "view=PrivateSetupLauncher(self, member.id, guild.id)" in code
+    assert "return await panels.envoyer(target, view, ephemere=False)" in code
+    assert "await setup_ui._can_setup(self.bot, member, guild)" in code
     assert "delete_after=15" not in code
+    assert "PrivateSetupLauncher" not in code
     for name in ("cogs/setup_invitations.py", "cogs/ai.py", "cogs/ai_api_hotfix.py",
                  "cogs/ai_reply_recovery.py", "cogs/platform_v4.py"):
         ast.parse((ROOT / name).read_text(encoding="utf-8"), filename=name)
@@ -358,28 +360,22 @@ async def test_canonical_pipeline_sends_image_to_responses_api_instead_of_text_o
     assert "images fournies" in generate.await_args.kwargs["instructions"]
 
 
-@pytest.mark.asyncio
-async def test_prefix_setup_has_clickable_private_launcher_and_checks_author():
-    from cogs.setup_invitations import PrivateSetupLauncher
-
-    setup = SimpleNamespace(send_setup=AsyncMock())
-    launcher = PrivateSetupLauncher(setup, 1234, 5678)
-    inter = SimpleNamespace(
-        guild_id=5678, user=SimpleNamespace(id=1234),
-        response=SimpleNamespace(send_message=AsyncMock()),
-    )
-    await launcher.children[0].callback(inter)
-    setup.send_setup.assert_awaited_once_with(inter)
-    inter.response.send_message.assert_not_awaited()
-
-    other = SimpleNamespace(
-        guild_id=5678, user=SimpleNamespace(id=9999),
-        response=SimpleNamespace(send_message=AsyncMock()),
-    )
-    await launcher.children[0].callback(other)
-    other.response.send_message.assert_awaited_once()
-    assert other.response.send_message.await_args.kwargs["ephemeral"] is True
-    setup.send_setup.assert_awaited_once_with(inter)
+def test_prefix_setup_is_public_immediate_and_slash_remains_ephemeral():
+    source = (ROOT / "cogs/setup_invitations.py").read_text(encoding="utf-8")
+    block = source.split("    async def final_send_setup(self, target):", 1)[1].split(
+        "    current = setup_ui.OfficialSetup.send_setup", 1
+    )[0]
+    prefix = block.split(
+        "        # Discord ne sait pas envoyer un panneau éphémère", 1
+    )[0]
+    assert "target.interaction is None" in prefix
+    assert "await setup_ui._can_setup(self.bot, member, guild)" in prefix
+    assert "await view.prepare()" in prefix
+    assert "return await panels.envoyer(target, view, ephemere=False)" in prefix
+    assert "PrivateSetupLauncher" not in source
+    # La commande slash /setup suit TOUJOURS le transport privé.
+    assert "return await panels.envoyer(target.followup, view, ephemere=True)" in block
+    assert "return await panels.envoyer(target, view, ephemere=True)" in block
 
 
 def test_only_native_custom_messages_bypass_legacy_information_banner():
@@ -391,6 +387,6 @@ def test_only_native_custom_messages_bypass_legacy_information_banner():
     custom = (ROOT / "cogs/platform_v4.py").read_text(encoding="utf-8")
     assert 'embeds=[banner, embed]' in custom
     assert '_sentrix_native_message=True' in custom
-    launcher = (ROOT / "cogs/setup_invitations.py").read_text(encoding="utf-8")
-    assert 'view=PrivateSetupLauncher(self, member.id, guild.id)' in launcher
-    assert '_sentrix_native_message=True' in launcher
+    setup = (ROOT / "cogs/setup_invitations.py").read_text(encoding="utf-8")
+    assert 'return await panels.envoyer(target, view, ephemere=False)' in setup
+    assert 'PrivateSetupLauncher' not in setup
