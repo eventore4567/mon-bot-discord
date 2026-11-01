@@ -227,18 +227,11 @@ async def test_la_synchronisation_est_idempotente():
 
 
 @pytest.mark.asyncio
-async def test_une_version_precedente_est_remplacee(monkeypatch):
-    """Sans témoin, le compte porte l'ancien pack : il faut l'effacer.
-
-    Un emoji d'application n'est pas modifiable en place et `create` échoue sur
-    un nom déjà pris. Sans cette purge, les anciennes icônes resteraient pour
-    toujours — c'est exactement ce qui s'est produit quand le pack a changé
-    d'apparence.
-    """
+async def test_temoins_absents_ne_suppriment_pas_les_emojis_existants(monkeypatch):
+    """Même sur un ancien pack, préserver les IDs Discord des panneaux déjà publiés."""
     monkeypatch.setattr(se, "DELAI_ENTRE_ENVOIS", 0)
     noms = se.noms_disponibles()[:3]
     bot = _BotDejaFourni(noms, avec_temoin=False)
-
     envoyes = []
 
     async def _creer(*, name, image):
@@ -247,10 +240,12 @@ async def test_une_version_precedente_est_remplacee(monkeypatch):
 
     bot.create_application_emoji = _creer
     bilan = await se.synchroniser(bot)
+    assert bot.supprimes == []
+    assert bilan["remplaces"] == 0
+    assert not (set(envoyes) & set(noms))
+    assert all(se.emoji(nom).startswith("<:") for nom in noms)
+    assert bilan["envoyes"] > 0
 
-    assert sorted(bot.supprimes) == sorted(noms), "l'ancien pack n'a pas été effacé"
-    assert bilan["remplaces"] == len(noms)
-    assert se.TEMOIN in envoyes, "le témoin n'a pas été posé après la migration"
 
 
 def test_un_marquage_malforme_ne_produit_pas_de_bouton_casse():
