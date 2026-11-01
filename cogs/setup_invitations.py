@@ -66,31 +66,6 @@ async def _prepare_private_setup_interaction(interaction: discord.Interaction) -
     return True
 
 
-class PrivateSetupLauncher(discord.ui.View):
-    """Bouton public SANS données de configuration, ouvrant /setup en privé.
-
-    Une commande préfixée Discord n'a pas de réponse ephemeral : ce bouton
-    crée sa propre interaction, ce qui permet enfin le setup privé pour +/!setup.
-    """
-
-    def __init__(self, setup, author_id: int, guild_id: int):
-        super().__init__(timeout=1800)
-        self.setup = setup
-        self.author_id = int(author_id)
-        self.guild_id = int(guild_id)
-
-    @discord.ui.button(label="Ouvrir mon setup privé", style=discord.ButtonStyle.primary)
-    async def open_setup(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.guild_id != self.guild_id or interaction.user.id != self.author_id:
-            return await interaction.response.send_message(
-                "Lance ta propre commande setup pour ouvrir ton panneau.",
-                ephemeral=True,
-            )
-        # Lance EXACTEMENT la même autorité que /setup : permission contrôlée,
-        # defer(ephemeral=True) avant la construction et navigation privée.
-        return await self.setup.send_setup(interaction)
-
-
 CATEGORY = "invitations"
 LABEL = "Invitations"
 # On accepte aussi la faute montrée en production : +setup invition.
