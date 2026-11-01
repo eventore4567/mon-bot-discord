@@ -524,6 +524,11 @@ class PlatformV4(commands.Cog):
         """Seuls les administrateurs attribuent les droits d'exécution."""
         actor_id = int(actor_id)
         member = guild.get_member(actor_id)
+        if member is None and actor_id != guild.owner_id:
+            try:
+                member = await guild.fetch_member(actor_id)
+            except (discord.HTTPException, AttributeError):
+                member = None
         if actor_id != guild.owner_id and not (
             member is not None and member.guild_permissions.administrator
         ):
@@ -542,6 +547,11 @@ class PlatformV4(commands.Cog):
                 raise ValueError("Ce rôle n'existe pas ou représente tout le serveur.")
         if subject_type == "user":
             user = guild.get_member(subject_id)
+            if user is None:
+                try:
+                    user = await guild.fetch_member(subject_id)
+                except (discord.HTTPException, AttributeError):
+                    user = None
             if user is None:
                 raise ValueError("Ce membre ne fait pas partie du serveur.")
         exists = await self.bot.db.fetchone(
