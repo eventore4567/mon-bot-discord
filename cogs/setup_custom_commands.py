@@ -103,6 +103,7 @@ class CommandTextModal(discord.ui.Modal):
                  "name": name, "response": str(self.texte.value or ""),
                  "embed_title": str(self.existing["embed_title"]) if self.existing else "",
                  "embed_color": int(self.existing["embed_color"]) if self.existing else 0x6C57CC,
+                 "ping_role_id": int(self.existing["ping_role_id"]) if self.existing else 0,
                  "enabled": bool(self.existing["enabled"]) if self.existing else True},
             )
         except ValueError as exc:
@@ -272,6 +273,7 @@ async def build_page(shell) -> None:
         container.add_item(discord.ui.TextDisplay(
             f"### {prefix}{selected['name']}\n"
             f"**Format :** {'Embed Discord' if selected['embed_title'] else 'Texte simple'}\n"
+            f"**Ping :** {(shell.guild.get_role(int(selected['ping_role_id'])).mention if selected['ping_role_id'] and shell.guild.get_role(int(selected['ping_role_id'])) else 'Aucun')}\n"
             f"**Message :** {str(selected['response'])[:250]}\n\n"
             f"**Actions ({len(action_rows)}/10) :**\n{details[:1300]}"
         ))
@@ -394,6 +396,7 @@ async def build_page(shell) -> None:
                     "response": row["response"],
                     "embed_title": "" if row["embed_title"] else row["name"].capitalize(),
                     "embed_color": row["embed_color"],
+                    "ping_role_id": row["ping_role_id"],
                     "enabled": bool(row["enabled"]),
                 },
             )
@@ -403,6 +406,41 @@ async def build_page(shell) -> None:
 
     format_button.callback = toggle_format
     container.add_item(discord.ui.ActionRow(format_button))
+
+    # RoleSelect affiche les rôles existants, sans demander aux admins de
+    # chercher un ID dans le mode développeur. Le ping reste OFF par défaut.
+    if selected:
+        ping_select = discord.ui.RoleSelect(
+            placeholder="Rôle à mentionner (facultatif)",
+            min_values=0, max_values=1,
+        )
+
+        async def change_ping(interaction):
+            if interaction.user.id != shell.author_id:
+                return await notify(interaction, "Ce panneau ne t'appartient pas.")
+            row = await selected_row(shell)
+            if row is None:
+                return await notify(interaction, "Commande supprimée.")
+            new_role = ping_select.values[0] if ping_select.values else None
+            platform = shell.bot.get_cog("PlatformV4")
+            if platform is None:
+                return await notify(interaction, "Moteur indisponible.")
+            try:
+                await platform.save_custom_command(
+                    shell.guild, interaction.user.id,
+                    {
+                        "id": row["id"], "name": row["name"], "response": row["response"],
+                        "embed_title": row["embed_title"], "embed_color": row["embed_color"],
+                        "ping_role_id": new_role.id if new_role is not None else 0,
+                        "enabled": bool(row["enabled"]),
+                    },
+                )
+            except ValueError as exc:
+                return await notify(interaction, str(exc))
+            await shell.refresh(interaction)
+
+        ping_select.callback = change_ping
+        container.add_item(discord.ui.ActionRow(ping_select))
 
     prefix_button = discord.ui.Button(label="Préfixe", style=discord.ButtonStyle.secondary)
     trigger_button = discord.ui.Button(
