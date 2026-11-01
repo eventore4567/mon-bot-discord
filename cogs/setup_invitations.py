@@ -496,6 +496,7 @@ def _patch_setup_v74(bot: commands.Bot) -> None:
                 "Clique sur **Ouvrir mon setup privé** pour configurer SentriX.",
                 view=PrivateSetupLauncher(self, member.id, guild.id),
                 allowed_mentions=discord.AllowedMentions.none(),
+                _sentrix_native_message=True,
             )
 
         # Discord ne sait pas envoyer un panneau éphémère depuis +setup.
