@@ -737,11 +737,15 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
     async def sticky_set(self, ctx: commands.Context, channel: discord.TextChannel, *, message: str):
         """Compatibilité /sticky set et +sticky-set : texte:, embed: ou banner:."""
         raw = str(message or "").strip()
-        mode = "text"
+        mode = None
         for prefix, selected in (("banner:", "banner"), ("embed:", "embed"), ("text:", "text")):
             if raw.casefold().startswith(prefix):
                 mode, raw = selected, raw[len(prefix):].strip()
                 break
+        # /sticky set #salon texte n'impose plus le mode texte par défaut :
+        # l'utilisateur choisit en boutons, avec ou sans bandeau.
+        if mode is None and raw:
+            return await self.sticky_add.callback(self, ctx, message=f"{channel.mention} {raw}")
         if not raw or len(raw) > 1700:
             return await ctx.send("Indiquez un message de 1 à 1700 caractères.")
         if not channel.permissions_for(ctx.author).manage_messages:
