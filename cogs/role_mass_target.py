@@ -10,6 +10,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from . import language_runtime
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.role-mass")
 _RUNNING: set[tuple[int, int]] = set()
@@ -31,7 +32,11 @@ class TargetSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         self.owner.target = self.values[0]
-        for item in self.owner.children:
+        parent = getattr(self.owner, "_sentrix_panel_view", None)
+        search = list(parent.children) if parent is not None else list(self.owner.children)
+        while search:
+            item = search.pop()
+            search.extend(getattr(item, "children", ()))
             if isinstance(item, discord.ui.Button) and item.custom_id == "sentrix:mass:confirm":
                 item.disabled = False
         label = {"members": "members", "bots": "bots", "all": "everyone"}[self.owner.target]
@@ -40,7 +45,10 @@ class TargetSelect(discord.ui.Select):
             if self.owner.english else
             f"Cible : **{label}**. Cliquez sur Confirmer pour {'ajouter' if self.owner.action == 'add' else 'retirer'} le rôle."
         )
-        await interaction.response.edit_message(content=desc, view=self.owner)
+        if parent is not None:
+            await interaction.response.edit_message(view=parent)
+        else:
+            await interaction.response.edit_message(content=desc, view=self.owner)
 
 
 class MassRoleView(discord.ui.View):
@@ -95,14 +103,23 @@ class MassRoleView(discord.ui.View):
             )
         _RUNNING.add(key)
         self.stop()
-        for item in self.children:
-            item.disabled = True
-        await interaction.response.edit_message(
-            content="Role operation started. A summary will be posted here when it ends."
-            if self.english else
-            "Opération démarrée. Un récapitulatif sera publié ici à la fin.",
-            view=self,
-        )
+        parent = getattr(self, "_sentrix_panel_view", None)
+        pending = list(parent.children) if parent is not None else list(self.children)
+        while pending:
+            item = pending.pop()
+            pending.extend(getattr(item, "children", ()))
+            if isinstance(item, (discord.ui.Button, discord.ui.Select)):
+                item.disabled = True
+        if parent is not None:
+            await interaction.response.edit_message(view=parent)
+            await interaction.followup.send(
+                "Opération démarrée. Le résultat sera envoyé en MP.",
+                ephemeral=True,
+            )
+        else:
+            await interaction.response.edit_message(
+                content="Opération démarrée. Le résultat sera envoyé en MP.", view=self
+            )
         # The job can outlast an interaction token on large servers.
         # Keep it independent and report through the original channel.
         asyncio.create_task(self._apply(interaction.guild, interaction.channel, self.author_id, key))
@@ -118,7 +135,7 @@ class MassRoleView(discord.ui.View):
                 members = [member async for member in guild.fetch_members(limit=None)]
             except (discord.Forbidden, discord.HTTPException):
                 # Do not silently apply to a partial member cache.
-                await channel.send("Mass role failed: full member list unavailable.")
+                await self._notify_actor(guild, actor_id, "Liste complète des membres indisponible ; aucun rôle modifié.")
                 return
             for member in members:
                 if self.target == "members" and member.bot:
@@ -142,27 +159,28 @@ class MassRoleView(discord.ui.View):
                 except (discord.Forbidden, discord.HTTPException):
                     failed += 1
                 await asyncio.sleep(0)
-            await channel.send(
-                f"Role operation finished · {changed} changed · {skipped} skipped · {failed} failed."
-                if self.english else
-                f"Opération terminée · {changed} modifiés · {skipped} ignorés · {failed} échecs.",
-                allowed_mentions=discord.AllowedMentions.none(),
+            await self._notify_actor(
+                guild, actor_id,
+                f"Opération terminée : {changed} modifiés, {skipped} ignorés et {failed} échecs.",
             )
         except Exception:
             logger.exception("Mass role failed: guild=%s, role=%s, processed=%s",
                              guild.id, self.role_id, processed)
-            try:
-                await channel.send("Mass role operation stopped unexpectedly.")
-            except discord.HTTPException:
-                pass
+            await self._notify_actor(guild, actor_id, "L'opération sur les rôles a été interrompue.")
         finally:
             _RUNNING.discard(key)
+
+    async def _notify_actor(self, guild: discord.Guild, actor_id: int, message: str) -> None:
+        try:
+            actor = guild.get_member(actor_id) or await guild.fetch_member(actor_id)
+            await actor.send(message, allowed_mentions=discord.AllowedMentions.none())
+        except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+            logger.warning("Récapitulatif de rôle impossible à envoyer en MP (guild=%s).", guild.id)
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.stop()
-        await interaction.response.edit_message(
-            content="Cancelled." if self.english else "Annulé.", view=None)
+        await interaction.response.edit_message(view=None)
 
 
 class MassRole(commands.Cog):
@@ -229,7 +247,19 @@ class MassRole(commands.Cog):
             if english else
             f"Rôle : {role.mention} · Action : **{action}**. Choisissez les membres concernés."
         )
-        await ctx.send(description, view=view, ephemeral=bool(ctx.interaction), allowed_mentions=discord.AllowedMentions.none())
+        panneau = panels.Panneau(
+            titre="Gestion des rôles en masse" if not english else "Bulk role management",
+            sous_titre=description,
+            kind="moderation",
+            banniere=True,
+            sections=[panels.Section(
+                "Sélection" if not english else "Selection",
+                texte="Choisissez membres, bots ou tous, puis confirmez. Aucune modification sans confirmation."
+                if not english else "Choose members, bots or everyone, then confirm.",
+            )],
+        )
+        panneau = panels.avec_composants(panneau, view)
+        await panels.envoyer(ctx, panneau, ephemere=bool(ctx.interaction))
 
 
 async def setup(bot: commands.Bot):
