@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import discord
 
-from cogs.presentation import _is_old_presentation, _presentation
+from cogs.presentation import _old_panel, presentation_panel
 from cogs.presentation_feedback import (
     BUTTON_ID,
     COOLDOWN_SECONDS,
@@ -22,7 +22,7 @@ def test_feedback_registration_survives_restart():
 
 
 def test_presentation_has_install_and_feedback_buttons():
-    view = _presentation(
+    view = presentation_panel(
         "https://discord.com/oauth2/authorize?client_id=123",
         english=True,
         bot=SimpleNamespace(),
@@ -53,7 +53,7 @@ def test_legacy_presentation_detection_is_strict():
             return {"text": "SentriX /setup", "button": {"label": "Add SentriX"}}
 
     old = SimpleNamespace(author=SimpleNamespace(id=123), components=[Component()])
-    assert _is_old_presentation(old, 123)
-    assert not _is_old_presentation(old, 999)
+    assert _old_panel(old, 123)
+    assert not _old_panel(old, 999)
     unrelated = SimpleNamespace(author=SimpleNamespace(id=123), components=[])
-    assert not _is_old_presentation(unrelated, 123)
+    assert not _old_panel(unrelated, 123)
