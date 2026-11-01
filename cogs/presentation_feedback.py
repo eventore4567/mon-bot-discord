@@ -17,6 +17,7 @@ from database.db import PRIMARY_CREATOR_ID
 logger = logging.getLogger("bot.presentation-feedback")
 BUTTON_ID = "sentrix:presentation:feedback:v1"
 COOLDOWN_SECONDS = 900
+FEEDBACK_LOCKS: dict[tuple[int, int], asyncio.Lock] = {}
 
 
 async def ensure_schema(bot: commands.Bot) -> None:
@@ -59,16 +60,8 @@ class FeedbackModal(discord.ui.Modal):
                 ephemeral=True,
             )
         await interaction.response.defer(ephemeral=True, thinking=True)
-        cog = self.bot.get_cog("SentriXPresentation")
-        if cog is None:
-            return await interaction.followup.send(
-                "Feedback is temporarily unavailable." if self.english
-                else "Les avis sont momentanément indisponibles.",
-                ephemeral=True,
-            )
-
         key = (interaction.guild.id, interaction.user.id)
-        lock = cog.feedback_locks.setdefault(key, asyncio.Lock())
+        lock = FEEDBACK_LOCKS.setdefault(key, asyncio.Lock())
         async with lock:
             try:
                 row = await self.bot.db.fetchone(
