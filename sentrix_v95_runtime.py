@@ -437,7 +437,7 @@ async def _invoke_original(
             return await interaction.response.send_message(
                 "Configuration momentanément indisponible.", ephemeral=True,
             )
-        return await setup.send_setup(interaction, private=True)
+        return await setup.send_setup(interaction)
 
     if not interaction.response.is_done():
         await interaction.response.defer(thinking=True)
