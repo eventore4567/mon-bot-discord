@@ -40,6 +40,8 @@ PREFIXE = "sentrix_"
 #: animations partout » — une interface qui bouge en permanence fatigue.
 #: Une animation ne se justifie que pour un état VIVANT : quelque chose est en
 #: cours, ou vient de changer.
+from tools.generer_emojis_application_v2 import ANIMES as _ANIMES_VARIANTES
+
 ANIMES_AUTORISES = frozenset({
     "sentrix_loading", "sentrix_scan", "sentrix_live", "sentrix_success",
     "sentrix_alert", "sentrix_lock", "sentrix_unlock", "sentrix_upload",
@@ -52,7 +54,7 @@ ANIMES_AUTORISES = frozenset({
     # exactement ce qui faisait « émoji moche ».
     "sentrix_bouclier", "sentrix_valide", "sentrix_croix",
     "sentrix_fleche", "sentrix_chargement", "sentrix_alerte",
-})
+}) | _ANIMES_VARIANTES
 
 #: Repli affiché tant que l'icône n'est pas disponible. Volontairement sobre :
 #: ce sont des caractères typographiques, pas des emojis colorés, pour que le
@@ -434,6 +436,16 @@ async def synchroniser(bot, *, forcer: bool = False) -> dict[str, int]:
         return {"deja_fait": 1}
 
     bilan = {"existants": 0, "envoyes": 0, "echecs": 0, "absents_du_pack": 0, "remplaces": 0}
+    # Le nouveau pack est fabriqué localement en 128 px : 96 variantes fixes
+    # et 16 animations légères. Les icônes déjà présentes ne sont jamais
+    # recréées : même nom = même emoji Discord = mêmes ID dans les vieux logs.
+    try:
+        from tools.generer_emojis_application_v2 import generer
+        resultat = generer(DOSSIER)
+        logger.info("Variantes SentriX : %s nouveau(x) fichier(s), %s prévus.",
+                    resultat["crees"], resultat["total_planifies"])
+    except Exception:
+        logger.warning("Pack complémentaire indisponible, les emojis existants restent actifs.", exc_info=True)
     try:
         existants = await bot.fetch_application_emojis()
     except Exception:

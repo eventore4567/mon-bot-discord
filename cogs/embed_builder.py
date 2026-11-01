@@ -262,24 +262,24 @@ class EmbedDraft:
         return view if view.children else None
 
     def status_summary(self) -> str:
-        def etat(ok: bool, texte: str) -> str:
-            return f"{'✅' if ok else '▫️'} {texte}"
-
-        lines = [
-            etat(bool(self.title), f"**Titre** · `{len(self.title)} car.`" if self.title else "**Titre** · *vide*"),
-            etat(bool(self.description),
-                 f"**Description** · `{len(self.description)} car.`" if self.description else "**Description** · *vide*"),
-            f"🎨 **Couleur** · `#{self.colour:06X}`" if self.colour is not None else "🎨 **Couleur** · *aucune*",
-            f"📋 **Champs** · `{len(self.fields)}/{MAX_FIELDS}` · 🔘 **Boutons** · `{len(self.buttons)}/{MAX_BUTTONS}`",
-            f"🖼️ **Image** · {'✅' if self.image_url else '▫️'} · **Miniature** · {'✅' if self.thumbnail_url else '▫️'}",
-            f"🧮 **Total** · `{self.total_chars()}/{MAX_TOTAL}` caractères",
-        ]
-        if self.template_name:
-            lines.append(f"💾 **Modèle** · 🟢 `{self.template_name}` enregistré" if not self.dirty
-                         else f"💾 **Modèle** · 🟠 `{self.template_name}` — modifications non enregistrées")
-        else:
-            lines.append("💾 **Modèle** · 🟠 non sauvegardé")
-        return "\n".join(lines)
+        """Texte court pour les anciens écrans et diagnostics, sans grappe d'icônes."""
+        titre = (self.title[:54] + "…" if len(self.title or "") > 55 else self.title) or "Non défini"
+        description = f"{len(self.description)} caractères" if self.description else "Non définie"
+        couleur = f"#{self.colour:06X}" if self.colour is not None else "Aucune"
+        sauvegarde = (
+            f"{self.template_name} · Modifié" if self.dirty else self.template_name
+        ) if self.template_name else "Brouillon non sauvegardé"
+        return (
+            f"**Titre :** {titre}\n"
+            f"**Description :** {description}\n\n"
+            f"**Couleur :** {couleur}\n"
+            f"**Champs :** {len(self.fields)}/{MAX_FIELDS}   "
+            f"**Boutons :** {len(self.buttons)}/{MAX_BUTTONS}\n"
+            f"**Image :** {'Ajoutée' if self.image_url else 'Aucune'}   "
+            f"**Miniature :** {'Ajoutée' if self.thumbnail_url else 'Aucune'}\n\n"
+            f"**Caractères :** {self.total_chars()}/{MAX_TOTAL}\n"
+            f"**Modèle :** {sauvegarde}"
+        )
 
     # ---------- (dé)sérialisation ----------
 
@@ -932,8 +932,16 @@ class EmbedBuilderView(discord.ui.View):
             self.remove_item(item)
         menu = discord.ui.Select(
             placeholder="✏️ Modifier l'embed…", row=0,
-            options=[discord.SelectOption(label=libelle, value=cle, emoji=emoji)
-                     for cle, libelle, emoji, _item in reglages],
+            options=[
+                discord.SelectOption(
+                    label=libelle, value=cle,
+                    emoji=__import__("utils.sentrix_emojis", fromlist=["partiel"]).partiel({
+                        "texte": "note", "apparence": "settings", "images": "image",
+                        "ajout_champ": "more", "champs": "file", "boutons": "link",
+                    }.get(cle, "settings")) or emoji,
+                )
+                for cle, libelle, emoji, _item in reglages
+            ],
         )
 
         async def choisir(interaction: discord.Interaction):
@@ -958,10 +966,38 @@ class EmbedBuilderView(discord.ui.View):
                 pass
 
     def build_panel_embeds(self) -> list[discord.Embed]:
-        status = design_system.create_embed(
+        # Un véritable embed Discord, sans panneau « Action effectuée »
+        # supplémentaire : une intro courte, puis des champs aérés.
+        status = discord.Embed(
             title="Créateur d'embed SentriX",
-            description="Personnalise ton embed avec le menu ci-dessous.\n\n" + self.draft.status_summary(),
-            colour=self.draft.colour if self.draft.colour is not None else design_system.COLORS.primary,
+            description="Choisis un réglage ci-dessous, puis prévisualise avant d'envoyer.",
+            colour=discord.Colour(0x6C57CC),
+        )
+        status.add_field(
+            name="Texte",
+            value=(
+                f"**Titre :** {self.draft.title[:60] if self.draft.title else 'À renseigner'}\n"
+                f"**Description :** "
+                + (f"{len(self.draft.description)} caractères" if self.draft.description else "À renseigner")
+            ), inline=False,
+        )
+        status.add_field(
+            name="Apparence",
+            value=(
+                f"Couleur : `#{self.draft.colour:06X}`\n"
+                if self.draft.colour is not None else "Couleur : aucune\n"
+            ) + f"Image : {'oui' if self.draft.image_url else 'non'} · Miniature : {'oui' if self.draft.thumbnail_url else 'non'}",
+            inline=True,
+        )
+        status.add_field(
+            name="Éléments",
+            value=f"Champs : {len(self.draft.fields)}/{MAX_FIELDS}\nLiens : {len(self.draft.buttons)}/{MAX_BUTTONS}",
+            inline=True,
+        )
+        status.add_field(
+            name="Brouillon",
+            value=self.draft.template_name or "Non sauvegardé",
+            inline=False,
         )
         result = [status]
         preview = self.draft.to_embed()

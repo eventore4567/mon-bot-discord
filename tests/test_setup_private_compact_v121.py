@@ -25,7 +25,7 @@ def test_one_select_setup_home_does_not_toggle_modules():
     assert home.count("discord.ui.Select(") == 1
     assert "ModuleSwitchSelect" not in home
     assert "toggle_module_switch" not in home
-    assert "discord.ui.Button(label=\"Fermer\"" in home
+    assert 'label="Fermer"' in home
     assert "Installer" not in home
 
 

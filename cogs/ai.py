@@ -82,6 +82,44 @@ async def _remplacer_attente(ctx, message) -> None:
         pass
 
 
+async def _images_from_discord_attachments(attachments) -> list[str]:
+    """Images autorisées par l'auteur pour une seule question ; aucune URL distante suivie.
+
+    Les pièces jointes Discord sont lues sur le message d'origine, vérifiées,
+    encodées en data URI et ne sont pas ajoutées à l'historique durable.
+    Un GIF est analysé sur sa première image (pas la vidéo entière).
+    """
+    import base64
+    import io
+
+    from PIL import Image
+
+    images = []
+    for attachment in list(attachments)[:3]:
+        mime = str(getattr(attachment, "content_type", "") or "").split(";")[0].lower()
+        if mime not in {"image/png", "image/jpeg", "image/webp", "image/gif"}:
+            continue
+        if int(getattr(attachment, "size", 0) or 0) > 4 * 1024 * 1024:
+            continue
+        try:
+            raw = await attachment.read()
+            if len(raw) > 4 * 1024 * 1024:
+                continue
+            # Pillow valide les octets. Les GIF animés sont réduits à une
+            # image, et les autres formats peuvent être compressés si besoin.
+            with Image.open(io.BytesIO(raw)) as original:
+                original.seek(0)
+                original.thumbnail((1536, 1536))
+                image = original.convert("RGB")
+                output = io.BytesIO()
+                image.save(output, format="JPEG", quality=83, optimize=True)
+            images.append("data:image/jpeg;base64," +
+                          base64.b64encode(output.getvalue()).decode("ascii"))
+        except Exception:
+            logger.debug("Pièce jointe image non lisible pour l'IA.", exc_info=True)
+    return images
+
+
 class AiResponseView(discord.ui.View):
     """Boutons attachés à une réponse +ai/+chat : Régénérer, Plus détaillé, Plus court,
     Nouvelle conversation. Verrouillés à l'auteur de la demande, protégés contre le double
@@ -738,7 +776,7 @@ class Ai(commands.Cog, name="Ai"):
 
     async def ask_ai(self, prompt, history: list = None, author_name: str = None, *,
                       guild_id: int = None, channel_id: int = None, user_id: int = None,
-                      command: str = None) -> str:
+                      command: str = None, image_urls: list[str] | None = None) -> str:
         """Compatibilité : utilisé par /sentrix, /ask, /summarize, +image-prompt, +explain,
         +rewrite, +fact-check — délègue au moteur centralisé (Responses API, GPT-5.6
         Terra/Sol, nouvelles instructions) en gardant exactement la même signature.
@@ -755,9 +793,33 @@ class Ai(commands.Cog, name="Ai"):
         model_key = ai_service.pick_model(prompt if isinstance(prompt, str) else "")
         reasoning_effort = ai_service.pick_reasoning_effort(model_key, "medium")
         instructions = await self._build_system_instructions(user_id, author_name)
-        input_payload = prompt
-        if history:
-            input_payload = list(history) + [{"role": "user", "content": prompt}]
+        # Le moteur ne lit jamais des fichiers tout seul : seules les images
+        # explicitement jointes au message et validées passent à OpenAI.
+        content = prompt
+        if image_urls:
+            content = [{"type": "input_text", "text": str(prompt)}] + [
+                {"type": "input_image", "image_url": url, "detail": "low"}
+                for url in image_urls[:3]
+            ]
+        input_payload = (
+            list(history) + [{"role": "user", "content": content}]
+            if history else ([{"role": "user", "content": content}] if image_urls else prompt)
+        )
+        # GIFs / emojis d'application déjà présents dans le portail. Ne jamais
+        # inventer un ID Discord ni un lien GIF. L'IA reste libre de répondre
+        # sobrement et n'utilise les icônes que sur demande.
+        from utils import sentrix_emojis
+        if any(mot in str(prompt).casefold() for mot in ("emoji", "émoji", "gif", "sticker")):
+            allowed = [sentrix_emojis.emoji(name) for name in
+                       ("success", "alert", "ticket", "gift", "bouclier",
+                        "musique", "ai", "notification", "gamepad", "trophy")]
+            allowed = [emoji for emoji in allowed if emoji.startswith("<")]
+            if allowed:
+                instructions += (
+                    "\nTu peux inclure au maximum deux emojis SentriX adaptés à la demande "
+                    "parmi ceux-ci, sans changer leurs identifiants : " + " ".join(allowed)
+                    + ". N'invente jamais un lien vers un GIF."
+                )
         result = await ai_service.generate(
             input_payload, model_key=model_key, reasoning_effort=reasoning_effort, instructions=instructions,
             guild_id=guild_id, channel_id=channel_id, user_id=user_id, command=command,
@@ -797,7 +859,9 @@ class Ai(commands.Cog, name="Ai"):
             content = content[:match.start()].rstrip(" \n-")
         return content, confidence
 
-    async def send_sentrix_reply(self, destination, author, question: str, *, reply_to: discord.Message = None):
+    async def send_sentrix_reply(self, destination, author, question: str, *,
+                                 reply_to: discord.Message = None,
+                                 attachments: list[discord.Attachment] | None = None):
         """Envoie la réponse de SentriX en texte brut (sans embed), demandé par Jayden pour
         /sentrix. Partagé entre la commande /sentrix et le déclenchement par simple message
         (mention du bot ou message commençant par "sentrix" / "ssentrix").
@@ -834,8 +898,14 @@ class Ai(commands.Cog, name="Ai"):
         command = "sentrix-passif" if reply_to is not None else "sentrix"
         history = self.histories.get(author.id, [])
         author_name = getattr(author, "display_name", None) or str(author)
+        images = await _images_from_discord_attachments(attachments or [])
+        if attachments and not images and any(
+            mot in question.casefold() for mot in ("image", "photo", "capture", "gif", "regarde", "voir")
+        ):
+            return await _send(content="Je peux analyser jusqu'à 3 images PNG, JPG, WebP ou GIF (4 Mo max chacune).")
         answer = await self.ask_ai(question, history, author_name=author_name,
-                                    guild_id=guild_id, channel_id=channel_id, user_id=author.id, command=command)
+                                    guild_id=guild_id, channel_id=channel_id,
+                                    user_id=author.id, command=command, image_urls=images)
         if ai_service.is_error_code(answer):
             # Les conversations restent en texte libre, même en cas d'erreur.
             return await _send(content=ai_service.error_message(answer)[:1800])
@@ -2338,11 +2408,22 @@ class Ai(commands.Cog, name="Ai"):
             question = re.sub(r"<@!?\d+>", "", question, count=1).strip()
         elif name_trigger:
             question = content[name_match.end():].lstrip(" ,:-").strip()
+        # Une image postée en réponse à une capture déjà visible est aussi
+        # une image volontairement présentée à SentriX. On ne récupère JAMAIS
+        # les images des autres messages du salon sans demande explicite.
+        attachments = list(message.attachments)
+        reference = getattr(message, "reference", None)
+        if not attachments and reference is not None:
+            cible = getattr(reference, "resolved", None)
+            if isinstance(cible, discord.Message):
+                attachments = list(cible.attachments)
         if not question:
-            question = "Salut, comment tu vas ?"
+            question = "Décris cette image." if attachments else "Salut, comment tu vas ?"
 
         try:
-            if await self._invoke_natural_command(message, question, prefix):
+            # Une image à comprendre n'est PAS une commande naturelle. Sinon
+            # « SentriX regarde mon image » peut tomber dans le routeur actions.
+            if not attachments and await self._invoke_natural_command(message, question, prefix):
                 return
         except Exception:
             # Une action naturelle ne doit JAMAIS disparaître silencieusement : le détail
@@ -2364,7 +2445,16 @@ class Ai(commands.Cog, name="Ai"):
             return
 
         async with message.channel.typing():
-            await self.send_sentrix_reply(message.channel, message.author, question, reply_to=message)
+            if attachments:
+                await self.send_sentrix_reply(
+                    message.channel, message.author, question,
+                    reply_to=message, attachments=attachments,
+                )
+            else:
+                await self.send_sentrix_reply(
+                    message.channel, message.author, question,
+                    reply_to=message,
+                )
 
     @commands.hybrid_command(name="ask", description="Poser une question à l'IA.")
     @app_commands.describe(question="Votre question pour l'IA")

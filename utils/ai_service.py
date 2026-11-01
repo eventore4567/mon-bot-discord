@@ -733,7 +733,7 @@ class AiResult:
 
 
 async def generate(
-    prompt: str,
+    prompt: str | list,
     *,
     model_key: str = MODEL_TERRA,
     reasoning_effort: str = "medium",
@@ -781,7 +781,13 @@ async def generate(
 
     model_id = MODEL_IDS.get(model_key, config.OPENAI_MODEL)
     video_search = web_search and is_video_search_request(filtered_text)
-    effective_prompt = prompt + _VIDEO_SEARCH_INSTRUCTIONS if video_search else prompt
+    # Une demande avec image arrive sous forme de messages Responses API, pas
+    # d'une chaîne : ne jamais concaténer une instruction texte à cette liste.
+    effective_prompt = (
+        prompt + _VIDEO_SEARCH_INSTRUCTIONS
+        if video_search and isinstance(prompt, str)
+        else prompt
+    )
     kwargs = {
         "model": model_id,
         "instructions": instructions,

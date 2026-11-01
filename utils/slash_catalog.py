@@ -760,6 +760,22 @@ RETIRED: dict[str, str] = {
 # Conserver toute la sécurité, la modération, les tickets et les 40+ jeux.
 # /setup est le seul endroit public pour la configuration générale.
 _MENU_SIMPLIFIE_KEEP: dict[str, frozenset[str]] = {
+    # Les interrupteurs AutoMod sont dans /setup ; ne pas exposer dix copies.
+    # Garder les opérations d'urgence et le diagnostic direct.
+    "security": frozenset({
+        "antinuke", "quarantine", "lockdown", "panic", "panic-off",
+        "panic-status", "status", "history", "scan", "fix", "permissions",
+        "isolate", "release",
+    }),
+    # Le menu Sécurité gère les paramètres ; conserver surtout les opérations
+    # réelles, les sauvegardes et les commandes d'urgence.
+    "protection": frozenset({
+        "blacklist", "block", "unblock", "words", "backup", "restore",
+        "lockdown", "unlock", "raid status", "raid pause", "raid resume",
+        "trusted", "trust", "untrust", "exempt immunity", "bot-allow",
+    }),
+    "logs": frozenset({"search", "trace", "status"}),
+    "tickets": frozenset({"open", "reopen", "transcript", "stats"}),
     "config": frozenset(()),
     "market": frozenset(()),
     "counter": frozenset(()),

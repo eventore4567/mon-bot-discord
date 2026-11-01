@@ -363,144 +363,143 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         await cog.open_builder_from_interaction(interaction)
 
     async def _build_home(self) -> None:
-        """Accueil privé compact : un seul menu, aucune activation involontaire."""
+        """Accueil privé lisible : un aperçu bref, un seul menu, zéro action destructive."""
+        from utils import sentrix_emojis as icons
+
         self.backend.category = None
         self.avance = False
-
         states = await setup_ui.module_switch_states(self.bot, self.guild.id)
-        actifs = sum(state == "enabled" for state in states.values())
-        actifs_labels = [
-            label for key, label in setup_ui.MODULE_SWITCHES
-            if states.get(key) == "enabled"
-        ]
-        inactifs_labels = [
-            label for key, label in setup_ui.MODULE_SWITCHES
-            if states.get(key) == "disabled"
-        ]
-        manquants_labels = [
-            label for key, label in setup_ui.MODULE_SWITCHES
-            if states.get(key) in {"not_configured", "empty"}
-        ]
-        container = discord.ui.Container()
+        labels = dict(setup_ui.MODULE_SWITCHES)
+        actifs = [labels[key] for key in labels if states.get(key) == "enabled"]
+        inactifs = [labels[key] for key in labels if states.get(key) == "disabled"]
+        incomplets = [labels[key] for key in labels if states.get(key) in {"empty", "not_configured"}]
+
+        def label_liste(items: list[str]) -> str:
+            return ", ".join(items) if items else "Aucun"
+
+        container = discord.ui.Container(accent_colour=0x6C57CC)
         v73.poser_banniere(container)
-        container.add_item(
-            discord.ui.Section(
-                discord.ui.TextDisplay(
-                    "# Configuration SentriX\n"
-                    f"**{self.guild.name}** · **{actifs}/{len(setup_ui.MODULE_SWITCHES)}** modules actifs\n"
-                    "Choisis une fonctionnalité pour modifier ses réglages."
-                ),
-                accessory=v73._thumbnail(self.bot),
-            )
-        )
+        container.add_item(discord.ui.Section(
+            discord.ui.TextDisplay(
+                "# Configuration SentriX\n"
+                f"**{self.guild.name}**  ·  **{len(actifs)}/{len(labels)} modules actifs**\n"
+                "-# Chaque choix ouvre les réglages du module ; aucun changement sans action."
+            ),
+            accessory=v73._thumbnail(self.bot),
+        ))
         container.add_item(discord.ui.Separator())
         container.add_item(discord.ui.TextDisplay(
-            "**Actifs :** " + (", ".join(actifs_labels) or "Aucun") + "\n"
-            "**Désactivés :** " + (", ".join(inactifs_labels) or "Aucun") + "\n"
-            "**À configurer :** " + (", ".join(manquants_labels) or "Aucun")
+            "### État des fonctionnalités\n"
+            "**Actives**\n"
+            f"{label_liste(actifs)}\n\n"
+            "**Désactivées**\n"
+            f"{label_liste(inactifs)}\n\n"
+            "**À terminer**\n"
+            f"{label_liste(incomplets)}"
         ))
+        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.TextDisplay("### Que veux-tu configurer ?"))
 
-        # Emojis d'APPLICATION déjà téléversés : jamais de copie sur le serveur.
-        # Chaque catégorie reçoit son dessin propre ; animation seulement pour
-        # les états vivants, avec repli Unicode tant que le cache n'est pas prêt.
-        from utils import sentrix_emojis
-        categories_emoji = {
-            "security": "bouclier",
-            "moderation": "mod",
-            "tickets": "ticket",
-            "welcome": "member_join",
-            "goodbye": "member_leave",
-            "roles": "role",
-            "logs": "logs",
-            "levels": "level",
-            "notifications": "notification",
-            "music": "musique",
-            "ai": "ai",
-            "invitations": "tracking",
+        # Même bibliothèque partout ; chaque sujet a SON icône et non un
+        # emoji copié sur des catégories différentes. Les codes existants du
+        # portail développeur restent valables en cas de redéploiement.
+        icons_par_module = {
+            "security": "bouclier", "moderation": "mod",
+            "tickets": "ticket", "welcome": "member_join",
+            "goodbye": "member_leave", "roles": "role",
+            "logs": "logs", "levels": "level",
+            "notifications": "notification", "music": "musique",
+            "ai": "ai", "invitations": "tracking",
+            "economy": "coin",
         }
-        # Les pages comme Invitations et Musique ont leur propre état réel :
-        # ne pas afficher « Désactivé » uniquement parce qu'elles ne font
-        # pas partie des 12 interrupteurs de l'ancien menu.
-        details = await self._effective_states()
+        etats = await self._effective_states()
 
-        def _etat_page(key: str) -> str:
-            status = states.get(key)
-            if status == "enabled":
+        def etat(key: str) -> str:
+            value = states.get(key)
+            if value == "enabled":
                 return "Actif"
-            if status in {"not_configured", "empty"}:
-                return "À configurer"
-            if status == "disabled":
+            if value == "disabled":
                 return "Désactivé"
-            detail = str(details.get(key, "")).upper()
-            if "ACTIF" in detail and "INACTIF" not in detail:
-                return "Actif"
+            if value in {"empty", "not_configured"}:
+                return "À configurer"
+            detail = str(etats.get(key, "")).upper()
             if "INACTIF" in detail:
                 return "Désactivé"
+            if "ACTIF" in detail:
+                return "Actif"
             return "À configurer"
 
-        modules = [
+        options = [
             discord.SelectOption(
-                label=CATEGORY_META[key][1][:100],
-                value=key,
-                description=_etat_page(key),
-                emoji=(
-                    sentrix_emojis.partiel(categories_emoji.get(key, ""))
-                    or CATEGORY_META[key][0]
-                ),
+                label=CATEGORY_META[key][1][:100], value=key,
+                description=(etat(key) + " · " + CATEGORY_META[key][2])[:100],
+                emoji=icons.partiel(icons_par_module.get(key, ""))
+                      or CATEGORY_META[key][0],
             )
             for key in CATEGORY_ORDER if key in CATEGORY_META
         ]
-        modules.extend([
-            discord.SelectOption(label="Règlement et accès", value="rules_access", emoji="📜"),
-            discord.SelectOption(label="Suggestions", value="suggestions", emoji="💡"),
-            discord.SelectOption(label="Embeds personnalisés", value="embeds", emoji="📨"),
-            discord.SelectOption(label="Commandes personnalisées", value="custom_commands"),
-            discord.SelectOption(label="Messages enregistrés", value="snippets"),
-            discord.SelectOption(label="Messages récurrents", value="recurring_messages"),
-            discord.SelectOption(label="Automatisations", value="automation"),
-            discord.SelectOption(label="Logs Soundboard", value="soundboard"),
-            discord.SelectOption(label="Identité sur ce serveur", value="identity"),
-            discord.SelectOption(label="Assistant guidé", value="guided"),
-            discord.SelectOption(label="Langue du serveur", value="language"),
-        ])
-        assert len(modules) <= 25, "Discord autorise 25 choix par menu."
-        choice = discord.ui.Select(placeholder="Configurer une fonctionnalité…", options=modules)
+
+        # Les logs Soundboard se configurent depuis Logs. L'ancien assistant
+        # guidé doublonnait les pages et les écrans déjà configurés.
+        # Les options secondaires deviennent des fonctions explicites.
+        extras = (
+            ("rules_access", "Règlement et vérification", "note",
+             "Règles, CAPTCHA, rôles et accès aux salons"),
+            ("suggestions", "Suggestions", "info",
+             "Salon, votes et modération des idées"),
+            ("embeds", "Créer un embed", "image",
+             "Texte, images, couleurs et boutons"),
+            ("custom_commands", "Commandes personnalisées", "tools",
+             "Créer ses propres commandes"),
+            ("snippets", "Messages enregistrés", "message",
+             "Préparer des messages à réutiliser"),
+            ("recurring_messages", "Messages programmés", "calendar",
+             "Réglages des publications automatiques"),
+            ("automation", "Automatisations", "sync",
+             "Règles et actions automatiques"),
+            ("language", "Langue du serveur", "settings",
+             "Français ou English"),
+        )
+        options.extend(
+            discord.SelectOption(
+                label=label, value=key, description=description,
+                emoji=icons.partiel(icone),
+            )
+            for key, label, icone, description in extras
+        )
+        assert len(options) <= 25, "Discord limite les menus à 25 choix."
+        choice = discord.ui.Select(
+            placeholder="Choisir un module ou une fonction…", options=options,
+        )
 
         async def ouvrir(interaction: discord.Interaction):
             selected = choice.values[0]
             if selected == "embeds":
                 return await self._open_embed_builder(interaction)
-            if selected == "identity":
-                return await interaction.response.send_modal(IdentiteBotModal(self))
-            if selected == "guided":
-                return await self._guide_aller(
-                    interaction, (await guide_step_saved(self.bot, self.guild.id)) or 0
-                )
             if selected == "language":
                 from .language_official_bridge import OfficialLanguageSelect
                 panneau = discord.ui.LayoutView(timeout=180)
-                bloc = discord.ui.Container()
+                bloc = discord.ui.Container(accent_colour=0x6C57CC)
                 v73.poser_banniere(bloc)
                 bloc.add_item(discord.ui.TextDisplay("## Langue du serveur"))
+                bloc.add_item(discord.ui.Separator())
                 bloc.add_item(discord.ui.ActionRow(OfficialLanguageSelect(self.backend)))
                 panneau.add_item(bloc)
                 return await interaction.response.send_message(
-                    **v73.joindre_banniere({"view": panneau}), ephemeral=True
+                    **v73.joindre_banniere({"view": panneau}), ephemeral=True,
                 )
-            self.page = "logs" if selected == "soundboard" else selected
+            self.page = selected
             self.backend = self._new_backend(self.page)
-            if selected == "soundboard":
-                self.backend.selected_log = "soundboard"
             await self.refresh(interaction)
 
         choice.callback = ouvrir
         container.add_item(discord.ui.ActionRow(choice))
-
-        close = discord.ui.Button(label="Fermer", style=discord.ButtonStyle.secondary)
-
+        close = discord.ui.Button(
+            label="Fermer", style=discord.ButtonStyle.secondary,
+            emoji=icons.partiel("close"),
+        )
         async def fermer(interaction: discord.Interaction):
             await self._close(interaction)
-
         close.callback = fermer
         container.add_item(discord.ui.ActionRow(close))
         self.add_item(container)
@@ -515,7 +514,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         )
         problems = sum("CORRIGER" in states.get(key, "") for key in CATEGORY_ORDER)
 
-        container = discord.ui.Container()
+        container = discord.ui.Container(accent_colour=0x6C57CC)
         v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
@@ -672,7 +671,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
 
         toggle.callback = toggle_module
 
-        container = discord.ui.Container()
+        container = discord.ui.Container(accent_colour=0x6C57CC)
         v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
@@ -764,7 +763,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         else:
             channel_text = "All channels" if english else "Tous les salons"
 
-        container = discord.ui.Container()
+        container = discord.ui.Container(accent_colour=0x6C57CC)
         v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
@@ -864,7 +863,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
     async def _build_suggestions(self) -> None:
         from cogs import suggestions
 
-        container = discord.ui.Container()
+        container = discord.ui.Container(accent_colour=0x6C57CC)
         v73.poser_banniere(container)
         for item in await suggestions.setup_page_items(self):
             container.add_item(item)
@@ -918,7 +917,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             f"**Panneau public :** {'Publié' if published else 'Non publié'}"
         )
 
-        container = discord.ui.Container()
+        container = discord.ui.Container(accent_colour=0x6C57CC)
         v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
@@ -996,7 +995,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             else "Configurez les réactions automatiques et les règles de contenu par salon."
         )
 
-        container = discord.ui.Container()
+        container = discord.ui.Container(accent_colour=0x6C57CC)
         v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
@@ -1093,7 +1092,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             style=discord.ButtonStyle.success if settings.get("enabled") else discord.ButtonStyle.secondary,
             disabled=True,
         )
-        container = discord.ui.Container()
+        container = discord.ui.Container(accent_colour=0x6C57CC)
         v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
@@ -1310,7 +1309,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             style=discord.ButtonStyle.success if enabled else discord.ButtonStyle.secondary,
             disabled=True,
         )
-        container = discord.ui.Container()
+        container = discord.ui.Container(accent_colour=0x6C57CC)
         v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
@@ -1381,7 +1380,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             else discord.ButtonStyle.secondary
         )
         status = discord.ui.Button(label=status_label, style=status_style, disabled=True)
-        container = discord.ui.Container()
+        container = discord.ui.Container(accent_colour=0x6C57CC)
         v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
@@ -1458,7 +1457,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             disabled=True,
         )
 
-        container = discord.ui.Container()
+        container = discord.ui.Container(accent_colour=0x6C57CC)
         v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(

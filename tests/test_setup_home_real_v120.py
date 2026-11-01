@@ -20,7 +20,7 @@ def test_single_menu_covers_essential_setup_and_advanced_options():
                  "custom_commands", "recurring_messages", "automation", "embeds"):
         assert word in home
     assert home.count("discord.ui.Select(") == 1
-    assert "assert len(modules) <= 25" in home
+    assert "assert len(options) <= 25" in home
     assert "self.refresh(interaction)" in home
 
 
@@ -31,9 +31,9 @@ def test_opening_a_page_never_activates_module():
     assert "_set_security_profile" not in home
 
 
-def test_guide_and_language_remain_reachable():
+def test_language_reachable_without_duplicate_guide():
     home = _method("_build_home")
-    assert "guided" in home
+    assert "Assistant guidé" not in home
     assert "language" in home
     assert "OfficialLanguageSelect" in home
 
