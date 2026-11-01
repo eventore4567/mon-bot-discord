@@ -946,6 +946,26 @@ class Configuration(commands.Cog):
         panneau — page d'accueil avec menu de catégories, comme +help, plus besoin
         de taper une commande différente par réglage.
         """
+        if ctx.interaction is None:
+            # Prefix commands cannot create ephemeral Discord messages.
+            # Remove the public setup acknowledgement and direct the author
+            # privately to the real /setup interaction instead.
+            try:
+                await ctx.message.delete()
+            except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+                pass
+            try:
+                await ctx.author.send(
+                    "La configuration privée s'ouvre avec **/setup** dans votre serveur. "
+                    "Le message +setup a été retiré du salon."
+                )
+            except (discord.Forbidden, discord.HTTPException):
+                await ctx.send(
+                    "Utilisez /setup pour ouvrir la configuration en privé.",
+                    delete_after=6,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            return
         existing = self.active_by_guild.get(ctx.guild.id)
         if existing and existing[1] != ctx.author.id:
             locked_message_id, locked_author_id, locked_author_name = existing

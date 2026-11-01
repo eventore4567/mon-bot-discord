@@ -175,26 +175,61 @@ class MassRole(commands.Cog):
     async def role(self, ctx: commands.Context):
         await ctx.send("Use `/role mass` or `+role mass @role add`.")
 
-    @role.command(name="mass", description="Choose members, bots, or everyone for a bulk role change.")
+    @role.command(name="mass", description="Ajouter ou retirer un rôle en masse.")
     @commands.has_guild_permissions(manage_roles=True)
-    @app_commands.describe(role="Role to manage", action="Add or remove the role")
-    async def mass(self, ctx: commands.Context, role: discord.Role,
-                   action: Literal["add", "remove"] = "add"):
+    @app_commands.describe(
+        role="Rôle à modifier",
+        action="Ajouter ou retirer le rôle",
+        cible="Choisir les membres, les bots ou tout le monde",
+    )
+    @app_commands.choices(
+        action=[
+            app_commands.Choice(name="Ajouter", value="add"),
+            app_commands.Choice(name="Retirer", value="remove"),
+        ],
+        cible=[
+            app_commands.Choice(name="Membres (sans bots)", value="members"),
+            app_commands.Choice(name="Bots uniquement", value="bots"),
+            app_commands.Choice(name="Tous", value="all"),
+        ],
+    )
+    async def mass(
+        self, ctx: commands.Context, role: discord.Role,
+        action: str = "add", cible: str = "members",
+    ):
+        # Acknowledge slash commands immediately; Discord otherwise times out
+        # before the permission checks, localization and target panel complete.
+        if ctx.interaction:
+            await ctx.defer(ephemeral=True)
         guild = ctx.guild
         actor = ctx.author
         me = guild.me
         if (me is None or not me.guild_permissions.manage_roles
                 or role.is_default() or role.managed or role >= me.top_role
                 or (actor.id != guild.owner_id and role >= actor.top_role)):
-            return await ctx.send("Role cannot be managed due to Discord permissions or hierarchy.")
+            return await ctx.send("Ce rôle ne peut pas être modifié (permissions ou hiérarchie Discord).", ephemeral=bool(ctx.interaction))
         english = await language_runtime.get_language(self.bot, guild.id) == language_runtime.LANG_EN
+        if action not in {"add", "remove"} or cible not in {"members", "bots", "all"}:
+            return await ctx.send("Choisissez une action et une cible valides.", ephemeral=bool(ctx.interaction))
         view = MassRoleView(self.bot, guild.id, actor.id, role.id, action, english)
+        view.target = cible
+        for item in view.children:
+            if isinstance(item, TargetSelect):
+                for option in item.options:
+                    option.default = option.value == cible
+                item.placeholder = {
+                    "members": "Cible : membres",
+                    "bots": "Cible : bots",
+                    "all": "Cible : tous",
+                }[cible]
+            elif isinstance(item, discord.ui.Button) and item.custom_id == "sentrix:mass:confirm":
+                item.disabled = False
         description = (
             f"Role: {role.mention} · Action: **{action}**. Choose who should be affected."
             if english else
             f"Rôle : {role.mention} · Action : **{action}**. Choisissez les membres concernés."
         )
-        await ctx.send(description, view=view, allowed_mentions=discord.AllowedMentions.none())
+        await ctx.send(description, view=view, ephemeral=bool(ctx.interaction), allowed_mentions=discord.AllowedMentions.none())
 
 
 async def setup(bot: commands.Bot):

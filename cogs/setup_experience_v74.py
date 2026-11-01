@@ -1722,13 +1722,22 @@ async def _send_setup_v74(self, target):
     await view.prepare()
 
     if isinstance(target, commands.Context):
-        # Discord ne fournit pas d'éphémère pour une commande préfixée.
-        # Ne pas publier la configuration complète devant tout le serveur.
-        return await target.send(
-            "Ouvre **/setup** pour configurer SentriX en privé (visible uniquement par toi).",
-            delete_after=15,
-            allowed_mentions=discord.AllowedMentions.none(),
-        )
+        # Le préfixe + ne peut pas afficher d'éphémère : aucun message
+        # "Information" ou panneau sensible ne doit rester dans le salon.
+        try:
+            await target.message.delete()
+        except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+            pass
+        try:
+            return await member.send(
+                "Ouvrez **/setup** dans le serveur pour accéder au centre privé de SentriX."
+            )
+        except (discord.Forbidden, discord.HTTPException):
+            return await target.send(
+                "Utilisez /setup pour la configuration privée.",
+                delete_after=6,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
     if target.response.is_done():
         return await target.followup.send(**v73.joindre_banniere({"view": view}), ephemeral=True)
     # joindre_banniere consulte la MÊME condition que poser_banniere : la

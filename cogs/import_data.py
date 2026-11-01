@@ -257,6 +257,48 @@ class ImportFileModal(discord.ui.Modal):
         )
 
 
+class ImportSetupView(discord.ui.View):
+    """Mini assistant opened inside the active V116 setup."""
+
+    def __init__(self, bot, guild_id: int, author_id: int):
+        super().__init__(timeout=300)
+        self.bot = bot
+        self.guild_id = int(guild_id)
+        self.author_id = int(author_id)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        user = interaction.user
+        if (interaction.guild_id != self.guild_id or user.id != self.author_id
+                or not isinstance(user, discord.Member)
+                or not user.guild_permissions.manage_guild):
+            await interaction.response.send_message(
+                "Ce mini-setup est réservé au gestionnaire du serveur.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="Choisir le fichier JSON", style=discord.ButtonStyle.primary)
+    async def choose_file(self, interaction: discord.Interaction, button: discord.ui.Button):
+        english = (await language_runtime.get_language(self.bot, self.guild_id)
+                   == language_runtime.LANG_EN)
+        await interaction.response.send_modal(
+            ImportFileModal(self.bot, self.guild_id, self.author_id, english))
+
+    @discord.ui.button(label="Format du fichier", style=discord.ButtonStyle.secondary)
+    async def format_info(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "Fichier JSON de 1 Mo maximum. Exemple :\n"
+            '```json\n{"users":[{"id":"123456789012345678","xp":250,"level":3,"cash":1000,"bank":200}]}\n```\n'
+            "Cet import utilise uniquement un export fourni par un administrateur.",
+            ephemeral=True,
+        )
+
+    @discord.ui.button(label="Fermer", style=discord.ButtonStyle.secondary)
+    async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.stop()
+        await interaction.response.edit_message(content="Importation fermée.", view=None)
+
+
+
 class ImportData(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -269,8 +311,12 @@ class ImportData(commands.Cog):
         if file is None:
             english = await language_runtime.get_language(self.bot, ctx.guild.id) == language_runtime.LANG_EN
             return await ctx.send(
-                "Attach a .json file to the command message (1 MB max)." if english
-                else "Joignez un fichier .json au message de commande (1 Mo maximum)."
+                "Open /setup > Levels or Economy > Import data, or attach a JSON file to +import-data."
+                if english else
+                "Ouvrez /setup > Niveaux ou Économie > Importer des données. "
+                "Vous pouvez aussi joindre un JSON au message +import-data.",
+                allowed_mentions=discord.AllowedMentions.none(),
+                delete_after=30,
             )
         try:
             embed, view = await preview_attachment(
