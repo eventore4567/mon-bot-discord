@@ -276,6 +276,8 @@ DISCORD_PERMISSION_COMMANDS = {
     "disconnect": "move_members",
     "role-snapshot": "manage_roles",
     "role-restore": "manage_roles",
+    "role": "manage_roles",
+    "import-data": "manage_guild",
     "giverole": "manage_roles",
     "removerole": "manage_roles",
     "addemoji": "manage_emojis_and_stickers",
