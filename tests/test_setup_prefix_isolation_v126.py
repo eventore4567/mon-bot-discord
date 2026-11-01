@@ -73,7 +73,8 @@ def test_global_native_and_custom_routing_are_isolated():
 def test_private_setup_entrypoint_and_admin_custom_management():
     access = (ROOT / "utils/access_matrix.py").read_text(encoding="utf-8")
     guard = (ROOT / "cogs/permission_guard.py").read_text(encoding="utf-8")
-    assert 'policy="setup:entrypoint-only"' in access
+    assert 'policy="setup:entrypoint-only"' not in access
+    assert 'policy="guild-owner:setup-recovery"' in access
     assert '"customcmd:administrator"' in access
     assert 'if name == "setup":' in guard
     assert "return None" in guard
