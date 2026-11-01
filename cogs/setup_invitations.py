@@ -432,45 +432,60 @@ def _patch_setup_v74(bot: commands.Bot) -> None:
         guild = getattr(target, "guild", None)
         member = getattr(target, "author", None) or getattr(target, "user", None)
 
-        # Une commande +setup ne peut pas être éphémère dans Discord.
-        # /setup et /config utilisent une INTERACTION avec visibilité fixée
-        # AVANT la moindre requête SQL ou génération de panneau.
-        slash = getattr(target, "interaction", None) if isinstance(target, commands.Context) else target
+        # Discord ne sait pas envoyer un panneau éphémère depuis +setup.
+        # Les commandes slash doivent être acquittées AVANT le premier accès DB.
+        slash = (
+            getattr(target, "interaction", None)
+            if isinstance(target, commands.Context) else target
+        )
+        private_followup = False
         if isinstance(slash, discord.Interaction):
             if not slash.response.is_done():
+                # C'est NOUS qui fixons le caractère éphémère, de façon fiable.
                 await slash.response.defer(ephemeral=True, thinking=True)
-            elif (
-                slash.response.type == discord.InteractionResponseType.deferred_channel_message
-                and not _KNOWN_PRIVATE_SETUP_ACK.get()
-            ):
-                # Une autre couche aurait pu différer en PUBLIC. Le drapeau
-                # ephemeral est alors immuable : ne JAMAIS éditer cette réponse
-                # avec un panneau de configuration sensible.
-                try:
-                    original = await slash.original_response()
-                    is_private = bool(getattr(getattr(original, "flags", None), "ephemeral", False))
-                except (discord.HTTPException, AttributeError):
-                    is_private = False
-                if not is_private:
-                    logger.error("Setup slash initialement différé en public : panneau bloqué pour confidentialité.")
-                    return await slash.followup.send(
-                        "Pour ta confidentialité, relance /setup. Aucun panneau public n'a été envoyé.",
-                        ephemeral=True,
-                    )
-        if not await setup_ui._can_setup(self.bot, member, guild):
-            return await setup_ui._permission_error(slash if isinstance(slash, discord.Interaction) else target)
+            elif not _KNOWN_PRIVATE_SETUP_ACK.get():
+                # D'autres wrappers (/config, intercepteurs, anciennes couches)
+                # peuvent avoir déjà consommé la réponse de départ, en public.
+                # Ne jamais éditer cet original. Si c'est un defer de type
+                # channel_message, le PREMIER followup pourrait réutiliser ce
+                # message et hériter de son flag PUBLIC malgré ephemeral=True.
+                # Le supprimer d'abord garantit un nouveau followup privé.
+                if (
+                    slash.response.type
+                    == discord.InteractionResponseType.deferred_channel_message
+                ):
+                    try:
+                        await slash.delete_original_response()
+                    except discord.NotFound:
+                        # L'original est déjà absent, donc ne peut être réécrit.
+                        pass
+                    except discord.HTTPException:
+                        logger.exception(
+                            "Impossible de supprimer le defer de /setup : "
+                            "aucun panneau potentiellement public ne sera envoyé."
+                        )
+                        return None
+                private_followup = True
 
-        # Cet installateur s'exécute APRÈS V74 et écrasait son transport privé.
-        # /setup est une vraie interaction => réponse éphémère dès l'origine.
-        # +setup ne peut pas être éphémère : ne publier qu'une notice courte.
+        if not await setup_ui._can_setup(self.bot, member, guild):
+            if isinstance(slash, discord.Interaction) and private_followup:
+                return await slash.followup.send(
+                    "Tu n'as pas la permission d'utiliser /setup.",
+                    ephemeral=True,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            return await setup_ui._permission_error(
+                slash if isinstance(slash, discord.Interaction) else target
+            )
+
         if isinstance(target, commands.Context):
-            if getattr(target, "interaction", None) is None:
+            if slash is None:
                 return await target.send(
                     "Ouvre **/setup** : le panneau de configuration sera visible uniquement par toi.",
                     delete_after=15,
                     allowed_mentions=discord.AllowedMentions.none(),
                 )
-            target = target.interaction
+            target = slash
         elif isinstance(slash, discord.Interaction):
             target = slash
 
@@ -481,7 +496,13 @@ def _patch_setup_v74(bot: commands.Bot) -> None:
             view.page = CATEGORY
             view.backend = view._new_backend(CATEGORY)
         await view.prepare()
-        # Toujours joindre la bannière dans le même message éphémère.
+
+        # Le panneau sort UNE SEULE FOIS et reste éphémère :
+        #  - ACK privé réalisé ici ou connu via V95 : éditer le privé initial
+        #  - ACK déjà consommé par une autre couche : nouveau followup privé
+        #    APRÈS avoir retiré tout defer initial potentiellement public.
+        if private_followup:
+            return await panels.envoyer(target.followup, view, ephemere=True)
         return await panels.envoyer(target, view, ephemere=True)
 
     current = setup_ui.OfficialSetup.send_setup
