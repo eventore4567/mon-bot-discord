@@ -172,7 +172,7 @@ def test_les_pages_de_v74_portent_la_banniere():
     # sobres : pas de bannière ni de fichier joint. Les autres pages gardent
     # leur bannière et la règle anti-galerie cassée.
     assert "async def _build_home(self)" in source
-    assert "discord.ui.TextDisplay(\"## Langue du serveur\")" in source
+    assert "\"## Server language\" if english else \"## Langue du serveur\"" in source
     assert poses >= conteneurs - 2, (
         f"{conteneurs} page(s), {poses} bannière(s) posée(s), 2 vues compactes sans bannière"
     )
