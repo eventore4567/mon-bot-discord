@@ -281,6 +281,13 @@ def install(bot: commands.Bot | None = None) -> None:
     raw_messageable_send = originals.get("messageable_send") or _unwrap(current_messageable_send)
     if _ACTIVE_WRAPPERS.get("messageable_send") is not current_messageable_send:
         async def absolute_messageable_send(self, *args, **kwargs):
+            # Les réponses personnalisées sont DÉJÀ des vrais embeds Discord
+            # composés volontairement par l'administrateur. Les restyler
+            # renomme le premier bandeau « Information » et le fait passer
+            # pour une énorme ancienne bannière. Même exemption pour le
+            # simple bouton d'accès à /setup privé (sans données publiques).
+            if kwargs.pop("_sentrix_native_message", False):
+                return await raw_messageable_send(self, *args, **kwargs)
             ctx = _COMMAND_CONTEXT.get()
             in_command = ctx is not None
             has_embed = kwargs.get("embed") is not None or bool(kwargs.get("embeds"))
