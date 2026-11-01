@@ -122,11 +122,16 @@ def apply_slash_default_permissions(bot: commands.Bot) -> int:
     for command in bot.tree.walk_commands():
         if command.parent is not None:
             continue  # Discord n'applique le reglage qu'a la racine d'un groupe
-        if getattr(command, "default_permissions", None) is not None:
-            continue  # deja declare explicitement dans le code
         name = access_matrix.resolve_name(
             getattr(command, "qualified_name", ""), getattr(command, "name", "")
         )
+        if name == "setup":
+            # Le panneau est protégé à l'exécution, mais sa commande doit être
+            # visible à tous pour que le refus privé soit compréhensible.
+            command.default_permissions = None
+            continue
+        if getattr(command, "default_permissions", None) is not None:
+            continue  # deja declare explicitement dans le code
         permissions = _default_permissions_for(name)
         if permissions is None:
             continue
