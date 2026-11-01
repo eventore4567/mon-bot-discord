@@ -484,7 +484,10 @@ CATALOG: tuple[SlashEntry, ...] = (
     # Fonctions de cogs/sentrix_plus.py : elles existaient, mais seulement en +,
     # et masquées de l'aide par apply_surface faute de classement (08/10/2026).
     _e("sticky set", "sticky-set", "Keep a message at the bottom of a channel."),
-    _e("sticky add", "sticky add", "Create a sticky in normal text or embed format."),
+    _e("sticky add", "sticky add", "Créer un sticky texte, embed ou avec bannière dans plusieurs salons."),
+    _e("sticky edit", "sticky edit", "Modifier les sticky de plusieurs salons."),
+    _e("sticky list", "sticky list", "Afficher les sticky configurés sur le serveur."),
+    _e("sticky remove", "sticky remove", "Supprimer un sticky du salon choisi."),
     _e("sticky frequency", "sticky-every", "Repost the sticky message every N messages."),
     _e("sticky off", "sticky-off", "Remove the sticky message from a channel."),
 
@@ -980,8 +983,8 @@ OPTION_OVERRIDES: dict[tuple[str, str], str] = {
     ("warn", "member"): "The member to warn.",
     ("warn", "reason"): "Why they are warned. Shown in the logs.",
     ("clear", "count"): "Number of messages to delete, from 2 to 100.",
-    ("role mass", "action"): "Use add for every human member, or remove for every human member.",
-    ("role mass", "role"): "Role to add to or remove from every human member.",
+    ("role mass", "action"): "Ajouter ou retirer des rôles aux membres, bots ou tous.",
+    ("role mass", "role"): "Rôle ciblé par la modification en masse.",
     ("moderation tempban", "member"): "The member to ban.",
     ("moderation tempban", "duration"): "How long, e.g. 1h, 2d.",
     ("moderation warnings", "member"): "Whose warnings to show.",
