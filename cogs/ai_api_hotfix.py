@@ -287,8 +287,28 @@ def _install_natural_message_fallback(bot: commands.Bot) -> None:
                     # Last-resort path if the Ai cog failed to load: still answer through
                     # the already-probed central AI service instead of leaving total silence.
                     from utils import ai_service
+                    # Même en mode de secours sans Cog, les captures doivent
+                    # parvenir au modèle, et non être transformées en texte.
+                    attached = list(getattr(message, "attachments", ()) or ())
+                    if attached:
+                        from cogs.ai import _images_from_discord_attachments
+                        urls = await _images_from_discord_attachments(attached)
+                        if not urls:
+                            await message.reply(
+                                "Cette image n'a pas pu être lue (PNG/JPG/WebP/GIF, 12 Mo maximum).",
+                                mention_author=False,
+                            )
+                            return
+                        model_input = [{
+                            "role": "user", "content": [
+                                {"type": "input_text", "text": question},
+                                *({"type": "input_image", "image_url": url, "detail": "low"} for url in urls),
+                            ],
+                        }]
+                    else:
+                        model_input = question
                     result = await ai_service.generate(
-                        question,
+                        model_input,
                         model_key=ai_service.MODEL_LUNA,
                         reasoning_effort="none",
                         instructions=ai_service.SYSTEM_PROMPT,
