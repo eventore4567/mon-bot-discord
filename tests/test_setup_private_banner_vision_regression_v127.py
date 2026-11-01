@@ -90,14 +90,19 @@ def test_final_setup_private_from_first_interaction_ack():
     end = src.index("    current = setup_ui.OfficialSetup.send_setup", start)
     code = src[start:end]
     assert "await _prepare_private_setup_interaction(slash)" in code
-    assert code.index("await _prepare_private_setup_interaction(slash)") < code.index(
-        "await setup_ui._can_setup("
-    )
+    # La branche +setup est publique et vérifie les permissions AVANT
+    # d'envoyer quoi que ce soit. La branche /setup continue de différer
+    # en privé avant son propre contrôle de permissions.
+    ack = code.index("await _prepare_private_setup_interaction(slash)")
+    slash_check = code.index("await setup_ui._can_setup(", ack)
+    assert ack < slash_check
     assert "Aucun panneau public n'a été envoyé" not in code
     assert "return await panels.envoyer(target.followup, view, ephemere=True)" in code
     assert "return await panels.envoyer(target, view, ephemere=True)" in code
-    assert "view=PrivateSetupLauncher(self, member.id, guild.id)" in code
+    assert "return await panels.envoyer(target, view, ephemere=False)" in code
+    assert "await setup_ui._can_setup(self.bot, member, guild)" in code
     assert "delete_after=15" not in code
+    assert "PrivateSetupLauncher" not in code
     for name in ("cogs/setup_invitations.py", "cogs/ai.py", "cogs/ai_api_hotfix.py",
                  "cogs/ai_reply_recovery.py", "cogs/platform_v4.py"):
         ast.parse((ROOT / name).read_text(encoding="utf-8"), filename=name)
@@ -358,28 +363,22 @@ async def test_canonical_pipeline_sends_image_to_responses_api_instead_of_text_o
     assert "images fournies" in generate.await_args.kwargs["instructions"]
 
 
-@pytest.mark.asyncio
-async def test_prefix_setup_has_clickable_private_launcher_and_checks_author():
-    from cogs.setup_invitations import PrivateSetupLauncher
-
-    setup = SimpleNamespace(send_setup=AsyncMock())
-    launcher = PrivateSetupLauncher(setup, 1234, 5678)
-    inter = SimpleNamespace(
-        guild_id=5678, user=SimpleNamespace(id=1234),
-        response=SimpleNamespace(send_message=AsyncMock()),
-    )
-    await launcher.children[0].callback(inter)
-    setup.send_setup.assert_awaited_once_with(inter)
-    inter.response.send_message.assert_not_awaited()
-
-    other = SimpleNamespace(
-        guild_id=5678, user=SimpleNamespace(id=9999),
-        response=SimpleNamespace(send_message=AsyncMock()),
-    )
-    await launcher.children[0].callback(other)
-    other.response.send_message.assert_awaited_once()
-    assert other.response.send_message.await_args.kwargs["ephemeral"] is True
-    setup.send_setup.assert_awaited_once_with(inter)
+def test_prefix_setup_is_public_immediate_and_slash_remains_ephemeral():
+    source = (ROOT / "cogs/setup_invitations.py").read_text(encoding="utf-8")
+    block = source.split("    async def final_send_setup(self, target):", 1)[1].split(
+        "    current = setup_ui.OfficialSetup.send_setup", 1
+    )[0]
+    prefix = block.split(
+        "        # Discord ne sait pas envoyer un panneau éphémère", 1
+    )[0]
+    assert "target.interaction is None" in prefix
+    assert "await setup_ui._can_setup(self.bot, member, guild)" in prefix
+    assert "await view.prepare()" in prefix
+    assert "return await panels.envoyer(target, view, ephemere=False)" in prefix
+    assert "PrivateSetupLauncher" not in source
+    # La commande slash /setup suit TOUJOURS le transport privé.
+    assert "return await panels.envoyer(target.followup, view, ephemere=True)" in block
+    assert "return await panels.envoyer(target, view, ephemere=True)" in block
 
 
 def test_only_native_custom_messages_bypass_legacy_information_banner():
@@ -391,6 +390,111 @@ def test_only_native_custom_messages_bypass_legacy_information_banner():
     custom = (ROOT / "cogs/platform_v4.py").read_text(encoding="utf-8")
     assert 'embeds=[banner, embed]' in custom
     assert '_sentrix_native_message=True' in custom
-    launcher = (ROOT / "cogs/setup_invitations.py").read_text(encoding="utf-8")
-    assert 'view=PrivateSetupLauncher(self, member.id, guild.id)' in launcher
-    assert '_sentrix_native_message=True' in launcher
+    setup = (ROOT / "cogs/setup_invitations.py").read_text(encoding="utf-8")
+    assert 'return await panels.envoyer(target, view, ephemere=False)' in setup
+    assert 'PrivateSetupLauncher' not in setup
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("lang", "confirmation"),
+    [
+        ("fr", "**Ajouté par :** <@200>"),
+        ("en", "**Added by:** <@200>"),
+    ],
+)
+async def test_ticket_add_shows_exact_staff_member_and_audits_actor(lang, confirmation):
+    from cogs import tickets
+    selected_member = SimpleNamespace(id=300, mention="<@300>")
+    staff = SimpleNamespace(id=200, mention="<@200>")
+    chosen = SimpleNamespace(values=[selected_member], callback=None)
+    fake_view = SimpleNamespace(add_item=lambda _item: None)
+    guild = SimpleNamespace(id=100)
+    channel = SimpleNamespace(set_permissions=AsyncMock())
+    setup_interaction = SimpleNamespace(
+        response=SimpleNamespace(send_message=AsyncMock()),
+    )
+    submit_interaction = SimpleNamespace(
+        guild=guild, channel=channel, user=staff,
+        response=SimpleNamespace(),
+    )
+    self = SimpleNamespace(bot=SimpleNamespace())
+    with patch("cogs.tickets.discord.ui.UserSelect", return_value=chosen), patch(
+        "cogs.tickets.discord.ui.View", return_value=fake_view
+    ), patch("cogs.tickets.language_runtime.get_language", AsyncMock(return_value=lang)):
+        with patch("cogs.tickets.sx_panels.envoyer", AsyncMock()) as sent, patch(
+            "cogs.tickets.sx_panels.depuis_embed", side_effect=lambda e: e
+        ), patch("cogs.tickets.tickets_service.journaliser_evenement", AsyncMock()) as audit:
+            await tickets.Tickets.btn_add(self, setup_interaction, {"id": 18})
+            assert setup_interaction.response.send_message.await_args.kwargs["ephemeral"]
+            await chosen.callback(submit_interaction)
+    channel.set_permissions.assert_awaited_once_with(
+        selected_member, view_channel=True, send_messages=True,
+        read_message_history=True,
+    )
+    embed = sent.await_args.args[1]
+    assert confirmation in str(embed.to_dict())
+    assert "<@300>" in str(embed.to_dict())
+    assert audit.await_args.kwargs["acteur"] is staff
+    assert audit.await_args.kwargs["cible"] is selected_member
+    assert audit.await_args.kwargs["ticket_id"] == 18
+
+
+@pytest.mark.asyncio
+async def test_ticket_remove_shows_actor_and_audits_after_discord_success():
+    from cogs import tickets
+    member = SimpleNamespace(id=300, mention="<@300>")
+    staff = SimpleNamespace(id=200, mention="<@200>")
+    selected = SimpleNamespace(values=[member], callback=None)
+    guild = SimpleNamespace(id=100)
+    channel = SimpleNamespace(set_permissions=AsyncMock())
+    setup = SimpleNamespace(response=SimpleNamespace(send_message=AsyncMock()))
+    inter = SimpleNamespace(guild=guild, channel=channel, user=staff,
+                            response=SimpleNamespace())
+    with patch("cogs.tickets.discord.ui.UserSelect", return_value=selected), patch(
+        "cogs.tickets.discord.ui.View", return_value=SimpleNamespace(add_item=lambda _: None)
+    ), patch("cogs.tickets.language_runtime.get_language", AsyncMock(return_value="fr")):
+        with patch("cogs.tickets.sx_panels.envoyer", AsyncMock()) as sent, patch(
+            "cogs.tickets.sx_panels.depuis_embed", side_effect=lambda e: e
+        ), patch("cogs.tickets.tickets_service.journaliser_evenement", AsyncMock()) as audit:
+            await tickets.Tickets.btn_remove(SimpleNamespace(bot=SimpleNamespace()),
+                                             setup, {"id": 18, "user_id": 400})
+            await selected.callback(inter)
+    channel.set_permissions.assert_awaited_once_with(member, overwrite=None)
+    assert "**Retiré par :** <@200>" in str(sent.await_args.args[1].to_dict())
+    assert audit.await_args.args[2] == "ticket_member_remove"
+    assert audit.await_args.kwargs["acteur"] is staff
+
+
+def test_english_french_language_defaults_and_safe_duplicate_command_removal():
+    import discord
+    from discord.ext import commands
+    from cogs import commandes_retirees, language_runtime
+
+    assert language_runtime.DEFAULT_LANGUAGE == language_runtime.LANG_FR == "fr"
+    assert language_runtime.text_for_language(
+        language_runtime.DEFAULT_LANGUAGE, "Bonjour", "Hello"
+    ) == "Bonjour"
+    assert language_runtime.text_for_language("en", "Bonjour", "Hello") == "Hello"
+
+    duplicates = {
+        "ask", "chat", "rank", "buyrole", "embed-create",
+        "latency", "levelroles", "roleinfo",
+    }
+    assert duplicates <= commandes_retirees.A_RETIRER
+    bot = commands.Bot(command_prefix="+", intents=discord.Intents.none())
+
+    async def noop(ctx):
+        return None
+
+    for name in duplicates | {"ping", "help", "ai", "level"}:
+        if name == "help":
+            continue  # discord.py enregistre déjà son aide intégrée
+        bot.command(name=name)(noop)
+    removed = commandes_retirees.retirer(bot)
+    assert duplicates <= set(removed)
+    for name in duplicates:
+        assert bot.get_command(name) is None
+    for name in ("ping", "ai", "level"):
+        assert bot.get_command(name) is not None

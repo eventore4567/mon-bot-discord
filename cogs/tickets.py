@@ -1945,7 +1945,18 @@ class Tickets(commands.Cog):
         async def cb(inter: discord.Interaction):
             member = select.values[0]
             await inter.channel.set_permissions(member, view_channel=True, send_messages=True, read_message_history=True)
-            await sx_panels.envoyer(inter.response, sx_panels.depuis_embed(embeds.success(f'➕ {member.mention} a été ajouté au ticket.')))
+            langue = await language_runtime.get_language(self.bot, inter.guild.id)
+            confirmation = language_runtime.text_for_language(
+                langue,
+                f'{member.mention} a été ajouté au ticket.\n'
+                f'**Ajouté par :** {inter.user.mention}',
+                f'{member.mention} was added to the ticket.\n'
+                f'**Added by:** {inter.user.mention}',
+            )
+            await sx_panels.envoyer(
+                inter.response,
+                sx_panels.depuis_embed(embeds.success(confirmation)),
+            )
             # Journalisé APRÈS le succès, jamais avant : un ajout de membre dans
             # un salon privé est précisément ce qu'un audit doit pouvoir
             # reconstituer, et journaliser une tentative échouée le brouillerait.
@@ -1968,7 +1979,18 @@ class Tickets(commands.Cog):
             if member.id == ticket["user_id"]:
                 return await sx_panels.envoyer(inter.response, sx_panels.depuis_embed(embeds.error('Impossible de retirer le créateur du ticket.')), ephemere=True)
             await inter.channel.set_permissions(member, overwrite=None)
-            await sx_panels.envoyer(inter.response, sx_panels.depuis_embed(embeds.success(f'➖ {member.mention} a été retiré du ticket.')))
+            langue = await language_runtime.get_language(self.bot, inter.guild.id)
+            confirmation = language_runtime.text_for_language(
+                langue,
+                f'{member.mention} a été retiré du ticket.\n'
+                f'**Retiré par :** {inter.user.mention}',
+                f'{member.mention} was removed from the ticket.\n'
+                f'**Removed by:** {inter.user.mention}',
+            )
+            await sx_panels.envoyer(
+                inter.response,
+                sx_panels.depuis_embed(embeds.success(confirmation)),
+            )
             await tickets_service.journaliser_evenement(
                 self.bot, inter.guild, "ticket_member_remove",
                 ticket_id=ticket["id"], channel=inter.channel,

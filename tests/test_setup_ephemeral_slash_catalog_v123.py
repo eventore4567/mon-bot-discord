@@ -71,16 +71,17 @@ def test_lintercepteur_setup_se_compile():
     ast.parse((ROOT / "sentrix_v95_runtime.py").read_text())
 
 
-def test_derniere_couche_invitations_ne_rend_jamais_setup_public():
+def test_derniere_couche_invitations_separe_prefix_public_et_slash_prive():
     source = (ROOT / "cogs/setup_invitations.py").read_text()
     start = source.index("    async def final_send_setup(")
     end = source.index("    current = setup_ui.OfficialSetup.send_setup", start)
     transport = source[start:end]
-    assert "ephemere=True" in transport
-    assert "view=PrivateSetupLauncher(self, member.id, guild.id)" in transport
+    assert "return await panels.envoyer(target, view, ephemere=False)" in transport
+    assert "return await panels.envoyer(target, view, ephemere=True)" in transport
+    assert "return await panels.envoyer(target.followup, view, ephemere=True)" in transport
+    assert "await setup_ui._can_setup(self.bot, member, guild)" in transport
+    assert "PrivateSetupLauncher" not in source
     assert "delete_after=15" not in transport
-    assert "panels.envoyer(target, view)" not in transport
-    assert "target = target.interaction" in transport
 
 
 def test_les_categories_ajoutees_nont_pas_de_keyerror_emoji():
