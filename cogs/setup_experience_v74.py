@@ -772,7 +772,7 @@ async def _send_setup_v74(self, target):
     guild = getattr(target, "guild", None)
     member = getattr(target, "author", None) or getattr(target, "user", None)
     if not await setup_ui._can_setup(self.bot, member, guild):
-        return await setup_ui._permission_error(target)
+        return await self.send_public_overview(target)
 
     view = SentriXSetupV74(self.bot, guild, member.id)
     await view.prepare()
