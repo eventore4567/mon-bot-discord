@@ -43,7 +43,8 @@ class TargetSelect(discord.ui.Select):
         desc = (
             f"Target: **{label}**. Click Confirm to {self.owner.action} the role."
             if self.owner.english else
-            f"Cible : **{label}**. Cliquez sur Confirmer pour {'ajouter' if self.owner.action == 'add' else 'retirer'} le rôle."
+            f"Cible : **{{'members': 'membres', 'bots': 'bots', 'all': 'tous'}[self.owner.target]}**. "
+            f"Cliquez sur Confirmer pour {'ajouter' if self.owner.action == 'add' else 'retirer'} le rôle."
         )
         if parent is not None:
             await interaction.response.edit_message(view=parent)
@@ -245,7 +246,8 @@ class MassRole(commands.Cog):
         description = (
             f"Role: {role.mention} · Action: **{action}**. Choose who should be affected."
             if english else
-            f"Rôle : {role.mention} · Action : **{action}**. Choisissez les membres concernés."
+            f"Rôle : {role.mention} · Action : **{'ajouter' if action == 'add' else 'retirer'}**. "
+            f"Cible : **{'membres' if cible == 'members' else 'bots' if cible == 'bots' else 'tous'}**."
         )
         panneau = panels.Panneau(
             titre="Gestion des rôles en masse" if not english else "Bulk role management",
