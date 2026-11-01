@@ -151,7 +151,7 @@ class ImportData(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @commands.hybrid_command(name="import-data", description="Preview and import a JSON export (XP and economy).")
+    @commands.command(name="import-data")
     @commands.guild_only()
     @commands.has_guild_permissions(manage_guild=True)
     async def import_data(self, ctx: commands.Context, file: discord.Attachment):
