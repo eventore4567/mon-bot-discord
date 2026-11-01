@@ -32,13 +32,12 @@ _KNOWN_PRIVATE_SETUP_ACK = contextvars.ContextVar(
 )
 
 async def _prepare_private_setup_interaction(interaction: discord.Interaction) -> bool:
-    """Acquitte en privé ou garantit qu'un followup sera réellement privé.
+    """Ouverture privée sans supprimer le message originel de /setup.
 
-    discord.py ne permet pas de convertir un defer public en message privé.
-    Le premier followup d'un defer non terminé peut hériter du flag public.
-    Nous supprimons donc l'original inconnu avant de créer le panneau privé.
-
-    Retourne True si le panneau doit partir par interaction.followup.
+    Une réponse déjà différée par un vieux runtime peut être publique :
+    Discord ignore ephemeral=True sur le PREMIER followup d'un defer encore
+    « thinking ». On finalise donc cet original avec une notification NEUTRE,
+    puis le panneau part dans un followup éphémère entièrement distinct.
     """
     if not interaction.response.is_done():
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -50,12 +49,20 @@ async def _prepare_private_setup_interaction(interaction: discord.Interaction) -
         interaction.response.type
         == discord.InteractionResponseType.deferred_channel_message
     ):
-        try:
-            await interaction.delete_original_response()
-        except discord.NotFound:
-            pass
-        # Toute autre erreur doit interrompre la commande. Il vaut mieux
-        # ne pas ouvrir /setup que risquer d'éditer un message public.
+        # Ne jamais supprimer l'original : Discord affichait ensuite
+        # « Le message n'a pas pu être chargé » dans les réponses à /setup.
+        # Aucun rôle, salon, réglage, contenu de panneau n'est publié ici.
+        from . import premium_style_runtime
+        raw_edit = premium_style_runtime._ORIGINALS.get("interaction_edit_original")
+        kwargs = {
+            "content": "Ton panneau de configuration s'ouvre en privé.",
+            "embed": None,
+            "view": None,
+        }
+        if callable(raw_edit) and isinstance(interaction, discord.Interaction):
+            await raw_edit(interaction, **kwargs)
+        else:
+            await interaction.edit_original_response(**kwargs)
     return True
 
 
