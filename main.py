@@ -17,6 +17,7 @@ V102 avant tout code applicatif — voir son propre docstring pour le détail ex
 import asyncio
 import logging
 import sys
+import time
 import traceback
 
 import discord
@@ -513,13 +514,20 @@ async def get_prefix(bot: "BotAllInOne", message: discord.Message):
         return commands.when_mentioned_or("+", default)(bot, message)
 
     cached = bot.prefix_cache.get(message.guild.id)
-    if cached is None:
+    # La configuration peut aussi changer depuis le dashboard, une autre
+    # instance Railway ou un ancien formulaire. Le cache ne doit pas rester
+    # périmé jusqu'au prochain redémarrage.
+    now = time.monotonic()
+    last_refresh = getattr(bot, "prefix_cache_refreshed", {}).get(message.guild.id, 0.0)
+    if cached is None or now - last_refresh >= 20:
         try:
             conf = await bot.db.get_guild_config(message.guild.id)
             cached = str(conf["prefix"] if conf and conf["prefix"] else default)
         except Exception:
             cached = default
         bot.prefix_cache[message.guild.id] = cached
+        if hasattr(bot, "prefix_cache_refreshed"):
+            bot.prefix_cache_refreshed[message.guild.id] = now
     # Supprimer les doublons et garder + en tête pour garantir la compatibilité.
     prefixes = tuple(dict.fromkeys(("+", str(cached), default)))
     return commands.when_mentioned_or(*prefixes)(bot, message)
@@ -579,6 +587,7 @@ class BotAllInOne(commands.Bot):
             config.GLOBAL_COOLDOWN_RATE, config.GLOBAL_COOLDOWN_PER, commands.BucketType.user
         )
         self.prefix_cache: dict[int, str] = {}
+        self.prefix_cache_refreshed: dict[int, float] = {}
         self.blacklist_cache: dict[int, str] = {}
 
     def _refresh_module_health(self) -> dict:
