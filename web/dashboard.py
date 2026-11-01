@@ -123,6 +123,7 @@ AI_CHOICE_FIELDS = {
 
 TEXT_FIELDS = {
     "prefix": (1, 5),
+    "custom_prefix": (1, 5),
     "welcome_message": (0, 2000),
     "goodbye_message": (0, 1000),
     "level_message": (0, 1000),
@@ -922,6 +923,14 @@ async def handle_guild(request: web.Request):
         _guild_payload_inflight[guild_id] = future
         future.add_done_callback(lambda _f: _guild_payload_inflight.pop(guild_id, None))
     payload = await future
+    from utils.command_prefixes import get_custom_prefix
+    from types import SimpleNamespace
+    # Ajouter le réglage même si une couche fail-soft a remplacé le chargement.
+    payload = dict(payload)
+    payload["settings"] = dict(payload.get("settings") or {})
+    payload["settings"]["custom_prefix"] = await get_custom_prefix(
+        SimpleNamespace(db=request.app["bot"].db), guild_id
+    )
     return web.json_response(payload)
 
 
@@ -990,6 +999,13 @@ def _validate_settings(guild: discord.Guild, values: dict) -> tuple[dict, str | 
     clean = {}
     for field, value in values.items():
         if field in TEXT_FIELDS:
+            if field in {"prefix", "custom_prefix"}:
+                from utils.command_prefixes import validate_prefix
+                try:
+                    clean[field] = validate_prefix(value)
+                except ValueError as exc:
+                    return {}, str(exc)
+                continue
             minimum, maximum = TEXT_FIELDS[field]
             text = str(value or "").strip()
             if not minimum <= len(text) <= maximum:
@@ -1565,6 +1581,12 @@ async def handle_update_guild(request: web.Request):
                 channel_id=int(value) if value else None,
                 enabled=bool(value),
             )
+        elif field == "custom_prefix":
+            from utils.command_prefixes import set_custom_prefix
+            await set_custom_prefix(bot, guild_id, value)
+        elif field == "prefix":
+            from utils.command_prefixes import set_official_prefix
+            await set_official_prefix(bot, guild_id, value)
         else:
             await db.set_guild_config(guild_id, field, value)
     for field, value in clean_automod.items():
@@ -1961,7 +1983,8 @@ INDEX_HTML = r"""<!doctype html>
     const EMPTY_STATE_DEFAULT="Sélectionnez un serveur pour commencer. Les serveurs sans SentriX proposent directement le bouton d'invitation.";
     const tabs={
       general:{title:"Configuration générale",description:"Les quelques réglages de base. Rien n'est configuré ou créé automatiquement.",fields:[
-        {key:"prefix",label:"Préfixe des commandes",type:"text",hint:"Entre 1 et 5 caractères. Le préfixe par défaut est +."},
+        {key:"prefix",label:"Préfixe des commandes officielles",type:"text",hint:"Exemple : +help, +setup, +ping. Par défaut +."},
+        {key:"custom_prefix",label:"Préfixe des commandes personnalisées",type:"text",hint:"Ce préfixe ne lance jamais help, setup ou les autres commandes officielles."},
         {key:"security_level",label:"Niveau de sécurité",type:"choice",options:[["faible","Faible"],["moyen","Moyen"],["eleve","Élevé"]]},
         {key:"warn_ban_threshold",label:"Bannissement après avertissements",type:"number",min:1,max:20,hint:"Nombre d'avertissements avant la sanction automatique."}
       ]},
