@@ -551,12 +551,11 @@ class PlatformV4(commands.Cog):
             await react_for_message(self.bot, message)
         except Exception:
             logger.exception("Réactions automatiques impossibles guild=%s", message.guild.id)
-        conf = await self.bot.db.get_guild_config(message.guild.id)
-        prefix = str(conf["prefix"] if conf and conf["prefix"] else "+")
-        # Les commandes personnalisées fonctionnent aussi avec +, même si le
-        # serveur utilise un alias alternatif pour ses commandes.
-        prefixes = sorted(set(("+", prefix)), key=len, reverse=True)
-        matched = next((p for p in prefixes if message.content.startswith(p)), None)
+        from utils.command_prefixes import get_custom_prefix
+        prefix = await get_custom_prefix(self.bot, message.guild.id)
+        # Ne jamais réinterpréter ici le préfixe officiel ou celui d'un autre
+        # module. Il ne déclenche QUE les commandes créées par le serveur.
+        matched = prefix if message.content.startswith(prefix) else None
         if matched is None:
             return
         raw = message.content[len(matched):].strip()
