@@ -64,6 +64,18 @@ MAX_CONTENT = 2000
 MAX_URL_LEN = 2000
 DRAFT_TIMEOUT = 600  # secondes avant qu'un brouillon non sauvegardé n'expire (configurable ici)
 
+def _editor_banner_file() -> discord.File | None:
+    """Use the existing ultra-thin SentriX asset, never a large generated image."""
+    try:
+        from utils.premium_log_banners import get_premium_log_banner, BANNER_FILENAME
+        banner = get_premium_log_banner()
+        if banner.is_file():
+            return discord.File(str(banner), filename=BANNER_FILENAME)
+    except (OSError, ValueError):
+        logger.debug("La bannière du créateur d'embed est indisponible.", exc_info=True)
+    return None
+
+
 COLOR_PRESETS = [
     ("blue", "🔵 Bleu", 0x5865F2),
     ("purple", "🟣 Violet", 0x9B59B6),
@@ -917,12 +929,14 @@ class EmbedBuilderView(discord.ui.View):
         self.draft = draft
         self.author_id = author_id
         self.message: discord.Message | None = None
+        self.banner_enabled = True
         # Moins de boutons (Jayden, 22/10/2026) : les six réglages passent dans UN menu,
         # qui appelle exactement les mêmes actions ; restent 4 boutons d'action.
         reglages = [
             ("texte", "Texte : titre, description, footer", "📝", self.edit_text),
             ("apparence", "Apparence : couleur, photo, nom, date", "🎨", self.open_appearance),
             ("images", "Images et miniature", "🖼️", self.edit_images),
+            ("banniere", "Bannière ultra-fine : oui/non", "▬", self.toggle_banner),
             ("ajout_champ", "Ajouter un champ", "➕", self.add_field),
             ("champs", "Gérer les champs", "📋", self.manage_fields),
             ("boutons", "Boutons de lien", "🔘", self.manage_buttons),
@@ -994,6 +1008,9 @@ class EmbedBuilderView(discord.ui.View):
             value=f"Champs : {len(self.draft.fields)}/{MAX_FIELDS}\nLiens : {len(self.draft.buttons)}/{MAX_BUTTONS}",
             inline=True,
         )
+        if self.banner_enabled:
+            from utils.premium_log_banners import BANNER_FILENAME
+            status.set_image(url=f"attachment://{BANNER_FILENAME}")
         status.add_field(
             name="Brouillon",
             value=self.draft.template_name or "Non sauvegardé",
@@ -1018,6 +1035,11 @@ class EmbedBuilderView(discord.ui.View):
     @discord.ui.button(label="Apparence", style=discord.ButtonStyle.secondary, emoji="🎨", row=0)
     async def open_appearance(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(embeds=self.build_panel_embeds(), view=EmbedAppearanceView(self))
+
+    @discord.ui.button(label="Bannière", style=discord.ButtonStyle.secondary, row=1)
+    async def toggle_banner(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.banner_enabled = not self.banner_enabled
+        await self.refresh(interaction)
 
     @discord.ui.button(label="Images", style=discord.ButtonStyle.secondary, emoji="🖼️", row=0)
     async def edit_images(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1178,7 +1200,14 @@ class EmbedBuilder(commands.Cog, name="EmbedBuilder"):
     async def open_builder_from_interaction(self, interaction: discord.Interaction) -> None:
         """L'éditeur en privé depuis un bouton ou un menu (le Setup)."""
         view = EmbedBuilderView(self, EmbedDraft(), interaction.user.id)
-        await interaction.response.send_message(embeds=view.build_panel_embeds(), view=view, ephemeral=True)
+        kwargs = {"embeds": view.build_panel_embeds(), "view": view, "ephemeral": True}
+        banner = _editor_banner_file()
+        if banner is not None:
+            kwargs["file"] = banner
+        else:
+            view.banner_enabled = False
+            kwargs["embeds"] = view.build_panel_embeds()
+        await interaction.response.send_message(**kwargs)
         try:
             view.message = await interaction.original_response()
         except (discord.NotFound, discord.HTTPException):
@@ -1187,7 +1216,15 @@ class EmbedBuilder(commands.Cog, name="EmbedBuilder"):
     async def open_builder(self, ctx: commands.Context, draft: EmbedDraft | None = None):
         draft = draft or EmbedDraft()
         view = EmbedBuilderView(self, draft, ctx.author.id)
-        msg = await ctx.send(embeds=view.build_panel_embeds(), view=view, ephemeral=True if ctx.interaction else False)
+        kwargs = {"embeds": view.build_panel_embeds(), "view": view,
+                  "ephemeral": bool(ctx.interaction)}
+        banner = _editor_banner_file()
+        if banner is not None:
+            kwargs["file"] = banner
+        else:
+            view.banner_enabled = False
+            kwargs["embeds"] = view.build_panel_embeds()
+        msg = await ctx.send(**kwargs)
         view.message = msg if not ctx.interaction else await ctx.interaction.original_response()
 
     # ---------------------------------------------------------------- ENVOI RÉEL
