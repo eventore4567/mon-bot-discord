@@ -77,7 +77,8 @@ def test_derniere_couche_invitations_ne_rend_jamais_setup_public():
     end = source.index("    current = setup_ui.OfficialSetup.send_setup", start)
     transport = source[start:end]
     assert "ephemere=True" in transport
-    assert "delete_after=15" in transport
+    assert "view=PrivateSetupLauncher(self, member.id, guild.id)" in transport
+    assert "delete_after=15" not in transport
     assert "panels.envoyer(target, view)" not in transport
     assert "target = target.interaction" in transport
 

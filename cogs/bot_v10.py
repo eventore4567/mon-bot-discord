@@ -168,10 +168,14 @@ class BotV10(commands.Cog, name="BotV10"):
    async def guarded(message: discord.Message, _original=original):
     if message.guild and not message.author.bot:
      try:
-      conf = await self.bot.db.get_guild_config(message.guild.id); prefix = str(conf["prefix"] or "+") if conf else "+"
-     except Exception: prefix = "+"
-     if (message.content or "").startswith(prefix):
+      from utils.command_prefixes import get_custom_prefix
+      prefix = await get_custom_prefix(self.bot, message.guild.id)
+     except Exception:
+      prefix = None
+     if prefix and (message.content or "").startswith(prefix):
       raw_name = (message.content[len(prefix):].split(maxsplit=1) or [""])[0].casefold()
+      if self.bot.get_command(raw_name):
+       return await _original(message)
       try: row = await self.bot.db.fetchone("SELECT id FROM platform_custom_commands WHERE guild_id=? AND name=? AND enabled=1", (message.guild.id, raw_name)) if raw_name else None
       except Exception: row = None
       if row:

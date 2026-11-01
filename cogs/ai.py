@@ -2749,7 +2749,8 @@ class Ai(commands.Cog, name="Ai"):
 
     async def _prepare_and_generate(self, *, guild_id, channel_id, user_id, author_name,
                                      question, forced_advanced: bool = False, suffix: str = "",
-                                     command: str = "ai", force_web_search: bool = False) -> dict:
+                                     command: str = "ai", force_web_search: bool = False,
+                                     image_urls: list[str] | None = None) -> dict:
         """Pipeline complet partagé par +ai, +chat, +improve, +correct, +ai-translate, +code et
         les boutons de régénération : réglages serveur, modération, cooldown/limites, mémoire,
         sélection du modèle, appel réel, puis mise à jour mémoire + compteurs d'usage.
@@ -2802,8 +2803,32 @@ class Ai(commands.Cog, name="Ai"):
         reasoning_effort = ai_service.pick_reasoning_effort(model_key, settings["reasoning_effort"])
 
         prompt = question + suffix
+        # V5 est le véritable moteur en production pour « SentriX analyse
+        # cette image » et les conversations par réponse Discord. La version
+        # précédente perdait les images AVANT de contacter OpenAI : ce n'était
+        # donc pas un problème de modèle ni de prompt.
+        image_urls = list(image_urls or ())[:3]
+        if image_urls:
+            model_input = [{
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": prompt},
+                    *(
+                        {"type": "input_image", "image_url": url, "detail": "high"}
+                        for url in image_urls
+                    ),
+                ],
+            }]
+            instructions += (
+                "\nLes images fournies dans cette demande sont réellement "
+                "jointes. Analyse uniquement ce qui est visible ; ne demande "
+                "pas de renvoyer une image déjà présente. Si un détail est "
+                "illisible, précise simplement qu'il est illisible."
+            )
+        else:
+            model_input = prompt
         result = await ai_service.generate(
-            prompt, model_key=model_key, reasoning_effort=reasoning_effort,
+            model_input, model_key=model_key, reasoning_effort=reasoning_effort,
             previous_response_id=previous_response_id, instructions=instructions,
             guild_id=guild_id, channel_id=channel_id, user_id=user_id, command=command,
             web_search=force_web_search or ai_service.needs_web_search(question),

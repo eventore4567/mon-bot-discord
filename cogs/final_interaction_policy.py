@@ -716,6 +716,12 @@ def _install_messageable_send() -> None:
     base = _unwrap(current)
 
     async def messageable_send(self, *args, **kwargs):
+        # Les commandes personnalisées et le petit launcher de setup ont
+        # déjà leur rendu Discord natif. Ne pas les transformer en carte
+        # « Information », et surtout ne jamais transmettre ce marqueur
+        # interne à discord.py qui ne connaît pas ce paramètre.
+        if kwargs.pop("_sentrix_native_message", False):
+            return await base(self, *args, **kwargs)
         root = _COMMAND_ROOT.get()
         ctx = _COMMAND_CONTEXT.get()
         bot = getattr(ctx, "bot", None) if ctx is not None else _client_from_messageable(self)
