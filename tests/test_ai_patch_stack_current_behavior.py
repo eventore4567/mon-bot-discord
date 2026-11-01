@@ -59,9 +59,17 @@ class DisableGuardSurvivesReapplicationTests(unittest.IsolatedAsyncioTestCase):
         ai_service.generate = self._original_generate
 
     async def test_bloque_openai_meme_reapplique_par_dessus_une_autre_couche(self):
-        bot = SimpleNamespace(db=SimpleNamespace(
-            fetchone=AsyncMock(return_value=_fake_ai_settings_row(enabled=False))
-        ))
+        # Reproduce the current module_settings authority instead of the
+        # old ai_settings-only fixture. Schema has already been migrated.
+        async def fetchone(query, params=()):
+            if "FROM module_settings" in query:
+                return {"enabled": 0}
+            return _fake_ai_settings_row(enabled=False)
+
+        bot = SimpleNamespace(
+            db=SimpleNamespace(fetchone=fetchone),
+            _sentrix_v2_schema_ready=True,
+        )
         ai_disable_guard._install_service_guard(bot)  # 1ère application
 
         # Simule une couche non liée s'installant PAR-DESSUS (comme ai_context_v9
