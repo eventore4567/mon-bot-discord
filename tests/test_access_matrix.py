@@ -218,8 +218,13 @@ class MemberTests(unittest.TestCase):
 
     def test_member_gets_no_moderation_or_admin_command(self):
         b = FakeBackend()
-        for cmd in ("ban", "kick", "mute", "clear", "setup", "antiraid", "dm"):
+        for cmd in ("ban", "kick", "mute", "clear", "antiraid", "dm"):
             self.assertFalse(decide(b, member(), cmd).allowed, cmd)
+        # +setup ouvre une VUE statique pour un membre. La catégorie
+        # "configuration" et toutes les mutations restent administratives.
+        entry = decide(b, member(), "setup")
+        self.assertTrue(entry.allowed)
+        self.assertEqual(entry.policy, "setup:readonly-entry")
 
     def test_denial_always_carries_the_standard_header(self):
         d = decide(FakeBackend(), member(), "ban")
