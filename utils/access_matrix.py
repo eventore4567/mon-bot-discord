@@ -51,6 +51,10 @@ PUBLIC_COMMANDS = frozenset({
     # alors qu'elle venait d'être publiée pour tout le monde. Renommer une
     # racine sans la reclasser la fait tomber en fail-closed, et c'est
     # exactement ce qui est arrivé à « test-events » dans le même lot.
+    # Accueil public de +setup / /setup. Le rendu pour un membre sans droits
+    # est strictement en lecture seule ; seules les interactions du staff
+    # passent _can_setup et peuvent modifier la configuration.
+    "setup",
     "help", "aide", "ping", "avatar", "info", "userinfo", "status", "about", "profile-card",
     "channelinfo", "membercount", "emoji-list", "poll", "remind",
     "reminder-list", "reminder-cancel", "translate", "weather", "suggest",
