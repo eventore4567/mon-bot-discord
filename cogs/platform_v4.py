@@ -741,25 +741,27 @@ class PlatformV4(commands.Cog):
                 # Bannière très fine AU-DESSUS du contenu, dans un seul message
                 # Discord. L'embed de la commande reste un vrai embed natif
                 # modifiable ; pas de deuxième message, pas de Components V2.
-                from utils.log_banners import BANNER_DIR, ensure_banners, nom_fichier
-                banner_name = nom_fichier("special")
+                from utils.premium_log_banners import BANNER_FILENAME, get_premium_log_banner
+                banner_name = BANNER_FILENAME
                 try:
-                    ensure_banners()
+                    # Bande des LOGS : 1200 × 24, neutre et sans ancien logo.
                     banner_file = discord.File(
-                        str(BANNER_DIR / banner_name), filename=banner_name,
+                        str(get_premium_log_banner()), filename=banner_name,
                     )
                 except (OSError, ValueError):
                     logger.exception("Bannière de commande personnalisée indisponible.")
                     await message.channel.send(
                         content=ping, embed=embed, allowed_mentions=mentions,
+                        _sentrix_native_message=True,
                     )
                 else:
-                    banner = discord.Embed(colour=embed.colour)
+                    banner = discord.Embed()
                     banner.set_image(url=f"attachment://{banner_name}")
                     try:
                         await message.channel.send(
                             content=ping, embeds=[banner, embed],
                             file=banner_file, allowed_mentions=mentions,
+                            _sentrix_native_message=True,
                         )
                     finally:
                         banner_file.close()
@@ -767,6 +769,7 @@ class PlatformV4(commands.Cog):
                 await message.channel.send(
                     (f"{ping}\n" if ping else "") + response,
                     allowed_mentions=mentions,
+                    _sentrix_native_message=True,
                 )
         except discord.HTTPException:
             pass
