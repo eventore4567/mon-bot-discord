@@ -279,25 +279,18 @@ def _resume_familles_automod(
     selected: set[str],
     options: list[tuple[str, str, str]],
 ) -> str:
-    """Synthèse visuelle, uniquement des états réellement enregistrés."""
-    available = {key: label for key, label, _description in options}
-    lines = ["### AutoMod par famille", "Chaque filtre se règle individuellement. Aucune protection n'est activée automatiquement."]
-    for title, keys in AUTOMOD_FAMILLES:
-        valid = [key for key in keys if key in available]
-        if not valid:
+    """Un tableau court lisible : pas de 17 descriptions collées à l'écran."""
+    disponibles = {key: label for key, label, _ in options}
+    lignes = []
+    for famille, champs in AUTOMOD_FAMILLES:
+        valides = [champ for champ in champs if champ in disponibles]
+        if not valides:
             continue
-        enabled = [available[key] for key in valid if key in selected]
-        lines.append(
-            f"**{title}** · {len(enabled)}/{len(valid)} actifs"
-            + (f"\n-# Activés : {', '.join(enabled)}" if enabled else "\n-# Aucun filtre actif")
-        )
-    others = [key for key in available if not any(key in keys for _title, keys in AUTOMOD_FAMILLES)]
-    if others:
-        lines.append(
-            f"**Autres protections** · {sum(key in selected for key in others)}/{len(others)} actifs"
-        )
-    lines.append("-# Seuils, rôles exemptés, salons stricts et sanctions : Centre de sécurité.")
-    return "\n\n".join(lines)[:3000]
+        actives = [disponibles[champ] for champ in valides if champ in selected]
+        detail = ", ".join(actives) if actives else "Aucune"
+        lignes.append(f"**{famille}** · {len(actives)}/{len(valides)}\n-# {detail}")
+    return "\n\n".join(lignes)[:2600]
+
 
 
 async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
@@ -328,7 +321,7 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
     container.add_item(
         discord.ui.Section(
             discord.ui.TextDisplay(
-                "# 🔒 Sécurité\n"
+                "# Sécurité\n"
                 "Choisissez les protections à activer."
             ),
             accessory=v74.v73._thumbnail(self.bot),
@@ -385,10 +378,13 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
         container.add_item(discord.ui.Separator())
 
     container.add_item(discord.ui.TextDisplay(
+        "### Protections configurées\n" +
         _resume_familles_automod(selected, option_specs)
     ))
     container.add_item(discord.ui.Separator())
-    container.add_item(discord.ui.TextDisplay("### Choisir les protections"))
+    container.add_item(discord.ui.TextDisplay(
+        "### Modifier les filtres\n-# Coche ou décoche les protections voulues."
+    ))
 
     protection_select = discord.ui.Select(
         placeholder="Choisir les protections anti à activer",
@@ -400,6 +396,17 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
                 value=key,
                 description=description[:100],
                 default=key in selected,
+                emoji=__import__("utils.sentrix_emojis", fromlist=["partiel"]).partiel(
+                    {
+                        "antispam": "antispam", "antimention": "notification",
+                        "anticaps": "message", "antiemoji": "image",
+                        "antiinsult": "mod", "antilink": "lock",
+                        "antiinvite": "tracking", "antiscam": "antiscam",
+                        "antiraid": "anti_raid", "antibot": "bot",
+                        "antiaccount": "member_join", "antinuke": "bouclier",
+                        "honeypot": "scan", "verification": "captcha",
+                    }.get(key, "security")
+                ),
             )
             for key, label, description in option_specs
         ],
@@ -466,17 +473,19 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
 
     all_on.callback = enable_all
     all_off.callback = disable_all
-    container.add_item(discord.ui.ActionRow(all_on, all_off))
+    # L'activation globale était trop risquée et encombrait le panneau.
+    # On garde les callbacks historiques pour compatibilité, mais seuls les
+    # filtres choisis explicitement sont modifiés depuis le menu.
 
     container.add_item(discord.ui.Separator())
     container.add_item(
         discord.ui.TextDisplay(
-            "### Centre de sécurité\n"
-            "Seuils, rôles exemptés et salons stricts, protection par protection."
+            "### Réglages avancés\n"
+            "Seuils, rôles exemptés et sanctions, sans modifier les filtres."
         )
     )
     exceptions = discord.ui.Button(
-        label="Ouvrir le centre de sécurité",
+        label="Seuils et exceptions",
         style=discord.ButtonStyle.primary,
     )
 
@@ -491,7 +500,7 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
     exceptions.callback = open_exceptions
 
     diagnostic = discord.ui.Button(
-        label="Diagnostic AutoMod", style=discord.ButtonStyle.secondary,
+        label="Vérifier la configuration", style=discord.ButtonStyle.secondary,
     )
 
     async def diagnostic_automod(interaction: discord.Interaction):
