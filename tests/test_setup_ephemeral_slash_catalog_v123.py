@@ -52,7 +52,7 @@ def test_setup_inclut_les_etats_et_la_banniere():
     assert "actifs =" in accueil
     assert "inactifs =" in accueil
     assert "incomplets =" in accueil
-    for status in ("Actifs :", "Désactivés :", "À configurer :"):
+    for status in ("Actives", "Désactivées", "À terminer"):
         assert status in accueil
     assert "v73.poser_banniere(container)" in accueil
     assert "icons.partiel(icons_par_module.get(key" in accueil
@@ -82,6 +82,6 @@ def test_derniere_couche_invitations_ne_rend_jamais_setup_public():
 
 def test_les_categories_ajoutees_nont_pas_de_keyerror_emoji():
     source = (ROOT / "cogs/setup_experience_v74.py").read_text()
-    assert 'categories_emoji.get(key, "")' in source
+    assert 'icons_par_module.get(key, "")' in source
     assert '"invitations": "tracking"' in source
-    assert "details = await self._effective_states()" in source
+    assert "etats = await self._effective_states()" in source
