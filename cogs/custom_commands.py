@@ -17,6 +17,7 @@ import time
 
 import discord
 from discord.ext import commands, tasks
+from utils.command_prefixes import get_custom_prefix
 
 from utils import checks, helpers
 from utils import sentrix_panels as panels
@@ -212,7 +213,7 @@ class CustomCommands(commands.Cog):
         if row is None:
             return await panels.envoyer(ctx, panels.Panneau(titre="Commande introuvable", sous_titre=nom, kind="danger"))
         conf = await self.bot.db.get_guild_config(ctx.guild.id)
-        prefixe = str(conf["prefix"] if conf and conf["prefix"] else "+")
+        prefixe = await get_custom_prefix(self.bot, ctx.guild.id)
         actions = await actions_de(self.bot.db, ctx.guild.id, row["name"])
         lignes = [panels.Ligne("Déclencheur", f"`{prefixe}{row['name']}`"),
                   panels.Ligne("Message", str(row["response"])[:300])]
@@ -283,7 +284,7 @@ class CustomCommands(commands.Cog):
     @customcmd.command(name="list", help="Lister les commandes personnalisées.")
     async def customcmd_list(self, ctx: commands.Context):
         conf = await self.bot.db.get_guild_config(ctx.guild.id)
-        prefixe = str(conf["prefix"] if conf and conf["prefix"] else "+")
+        prefixe = await get_custom_prefix(self.bot, ctx.guild.id)
         rows = await self.bot.db.fetchall(
             "SELECT name FROM platform_custom_commands WHERE guild_id=? ORDER BY name", (ctx.guild.id,))
         efface = await supprimer_declencheur(self.bot.db, ctx.guild.id)
@@ -309,12 +310,15 @@ class CustomCommands(commands.Cog):
         prefixe = prefixe.strip()
         if not 1 <= len(prefixe) <= 3 or " " in prefixe or prefixe.startswith("/"):
             return await panels.envoyer(ctx, panels.Panneau(titre="Préfixe invalide", sous_titre="1 à 3 caractères, sans espace ni « / ».", kind="danger"))
-        await self.bot.db.set_guild_config(ctx.guild.id, "prefix", prefixe)
-        # Le préfixe est global : les commandes natives et personnalisées partagent
-        # la même configuration. Invalider le cache lors d'un changement manuel.
-        if hasattr(self.bot, "prefix_cache"):
-            self.bot.prefix_cache[ctx.guild.id] = prefixe
-        await panels.envoyer(ctx, panels.Panneau(titre="Préfixe enregistré", sous_titre=f"Toutes les commandes utilisent `{prefixe}` ou `+`. Les commandes / restent disponibles.", kind="success"))
+        from utils.command_prefixes import set_custom_prefix
+        await set_custom_prefix(self.bot, ctx.guild.id, prefixe)
+        await panels.envoyer(
+            ctx, panels.Panneau(
+                titre="Préfixe des commandes personnalisées",
+                sous_titre=f"Préfixe personnalisé : `{prefixe}`. Il ne lance aucune commande officielle.",
+                kind="success",
+            )
+        )
 
     @customcmd.command(name="delete-trigger", help="Supprimer le message qui lance la commande (on/off).")
     async def customcmd_delete_trigger(self, ctx: commands.Context, etat: str):
