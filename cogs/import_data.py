@@ -286,10 +286,10 @@ async def preview_attachment(bot, guild_id: int, author_id: int, attachment: dis
         fmt = lambda n: f"{n:,}".replace(",", " ")
         description = (
             f"Le plus grand solde est de **{fmt(exc.maximum)}** pièces. "
-            "Le stocker directement ferait dépasser la capacité des entiers SQLite.\\n"
+            "Le stocker directement ferait dépasser la capacité des entiers SQLite.\n"
             f"Vous pouvez diviser **tous** les soldes cash et banque par "
             f"**{fmt(exc.divisor)}**, avec arrondi inférieur. "
-            "Les montants sont donc modifiés, pas seulement affichés autrement.\\n"
+            "Les montants sont donc modifiés, pas seulement affichés autrement.\n"
             "Aucune donnée ne sera modifiée sans les deux validations successives. "
             "Conservez le fichier d'export original."
         )
@@ -318,7 +318,7 @@ async def _preview_records(bot, guild_id: int, author_id: int, records: list[dic
     )
     if scaled_by > 1:
         description += (
-            "\\n**Avertissement :** tous les soldes cash/banque de cet export ont été "
+            "\n**Avertissement :** tous les soldes cash/banque de cet export ont été "
             f"divisés par **{scaled_by:,}** (arrondi inférieur). "
             "Les valeurs originales ne seront pas restaurées par SentriX."
         )
