@@ -49,20 +49,22 @@ async def _prepare_private_setup_interaction(interaction: discord.Interaction) -
         interaction.response.type
         == discord.InteractionResponseType.deferred_channel_message
     ):
-        # Ne jamais supprimer l'original : Discord affichait ensuite
-        # « Le message n'a pas pu être chargé » dans les réponses à /setup.
-        # Aucun rôle, salon, réglage, contenu de panneau n'est publié ici.
-        from . import premium_style_runtime
-        raw_edit = premium_style_runtime._ORIGINALS.get("interaction_edit_original")
-        kwargs = {
-            "content": "Ton panneau de configuration s'ouvre en privé.",
-            "embed": None,
-            "view": None,
-        }
-        if callable(raw_edit) and isinstance(interaction, discord.Interaction):
-            await raw_edit(interaction, **kwargs)
-        else:
-            await interaction.edit_original_response(**kwargs)
+        # Si le defer était déjà privé, le vrai panneau remplace directement
+        # sa réponse initiale : zéro « Ton panneau s'ouvre... » supplémentaire.
+        try:
+            original = await interaction.original_response()
+            if getattr(getattr(original, "flags", None), "ephemeral", False):
+                return False
+        except (discord.HTTPException, AttributeError):
+            pass
+
+        # Une ancienne couche a fait un defer PUBLIC. Le supprimer avant le
+        # followup éphémère ; ne plus laisser de panneau « Information »
+        # dans le salon simplement parce qu'un vieux runtime a ACK en public.
+        try:
+            await interaction.delete_original_response()
+        except (discord.HTTPException, AttributeError):
+            logger.debug("ACK setup public déjà supprimé.", exc_info=True)
     return True
 
 
