@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS platform_custom_commands (
     response TEXT NOT NULL,
     embed_title TEXT NOT NULL DEFAULT '',
     embed_color INTEGER NOT NULL DEFAULT 8228095,
+    ping_role_id INTEGER NOT NULL DEFAULT 0,
     enabled INTEGER NOT NULL DEFAULT 1,
     created_by INTEGER,
     created_at INTEGER NOT NULL,
@@ -163,6 +164,18 @@ async def _ensure_schema(bot: commands.Bot) -> None:
         sql = statement.strip()
         if sql:
             await bot.db.execute(sql)
+    # Migration non-destructive pour les 41 serveurs déjà configurés.
+    columns = await bot.db.fetchall("PRAGMA table_info(platform_custom_commands)")
+    if "ping_role_id" not in {str(row["name"]) for row in columns}:
+        try:
+            await bot.db.execute(
+                "ALTER TABLE platform_custom_commands ADD COLUMN ping_role_id INTEGER NOT NULL DEFAULT 0"
+            )
+        except Exception:
+            # Une instance de secours peut avoir effectué la migration en premier.
+            newer = await bot.db.fetchall("PRAGMA table_info(platform_custom_commands)")
+            if "ping_role_id" not in {str(row["name"]) for row in newer}:
+                raise
 
 
 class RoleToggleButton(discord.ui.Button):
@@ -488,6 +501,13 @@ class PlatformV4(commands.Cog):
         response = str(data.get("response") or "").strip()[:1900]
         if not response:
             raise ValueError("La réponse ne peut pas être vide.")
+        ping_role_id = int(data.get("ping_role_id") or 0)
+        if ping_role_id:
+            ping_role = guild.get_role(ping_role_id)
+            if ping_role is None or ping_role.is_default():
+                raise ValueError("Le rôle à mentionner n'existe plus.")
+            if not ping_role.mentionable and not guild.me.guild_permissions.mention_everyone:
+                raise ValueError("SentriX ne peut pas mentionner ce rôle : active ses mentions ou accorde la permission adaptée.")
         command_id = int(data.get("id") or 0)
         old = None
         if command_id:
@@ -496,13 +516,13 @@ class PlatformV4(commands.Cog):
                 raise ValueError("Commande introuvable.")
             old = dict(row)
             await self.bot.db.execute(
-                "UPDATE platform_custom_commands SET name=?,response=?,embed_title=?,embed_color=?,enabled=?,updated_at=? WHERE id=? AND guild_id=?",
-                (name, response, str(data.get("embed_title") or "")[:200], int(data.get("embed_color") or 8228095) & 0xFFFFFF, int(bool(data.get("enabled", True))), now(), command_id, guild.id),
+                "UPDATE platform_custom_commands SET name=?,response=?,embed_title=?,embed_color=?,ping_role_id=?,enabled=?,updated_at=? WHERE id=? AND guild_id=?",
+                (name, response, str(data.get("embed_title") or "")[:200], int(data.get("embed_color") or 8228095) & 0xFFFFFF, ping_role_id, int(bool(data.get("enabled", True))), now(), command_id, guild.id),
             )
         else:
             cur = await self.bot.db.execute(
-                "INSERT INTO platform_custom_commands (guild_id,name,response,embed_title,embed_color,enabled,created_by,created_at,updated_at) VALUES (?,?,?,?,?,1,?,?,?)",
-                (guild.id, name, response, str(data.get("embed_title") or "")[:200], int(data.get("embed_color") or 8228095) & 0xFFFFFF, actor_id, now(), now()),
+                "INSERT INTO platform_custom_commands (guild_id,name,response,embed_title,embed_color,ping_role_id,enabled,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,1,?,?,?)",
+                (guild.id, name, response, str(data.get("embed_title") or "")[:200], int(data.get("embed_color") or 8228095) & 0xFFFFFF, ping_role_id, actor_id, now(), now()),
             )
             command_id = int(cur.lastrowid)
         new = dict(await self.bot.db.fetchone("SELECT * FROM platform_custom_commands WHERE id=?", (command_id,)))
@@ -563,16 +583,29 @@ class PlatformV4(commands.Cog):
         response = str(row["response"] or "")
         response = response.replace("{user}", message.author.mention).replace("{server}", message.guild.name).replace("{args}", args[:1000])
         try:
+            ping_role = message.guild.get_role(int(row["ping_role_id"] or 0))
+            ping_role = ping_role if ping_role and not ping_role.is_default() else None
+            # Une commande personnalisée ne peut ping QUE son rôle enregistré,
+            # jamais tout le serveur ou des rôles contenus dans le texte libre.
+            if ping_role and not (
+                ping_role.mentionable or message.guild.me.guild_permissions.mention_everyone
+            ):
+                ping_role = None
+            ping = ping_role.mention if ping_role else None
+            mentions = discord.AllowedMentions(
+                users=True, roles=[ping_role] if ping_role else False,
+                everyone=False,
+            )
             if row["embed_title"]:
                 embed = discord.Embed(title=row["embed_title"], description=response, color=int(row["embed_color"] or 8228095))
                 # Envoyer un VRAI embed Discord, pas convertir l'embed
                 # demandé en panneau Components V2 ni créer de second message.
-                await message.channel.send(
-                    embed=embed,
-                    allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
-                )
+                await message.channel.send(content=ping, embed=embed, allowed_mentions=mentions)
             else:
-                await message.channel.send(response, allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False))
+                await message.channel.send(
+                    (f"{ping}\n" if ping else "") + response,
+                    allowed_mentions=mentions,
+                )
         except discord.HTTPException:
             pass
 
