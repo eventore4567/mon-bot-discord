@@ -40,3 +40,24 @@ def test_import_rejects_oversized_payload():
 def test_import_rejects_invalid_encoding():
     with pytest.raises(ValueError):
         parse_export(bytes([0xff, 0xfe]))
+
+def test_setup_import_uses_native_file_upload_modal():
+    import discord
+    from cogs.import_data import ImportFileModal
+
+    modal = ImportFileModal(object(), 123, 456, english=False)
+    assert isinstance(modal.upload, discord.ui.FileUpload)
+    assert modal.upload.min_values == 1
+    assert modal.upload.max_values == 1
+    assert modal.guild_id == 123
+    assert modal.author_id == 456
+
+
+def test_setup_page_has_import_button():
+    import inspect
+    from cogs.setup_components_v73 import SentriXSetupV73
+
+    code = inspect.getsource(SentriXSetupV73._build_page)
+    assert 'if page == "levels":' in code
+    assert "ImportFileModal(" in code
+    assert "interaction.response.send_modal" in code
