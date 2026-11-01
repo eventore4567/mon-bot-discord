@@ -49,13 +49,13 @@ def test_setup_inclut_les_etats_et_la_banniere():
     a = src.index("    async def _build_home(self)")
     b = src.index("    async def _build_home_complet", a)
     accueil = src[a:b]
-    assert "actifs_labels" in accueil
-    assert "inactifs_labels" in accueil
-    assert "manquants_labels" in accueil
+    assert "actifs =" in accueil
+    assert "inactifs =" in accueil
+    assert "incomplets =" in accueil
     for status in ("Actifs :", "Désactivés :", "À configurer :"):
         assert status in accueil
     assert "v73.poser_banniere(container)" in accueil
-    assert "sentrix_emojis.partiel(categories_emoji[key])" in accueil
+    assert "icons.partiel(icons_par_module.get(key" in accueil
     assert len({e.path for e in slash_catalog.CATALOG}) == len(slash_catalog.CATALOG)
 
 
