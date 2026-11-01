@@ -593,7 +593,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             from . import setup_custom_commands
             if not setup_custom_commands.is_admin(self, SimpleNamespace(user=self.guild.get_member(self.author_id), guild=self.guild)):
                 box = discord.ui.Container()
-                box.add_item(discord.ui.TextDisplay("# Commandes personnalisées\\nSeuls les administrateurs peuvent créer et modifier des commandes personnalisées."))
+                box.add_item(discord.ui.TextDisplay("# Commandes personnalisées\nSeuls les administrateurs peuvent créer et modifier des commandes personnalisées."))
                 self._add_navigation(box)
                 self.add_item(box)
                 return
@@ -630,7 +630,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         ):
             box = discord.ui.Container()
             box.add_item(discord.ui.TextDisplay(
-                "# Accès au setup\\nSeuls les administrateurs peuvent attribuer ces accès."
+                "# Accès au setup\nSeuls les administrateurs peuvent attribuer ces accès."
             ))
             self._add_navigation(box)
             self.add_item(box)
@@ -643,10 +643,10 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         box = discord.ui.Container(accent_colour=0x6C57CC)
         v73.poser_banniere(box)
         box.add_item(discord.ui.TextDisplay(
-            "# Autorisations /setup\\n"
+            "# Autorisations /setup\n"
             "Le propriétaire et les administrateurs ont automatiquement accès. "
             "Tu peux autoriser d'autres rôles ou membres ci-dessous. "
-            "Le panneau reste privé pour chaque utilisateur.\\n\\n"
+            "Le panneau reste privé pour chaque utilisateur.\n\n"
             "**Accès délégués :** " + (", ".join(saved[:25]) if saved else "Aucun")
         ))
 
