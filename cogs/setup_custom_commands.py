@@ -12,10 +12,21 @@ import time
 import discord
 
 from utils import sentrix_panels as panels
+from utils.command_prefixes import get_custom_prefix, set_custom_prefix, set_official_prefix, validate_prefix
 
 logger = logging.getLogger("bot.setup-custom-commands")
 
 VALID_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{1,31}$")
+
+def is_admin(shell, interaction: discord.Interaction) -> bool:
+    perms = getattr(interaction.user, "guild_permissions", None)
+    return bool(
+        getattr(interaction.guild, "id", None) == getattr(shell.guild, "id", None)
+        and (getattr(interaction.guild, "owner_id", None) == interaction.user.id
+             or (perms and getattr(perms, "administrator", False)))
+    )
+
+
 ROLE_KINDS = {"role_add", "role_remove", "role_temp"}
 KINDS = {
     "role_add": "Ajouter un rôle",
@@ -88,6 +99,8 @@ class CommandTextModal(discord.ui.Modal):
             self.texte.default = str(row["response"])
 
     async def on_submit(self, interaction: discord.Interaction):
+        if not is_admin(self.shell, interaction):
+            return await notify(interaction, "Seuls les administrateurs peuvent gérer ces commandes.")
         # Les actions sont indexées par (guild_id, name). La modification du
         # message ne renomme donc jamais la commande et ne perd pas ses actions.
         name = (str(self.existing["name"]) if self.existing else str(self.nom.value or "")).strip().casefold()
@@ -113,20 +126,24 @@ class CommandTextModal(discord.ui.Modal):
 
 
 class PrefixModal(discord.ui.Modal, title="Préfixe des commandes personnalisées"):
-    prefixe = discord.ui.TextInput(label="Préfixe", placeholder="!", min_length=1, max_length=3)
+    prefixe = discord.ui.TextInput(label="Préfixe", placeholder="!", min_length=1, max_length=5)
 
     def __init__(self, shell):
         super().__init__()
         self.shell = shell
 
     async def on_submit(self, interaction: discord.Interaction):
+        if not is_admin(self.shell, interaction):
+            return await notify(interaction, "Seuls les administrateurs peuvent gérer ces commandes.")
         value = str(self.prefixe.value or "").strip()
-        if not value or value.startswith("/") or any(ch.isspace() for ch in value):
-            return await notify(interaction, "Préfixe invalide : 1 à 3 caractères, sans espaces ni slash.")
-        await self.shell.bot.db.set_guild_config(self.shell.guild.id, "prefix", value)
-        # Éviter le cache périmé : + reste actif dans tous les cas.
-        self.shell.bot.prefix_cache[self.shell.guild.id] = value
-        await notify(interaction, "Préfixe personnalisé enregistré. Le préfixe + reste disponible.")
+        try:
+            validate_prefix(value)
+        except ValueError as exc:
+            return await notify(interaction, str(exc))
+        if not is_admin(self.shell, interaction):
+            return await notify(interaction, "Seuls les administrateurs peuvent modifier ce préfixe.")
+        await set_custom_prefix(self.shell.bot, self.shell.guild.id, value)
+        await notify(interaction, "Préfixe personnalisé enregistré. Il n'affecte pas les commandes officielles.")
 
 
 async def enregistrer_action(shell, name: str, kind: str, value: int, seconds: int) -> None:
@@ -160,6 +177,8 @@ class ActionModal(discord.ui.Modal):
         self.add_item(self.valeur)
 
     async def on_submit(self, interaction: discord.Interaction):
+        if not is_admin(self.shell, interaction):
+            return await notify(interaction, "Seuls les administrateurs peuvent gérer ces commandes.")
         try:
             value, seconds = parse_action(
                 self.kind, str(self.valeur.value or ""), "",
@@ -181,6 +200,8 @@ class DureeRoleModal(discord.ui.Modal, title="Durée du rôle temporaire"):
         self.add_item(self.duree)
 
     async def on_submit(self, interaction: discord.Interaction):
+        if not is_admin(self.shell, interaction):
+            return await notify(interaction, "Seuls les administrateurs peuvent gérer ces commandes.")
         try:
             value, seconds = parse_action(
                 "role_temp", str(self.role_id), str(self.duree.value),
@@ -223,13 +244,54 @@ class ChoisirRoleAction(discord.ui.View):
         self.add_item(select)
 
 
+class OfficialPrefixModal(discord.ui.Modal, title="Préfixe des commandes officielles"):
+    prefixe = discord.ui.TextInput(label="Préfixe officiel", placeholder="+", min_length=1, max_length=5)
+
+    def __init__(self, shell):
+        super().__init__()
+        self.shell = shell
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not is_admin(self.shell, interaction):
+            return await notify(interaction, "Seuls les administrateurs peuvent modifier le préfixe officiel.")
+        try:
+            await set_official_prefix(self.shell.bot, self.shell.guild.id, str(self.prefixe.value))
+        except ValueError as exc:
+            return await notify(interaction, str(exc))
+        await notify(interaction, "Préfixe officiel mis à jour. Les commandes personnalisées sont inchangées.")
+
+
+async def build_prefix_page(shell) -> None:
+    from . import setup_components_v73 as v73
+    conf = await shell.bot.db.get_guild_config(shell.guild.id)
+    official = str(conf["prefix"] if conf and conf["prefix"] else "+")
+    custom = await get_custom_prefix(shell.bot, shell.guild.id)
+    box = discord.ui.Container(accent_colour=0x6C57CC)
+    v73.poser_banniere(box)
+    box.add_item(discord.ui.TextDisplay(
+        "# Préfixes de SentriX\\n"
+        f"**Commandes officielles :** `{official}` (ex. `{official}help`)\\n"
+        f"**Commandes personnalisées :** `{custom}` (uniquement les commandes créées)\\n\\n"
+        "Les commandes slash / restent indépendantes."
+    ))
+    change = discord.ui.Button(label="Modifier le préfixe officiel", style=discord.ButtonStyle.primary)
+    async def change_official(interaction):
+        if not is_admin(shell, interaction):
+            return await notify(interaction, "Réservé aux administrateurs.")
+        await interaction.response.send_modal(OfficialPrefixModal(shell))
+    change.callback = change_official
+    box.add_item(discord.ui.ActionRow(change))
+    shell._add_navigation(box)
+    shell.add_item(box)
+
+
 async def build_page(shell) -> None:
     from cogs import setup_components_v73 as v73, setup_control_center as setup_ui
     from cogs.custom_commands import actions_de, supprimer_declencheur, decrire
 
     guild_id = shell.guild.id
     conf = await shell.bot.db.get_guild_config(guild_id)
-    prefix = str(conf["prefix"] if conf and conf["prefix"] else "+")
+    prefix = await get_custom_prefix(shell.bot, guild_id)
     delete_trigger = await supprimer_declencheur(shell.bot.db, guild_id)
     rows = list(await shell.bot.db.fetchall(
         "SELECT id,name,response FROM platform_custom_commands WHERE guild_id=? ORDER BY name LIMIT 25",
