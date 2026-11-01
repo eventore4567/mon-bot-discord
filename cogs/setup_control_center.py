@@ -782,6 +782,19 @@ class SetupView(discord.ui.LayoutView):
         self.clear_items()
 
         embed = await self.build_embed()
+        from . import language_runtime
+        english = await language_runtime.get_language(self.bot, self.guild.id) == language_runtime.LANG_EN
+        translate = language_runtime._english_setup_text if english else lambda value: value
+        if english:
+            language_runtime._translate_setup_embed(embed)
+            for item in self._commandes:
+                if isinstance(item, discord.ui.Button) and item.label:
+                    item.label = translate(item.label)
+                if isinstance(item, discord.ui.Select):
+                    item.placeholder = translate(item.placeholder)
+                    for option in getattr(item, "options", ()):
+                        option.label = translate(option.label)
+                        option.description = translate(option.description)
         titre = str(getattr(embed, "title", "") or "SentriX — Centre de contrôle")
         resume = _sans_barre(str(getattr(embed, "description", "") or ""))
         if self.avance or not self._sections_base:
@@ -806,11 +819,8 @@ class SetupView(discord.ui.LayoutView):
             rendu = section.rendu()
             if rendu:
                 conteneur.add_item(discord.ui.Separator())
-                conteneur.add_item(discord.ui.TextDisplay(rendu[:3800]))
+                conteneur.add_item(discord.ui.TextDisplay(str(translate(rendu))[:3800]))
 
-        conteneur.add_item(
-            discord.ui.TextDisplay("-# SentriX • Configuration · chaque modification est enregistrée aussitôt")
-        )
         for rangee in _rangees_de(self._commandes):
             conteneur.add_item(rangee)
         self.add_item(conteneur)
@@ -1237,6 +1247,14 @@ class SetupView(discord.ui.LayoutView):
                         )
                     ],
                 ),
+                panels.Section(
+                    "Importation depuis un autre bot",
+                    [
+                        panels.Ligne("Importer des données", "Utilisez `+import-data` avec un fichier JSON."),
+                        panels.Ligne("Fichier", '{"users":[{"id":"123456789012345678","xp":50,"level":1,"cash":100,"bank":0}]}'),
+                        panels.Ligne("Choix", "Aperçu puis ajouter les absents ou remplacer les champs importés."),
+                    ],
+                ),
             ]
         if cle == "notifications":
             rows = await self.bot.db.fetchall(
@@ -1354,11 +1372,42 @@ class OfficialSetup(commands.Cog, name="SentriXSetup"):
     def __init__(self, bot):
         self.bot = bot
 
+    async def send_public_overview(self, target):
+        """A safe public summary, without privileged interactive controls."""
+        guild = getattr(target, "guild", None)
+        if guild is None:
+            return await _permission_error(target)
+        from . import language_runtime
+        en = await language_runtime.get_language(self.bot, guild.id) == language_runtime.LANG_EN
+        overview = discord.Embed(
+            title="SentriX · Server modules" if en else "SentriX · Modules du serveur",
+            description=(
+                "Read-only overview. Server managers can modify settings with `/setup`."
+                if en else "Consultation uniquement. Les gestionnaires du serveur peuvent modifier les réglages avec `/setup`."
+            ),
+            color=discord.Colour.blurple(),
+        )
+        categories = ", ".join(
+            language_runtime._english_setup_text(CATEGORIES[key][0]) if en else CATEGORIES[key][0]
+            for key in CATEGORY_ORDER
+        )
+        overview.add_field(
+            name="Available modules" if en else "Modules disponibles",
+            value=categories, inline=False,
+        )
+        if isinstance(target, commands.Context):
+            return await target.send(embed=overview)
+        if target.response.is_done():
+            return await target.followup.send(embed=overview, ephemeral=True)
+        return await target.response.send_message(embed=overview, ephemeral=True)
+
     async def send_setup(self, target):
         guild = getattr(target, "guild", None)
         member = getattr(target, "author", None) or getattr(target, "user", None)
-        if not await _can_setup(self.bot, member, guild):
+        if guild is None or member is None:
             return await _permission_error(target)
+        if not await _can_setup(self.bot, member, guild):
+            return await self.send_public_overview(target)
         view = SetupView(self.bot, guild, member.id)
         await view.composer()
         return await panels.envoyer(target, view)

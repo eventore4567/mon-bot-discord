@@ -309,7 +309,7 @@ def _discord_timestamp(date_text: str, heure: str = "00:00", fuseau: str = "UTC"
         except ValueError:
             continue
     if naive is None:
-        raise ValueError("Format invalide. Utilise JJ/MM/AAAA et HH:MM (ex. 25/10/2026, 18:30).")
+        raise ValueError("Format invalide. Utilisez JJ/MM/AAAA et HH:MM (ex. 25/10/2026, 18:30).")
     aware = naive.replace(tzinfo=zone)
     result = int(aware.timestamp())
     back = _datetime.datetime.fromtimestamp(result, zone).replace(tzinfo=None)
@@ -815,61 +815,15 @@ class Utility(commands.Cog, name="Utility"):
             logger.exception("Impossible d'afficher le menu interactif de +help")
             await panels.envoyer(ctx, panels.depuis_embed(e))
 
-    @commands.hybrid_command(name="ping", description="Afficher la latence du bot.")
+    @commands.hybrid_command(name="ping", description="Show bot latency.")
     async def ping(self, ctx: commands.Context):
-        """État de la connexion, pas seulement un nombre.
-
-        « Pong ! 42 ms » ne dit pas si 42 ms est bon, ni si la base répond. Les
-        deux comptent quand on tape +ping : on cherche à savoir si le bot va bien.
-        """
-        latence = helpers.latence_ms(self.bot)
-        if latence <= 120:
-            etat, intention = "Excellente", "success"
-        elif latence <= 300:
-            etat, intention = "Correcte", "success"
-        elif latence <= 600:
-            etat, intention = "Dégradée", "warning"
+        """Quick connection check. Detailed diagnostics belong in the status command."""
+        latency = helpers.latence_ms(self.bot)
+        if not self.bot.is_ready():
+            message = f"Ping: {latency} ms · Reconnecting"
         else:
-            etat, intention = "Mauvaise", "danger"
-
-        connexion = [
-            panels.Ligne("Latence", f"**{latence} ms**", indice=f"Qualité : {etat.lower()}"),
-            panels.Ligne("Passerelle Discord", "connectée" if self.bot.is_ready() else "en reconnexion"),
-        ]
-        if ctx.guild is not None and ctx.guild.shard_id is not None:
-            connexion.append(panels.Ligne("Fragment", f"#{ctx.guild.shard_id}"))
-
-        # Ce que la latence recouvre : une bonne latence sur deux serveurs ne dit
-        # pas la meme chose qu'une bonne latence sur deux cents.
-        serveurs = list(getattr(self.bot, "guilds", ()) or ())
-        membres = sum(int(getattr(g, "member_count", 0) or 0) for g in serveurs)
-        portee = [
-            panels.Ligne("Serveurs", f"{len(serveurs):,}".replace(",", " ")),
-            panels.Ligne("Membres couverts", f"{membres:,}".replace(",", " ")),
-            panels.Ligne("Fragments", str(int(getattr(self.bot, "shard_count", None) or 1))),
-        ]
-
-        base = "opérationnelle"
-        try:
-            await self.bot.db.fetchone("SELECT 1")
-        except Exception:
-            base = "**injoignable**"
-            intention = "danger"
-
-        await panels.envoyer(
-            ctx,
-            panels.Panneau(
-                titre="SentriX — État",
-                sous_titre=f"Latence **{latence} ms** · connexion {etat.lower()}.",
-                kind=intention,
-                sections=[
-                    panels.Section("Connexion", connexion),
-                    panels.Section("Services", [panels.Ligne("Base de données", base)]),
-                    panels.Section("Portée", portee),
-                ],
-                pied="SentriX • État",
-            ),
-        )
+            message = f"Ping: {latency} ms"
+        await ctx.send(message, allowed_mentions=discord.AllowedMentions.none())
 
     @commands.hybrid_command(name="avatar", description="Afficher l'avatar d'un membre.")
     @app_commands.describe(membre="Le membre visé (optionnel)")
@@ -1953,7 +1907,7 @@ class Utility(commands.Cog, name="Utility"):
         if not message or len(message) > 1800 or not cible or len(cible) > 32:
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(
                 guild_id, title="Traduction", kind="warning",
-                description="Indique une langue et un texte de 1 à 1800 caractères.",
+                description="Indiquez une langue et un texte de 1 à 1800 caractères.",
             )))
         try:
             from deep_translator import GoogleTranslator
@@ -1970,7 +1924,7 @@ class Utility(commands.Cog, name="Utility"):
             logger.warning("Traduction indisponible (langue=%s)", cible, exc_info=True)
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(
                 guild_id, title="Traduction indisponible", kind="danger",
-                description="Impossible de traduire ce texte pour l'instant. Vérifie la langue (fr, en, es...) et réessaie.",
+                description="Impossible de traduire ce texte pour l'instant. Vérifiez la langue (fr, en, es...) et réessayez.",
             )))
 
         # Texte externe : aucune mention ni mise en forme arbitraire ne doit être injectée.
@@ -2009,7 +1963,7 @@ class Utility(commands.Cog, name="Utility"):
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(
                 ctx.guild.id if ctx.guild else None,
                 title="Format inconnu", kind="warning",
-                description="Choisis t, T, d, D, f, F ou R.",
+                description="Choisissez t, T, d, D, f, F ou R.",
             )))
         try:
             epoch = _discord_timestamp(date, heure, fuseau)

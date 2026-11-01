@@ -148,7 +148,15 @@ async def _send_welcome(bot, member: discord.Member, *, test: bool = False) -> t
         return False, error or "Salon de bienvenue indisponible."
     conf = await bot.db.get_guild_config(member.guild.id)
     presentation = await _welcome_presentation(bot, member.guild.id)
-    body = _format_welcome(_conf_value(conf, "welcome_message", WELCOME_DEFAULT_TEXT), member)
+    from . import language_runtime
+    english = await language_runtime.get_language(bot, member.guild.id) == language_runtime.LANG_EN
+    template = _conf_value(conf, "welcome_message", WELCOME_DEFAULT_TEXT)
+    if english and template == WELCOME_DEFAULT_TEXT:
+        template = "Welcome {member} to **{server}**!"
+    welcome_title = presentation["title"]
+    if english and welcome_title == WELCOME_DEFAULT_TITLE:
+        welcome_title = "Welcome to {server}"
+    body = _format_welcome(template, member)
     if presentation.get("mode") == "text":
         # Message simple : le texte seul, la mention en tête (sauf en test).
         try:
@@ -158,16 +166,16 @@ async def _send_welcome(bot, member: discord.Member, *, test: bool = False) -> t
             )
         except discord.HTTPException as exc:
             return False, f"Discord a refusé l’envoi : {exc}"
-        return True, f"Test envoyé dans {channel.mention}." if test else "Bienvenue envoyée."
+        return True, (f"Test sent to {channel.mention}." if test else "Welcome sent.") if english else (f"Test envoyé dans {channel.mention}." if test else "Bienvenue envoyée.")
     panel = embeds.brand(
-        _format_welcome(presentation["title"], member),
+        _format_welcome(welcome_title, member),
         body,
     )
     if presentation["show_avatar"]:
         panel.set_thumbnail(url=member.display_avatar.url)
     if presentation["show_member_count"]:
         count = int(member.guild.member_count or 0)
-        panel.add_field(name="Membres", value=f"{count} membre{'s' if count > 1 else ''}", inline=True)
+        panel.add_field(name="Members" if english else "Membres", value=f"{count} members" if english else f"{count} membre{'s' if count > 1 else ''}", inline=True)
     image_url = _conf_value(conf, "welcome_image_url")
     if image_url and str(image_url).startswith(("https://", "http://")):
         panel.set_image(url=str(image_url))
@@ -195,6 +203,10 @@ async def _send_goodbye(bot, member: discord.Member) -> discord.abc.Messageable 
     if not isinstance(channel, (discord.TextChannel, discord.Thread)):
         return None
     template = _conf_value(conf, "goodbye_message", "**{username}** a quitté **{server}**.")
+    from . import language_runtime
+    english = await language_runtime.get_language(bot, member.guild.id) == language_runtime.LANG_EN
+    if english and template == "**{username}** a quitté **{server}**.":
+        template = "**{username}** left **{server}**."
     presentation = await _welcome_presentation(bot, member.guild.id)
     if presentation.get("goodbye_mode") == "text":
         try:
@@ -202,7 +214,7 @@ async def _send_goodbye(bot, member: discord.Member) -> discord.abc.Messageable 
         except discord.HTTPException:
             return None
         return channel
-    panel = embeds.neutral("Départ d’un membre", _format_welcome(template, member))
+    panel = embeds.neutral("Member left" if english else "Départ d’un membre", _format_welcome(template, member))
     if presentation["show_avatar"]:
         panel.set_thumbnail(url=member.display_avatar.url)
     try:

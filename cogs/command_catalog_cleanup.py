@@ -24,7 +24,7 @@ GAME_COMMANDS = frozenset({
 })
 
 NORMAL_DIRECT_COMMANDS = frozenset({
-    "help", "setup", "ping", "avatar", "userinfo", "translate", "timestamp", "afk", "setprefix", "setmodrole",
+    "help", "setup", "ping", "avatar", "userinfo", "translate", "timestamp", "afk",
     "ban", "unban", "kick", "mute", "unmute", "warn", "warnings", "clear",
     "lock", "unlock", "clearwarnings", "slowmode", "nickname", "resetnick",
     "giverole", "removerole",
@@ -76,6 +76,7 @@ PURE_DUPLICATE_COMMANDS = frozenset({
 })
 
 SETUP_MERGED_COMMANDS = frozenset({
+    "setprefix", "setmodrole",
     "config-view", "config-reset", "create-logs", "logsetup", "logs-status",
     "designsetup", "welcome-config", "shopsetup", "aisetup",
     "setwelcomechannel", "setwelcomemessage", "setgoodbyechannel",

@@ -729,6 +729,18 @@ class Logs(commands.Cog, name="Logs"):
 
     @commands.Cog.listener()
     async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
+        # A ticket closed through SentriX is subsequently deleted on schedule.
+        # Its close event is already logged: suppress the redundant channel-delete
+        # notification, but keep logging manual deletion of still-open tickets.
+        try:
+            ticket = await self.bot.db.fetchone(
+                "SELECT closed_at FROM tickets WHERE channel_id=? ORDER BY id DESC LIMIT 1",
+                (channel.id,),
+            )
+            if ticket and ticket["closed_at"]:
+                return
+        except Exception:
+            logger.debug("Could not determine whether channel was a closed ticket", exc_info=True)
         actor, audit = await self._audit_actor(
             channel.guild,
             discord.AuditLogAction.channel_delete,

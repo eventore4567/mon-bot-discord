@@ -208,6 +208,8 @@ DISCORD_PERMISSION_COMMANDS: dict[str, str] = {
     "schedule-send": "manage_messages",
     "schedule-list": "manage_messages",
     "schedule-cancel": "manage_messages",
+    "sticky": "manage_messages",
+    "sticky add": "manage_messages",
     "sticky-set": "manage_messages",
     "sticky-every": "manage_messages",
     "sticky-off": "manage_messages",
@@ -229,6 +231,8 @@ DISCORD_PERMISSION_COMMANDS: dict[str, str] = {
     "disconnect": "move_members",
     "role-snapshot": "manage_roles",
     "role-restore": "manage_roles",
+    "role": "manage_roles",
+    "import-data": "manage_guild",
     "giverole": "manage_roles",
     "removerole": "manage_roles",
     "protectmember": "manage_roles",
@@ -862,6 +866,13 @@ async def evaluate(bot, *, command_name: Any, author: Any, guild: Any) -> Access
             return AccessDecision(True, policy="public-dm")
         return _deny("Cette commande doit être utilisée dans un serveur.", "guild-required")
     guild_id = int(guild_id)
+
+    # Setup is a public read-only entrypoint; editing remains permission-checked
+    # inside the setup controller and its interactive components.
+    if name == "setup":
+        if _is_guild_owner(author, guild):
+            return AccessDecision(True, policy="guild-owner:setup-recovery")
+        return AccessDecision(True, policy="public-setup-readonly")
 
     # (4) module désactivé
     module = module_for_command(name)

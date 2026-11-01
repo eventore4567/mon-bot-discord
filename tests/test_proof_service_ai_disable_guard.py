@@ -39,7 +39,18 @@ def _fake_bot(*, ai_enabled: bool):
         "language": None,
         "logs_enabled": 0,
     }
-    return SimpleNamespace(db=SimpleNamespace(fetchone=AsyncMock(return_value=row)))
+    # Simulate the current V2 module switch, which is authoritative over
+    # ai_settings.enabled. The fake bot must expose schema readiness and a
+    # module_settings row instead of relying on the deprecated legacy flag.
+    async def fetchone(query, params=()):
+        if "FROM module_settings" in query:
+            return {"enabled": row["enabled"]}
+        return row
+
+    return SimpleNamespace(
+        db=SimpleNamespace(fetchone=fetchone),
+        _sentrix_v2_schema_ready=True,
+    )
 
 
 def _fake_openai_response(payload: str):
@@ -48,6 +59,10 @@ def _fake_openai_response(payload: str):
 
 class ProofServiceRespectsAiDisableGuardTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        from cogs import setup_v2_core
+        # The runtime caches authoritative module switches per guild. Isolate
+        # fake-enabled and fake-disabled cases even though they share ID 999.
+        setup_v2_core.invalidate_module_cache(999, "ai")
         self._original_generate = ai_service.generate
 
     def tearDown(self):
