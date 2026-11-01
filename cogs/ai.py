@@ -2434,11 +2434,34 @@ class Ai(commands.Cog, name="Ai"):
         name_trigger = name_match is not None
         reference = getattr(message, "reference", None)
         referenced = getattr(reference, "resolved", None)
+        bot_id = getattr(self.bot.user, "id", None)
         reply_to_bot = (
-            isinstance(referenced, discord.Message)
-            and self.bot.user is not None
-            and referenced.author.id == self.bot.user.id
+            bot_id is not None
+            and getattr(getattr(referenced, "author", None), "id", None) == bot_id
         )
+        if (
+            image_attachments
+            and not reply_to_bot
+            and bot_id is not None
+            and getattr(reference, "message_id", None)
+        ):
+            # Discord n'inclut pas toujours reference.resolved dans l'événement
+            # Gateway (après redémarrage, sur mobile, lorsque le cache est vide).
+            # Il faut récupérer LA réponse précise, sinon une capture envoyée
+            # en réponse à SentriX est silencieusement ignorée.
+            try:
+                referenced = await message.channel.fetch_message(
+                    int(reference.message_id)
+                )
+                reply_to_bot = (
+                    getattr(getattr(referenced, "author", None), "id", None)
+                    == bot_id
+                )
+            except (discord.HTTPException, AttributeError, ValueError):
+                logger.debug(
+                    "Référence Discord non récupérable pour une capture, message=%s",
+                    getattr(message, "id", None),
+                )
         if not mentioned and not name_trigger and not (
             image_attachments and (pending or reply_to_bot)
         ):
@@ -2476,7 +2499,9 @@ class Ai(commands.Cog, name="Ai"):
         elif not attachments and any(
             phrase in question.casefold()
             for phrase in ("cette image", "mon image", "la photo", "cette photo",
-                           "capture d'écran", "cette capture", "l'image")
+                           "capture d'écran", "cette capture", "l'image",
+                           "examine", "examiner", "analyse", "analyser",
+                           "regarde", "décris", "decris", "screenshot")
         ):
             _PENDING_IMAGE_FOLLOWUPS[pending_key] = (time.monotonic() + 300, question)
             if len(_PENDING_IMAGE_FOLLOWUPS) > 4096:
