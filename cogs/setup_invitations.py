@@ -493,18 +493,26 @@ def _patch_setup_v74(bot: commands.Bot) -> None:
         member = getattr(target, "author", None) or getattr(target, "user", None)
 
         if isinstance(target, commands.Context) and target.interaction is None:
-            # Un Context.message ne dispose PAS du drapeau ephemeral.
-            # Au lieu d'un texte inutile qui disparaît après 15 secondes,
-            # laisser un bouton lançable qui crée une vraie interaction
-            # éphémère, sans exposer la configuration dans le salon.
+            # Les commandes préfixées sont PUBLIQUES par définition Discord.
+            # La demande explicite est que +setup ouvre son panneau directement,
+            # sans bouton intermédiaire. Les mutations restent contrôlées par
+            # interaction_check (auteur du panneau) et _can_setup (permissions).
+            # /setup reste éphémère et n'entre jamais dans cette branche.
             if guild is None or member is None:
-                return await target.channel.send("La configuration s'ouvre depuis un serveur.")
-            return await target.channel.send(
-                "Clique sur **Ouvrir mon setup privé** pour configurer SentriX.",
-                view=PrivateSetupLauncher(self, member.id, guild.id),
-                allowed_mentions=discord.AllowedMentions.none(),
-                _sentrix_native_message=True,
-            )
+                return await target.send("La configuration est disponible uniquement sur un serveur.")
+            if not await setup_ui._can_setup(self.bot, member, guild):
+                return await target.send(
+                    "Tu n'as pas la permission d'ouvrir la configuration de ce serveur.",
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            view = cls(self.bot, guild, member.id)
+            view._author_member = member
+            requested = _requested_setup_category(target)
+            if requested == CATEGORY:
+                view.page = CATEGORY
+                view.backend = view._new_backend(CATEGORY)
+            await view.prepare()
+            return await panels.envoyer(target, view, ephemere=False)
 
         # Discord ne sait pas envoyer un panneau éphémère depuis +setup.
         # Les commandes slash doivent être acquittées AVANT le premier accès DB.
