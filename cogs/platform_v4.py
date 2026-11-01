@@ -65,6 +65,20 @@ CREATE TABLE IF NOT EXISTS platform_custom_commands (
     updated_at INTEGER NOT NULL,
     UNIQUE(guild_id, name)
 );
+-- L'accès à chaque commande personnalisée est distinct des droits de /setup.
+-- Sans règle explicite, seuls le propriétaire et les administrateurs
+-- peuvent déclencher la commande. Un refus n'envoie aucun message.
+CREATE TABLE IF NOT EXISTS platform_custom_command_access (
+    guild_id INTEGER NOT NULL,
+    command_id INTEGER NOT NULL,
+    subject_type TEXT NOT NULL CHECK (subject_type IN ('role', 'user', 'everyone')),
+    subject_id INTEGER NOT NULL,
+    updated_by INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (guild_id, command_id, subject_type, subject_id)
+);
+CREATE INDEX IF NOT EXISTS idx_custom_command_access
+ON platform_custom_command_access (guild_id, command_id);
 CREATE TABLE IF NOT EXISTS platform_role_menus (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     guild_id INTEGER NOT NULL,
@@ -492,6 +506,84 @@ class PlatformV4(commands.Cog):
     async def list_custom_commands(self, guild_id: int) -> list[dict[str, Any]]:
         return [dict(r) for r in await self.bot.db.fetchall("SELECT * FROM platform_custom_commands WHERE guild_id=? ORDER BY name", (guild_id,))]
 
+
+    async def list_custom_command_access(self, guild_id: int, command_id: int) -> list[dict[str, Any]]:
+        """Règles d'exécution d'une commande (pas les permissions du setup)."""
+        return [
+            dict(row) for row in await self.bot.db.fetchall(
+                "SELECT subject_type,subject_id FROM platform_custom_command_access "
+                "WHERE guild_id=? AND command_id=? ORDER BY subject_type,subject_id",
+                (int(guild_id), int(command_id)),
+            )
+        ]
+
+    async def set_custom_command_access(
+        self, guild: discord.Guild, actor_id: int, command_id: int,
+        subject_type: str, subject_id: int, *, enabled: bool,
+    ) -> None:
+        """Seuls les administrateurs attribuent les droits d'exécution."""
+        actor_id = int(actor_id)
+        member = guild.get_member(actor_id)
+        if actor_id != guild.owner_id and not (
+            member is not None and member.guild_permissions.administrator
+        ):
+            raise PermissionError("Seuls les administrateurs peuvent gérer ces autorisations.")
+        if subject_type not in {"role", "user", "everyone"}:
+            raise ValueError("Type d'autorisation invalide.")
+        if subject_type == "everyone":
+            subject_id = 0
+        elif int(subject_id) <= 0:
+            raise ValueError("Rôle ou membre invalide.")
+        else:
+            subject_id = int(subject_id)
+        if subject_type == "role":
+            role = guild.get_role(subject_id)
+            if role is None or role.is_default():
+                raise ValueError("Ce rôle n'existe pas ou représente tout le serveur.")
+        if subject_type == "user":
+            user = guild.get_member(subject_id)
+            if user is None:
+                raise ValueError("Ce membre ne fait pas partie du serveur.")
+        exists = await self.bot.db.fetchone(
+            "SELECT id FROM platform_custom_commands WHERE guild_id=? AND id=?",
+            (guild.id, command_id),
+        )
+        if exists is None:
+            raise ValueError("Cette commande personnalisée n'existe plus.")
+        if enabled:
+            await self.bot.db.execute(
+                "INSERT INTO platform_custom_command_access "
+                "(guild_id,command_id,subject_type,subject_id,updated_by,updated_at) "
+                "VALUES (?,?,?,?,?,?) ON CONFLICT(guild_id,command_id,subject_type,subject_id) "
+                "DO UPDATE SET updated_by=excluded.updated_by,updated_at=excluded.updated_at",
+                (guild.id, command_id, subject_type, subject_id, actor_id, now()),
+            )
+        else:
+            await self.bot.db.execute(
+                "DELETE FROM platform_custom_command_access "
+                "WHERE guild_id=? AND command_id=? AND subject_type=? AND subject_id=?",
+                (guild.id, command_id, subject_type, subject_id),
+            )
+
+    async def can_run_custom_command(
+        self, guild: discord.Guild, member: discord.Member, command_id: int,
+    ) -> bool:
+        """Contrôle avant TOUT effet ou réponse; aucune règle = admin seulement."""
+        if member is None or member.bot:
+            return False
+        if guild.owner_id == member.id or member.guild_permissions.administrator:
+            return True
+        grants = await self.list_custom_command_access(guild.id, command_id)
+        if not grants:
+            return False
+        member_role_ids = {role.id for role in getattr(member, "roles", ())}
+        return any(
+            item["subject_type"] == "everyone"
+            or (item["subject_type"] == "user" and int(item["subject_id"]) == member.id)
+            or (item["subject_type"] == "role" and int(item["subject_id"]) in member_role_ids)
+            for item in grants
+        )
+
     async def save_custom_command(self, guild: discord.Guild, actor_id: int, data: dict[str, Any]) -> dict[str, Any]:
         name = str(data.get("name") or "").strip().lower().lstrip("+")
         if not _NAME_RE.fullmatch(name):
@@ -538,6 +630,10 @@ class PlatformV4(commands.Cog):
         if not row:
             raise ValueError("Commande introuvable.")
         old = dict(row)
+        await self.bot.db.execute(
+            "DELETE FROM platform_custom_command_access WHERE guild_id=? AND command_id=?",
+            (guild_id, command_id),
+        )
         await self.bot.db.execute("DELETE FROM platform_custom_commands WHERE id=?", (command_id,))
         await self.audit(guild_id, actor_id, "Commande personnalisée supprimée", target_type="custom_command", target_id=command_id, old=old, new=None, rollback_kind="custom_command")
 
@@ -569,6 +665,19 @@ class PlatformV4(commands.Cog):
             "SELECT * FROM platform_custom_commands WHERE guild_id=? AND name=? AND enabled=1", (message.guild.id, name)
         )
         if not row:
+            return
+        # Refus silencieux et sans effet secondaire : pas de message, sanction,
+        # argent, XP, ping ou suppression du message d'origine.
+        try:
+            if not await self.can_run_custom_command(
+                message.guild, message.author, int(row["id"])
+            ):
+                return
+        except Exception:
+            logger.exception(
+                "Lecture des droits de commande personnalisée impossible guild=%s cmd=%s",
+                message.guild.id, row["id"],
+            )
             return
         # Actions (rôles, rôle temporaire, argent, XP) et suppression du message
         # déclencheur : cogs/custom_commands (30/10/2026).
