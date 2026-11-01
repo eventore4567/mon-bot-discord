@@ -147,6 +147,91 @@ class ImportConfirm(discord.ui.View):
         await interaction.response.edit_message(view=None)
 
 
+
+async def preview_attachment(bot, guild_id: int, author_id: int, attachment: discord.Attachment):
+    """Shared preview path for +import-data and the /setup upload modal."""
+    if (not str(attachment.filename).lower().endswith(".json")
+            or attachment.size > MAX_UPLOAD_SIZE):
+        raise ValueError("Le fichier doit être un JSON de 1 Mo maximum.")
+    try:
+        records = parse_export(await attachment.read())
+    except (discord.HTTPException, OSError) as exc:
+        raise ValueError("Impossible de lire la pièce jointe.") from exc
+    english = await language_runtime.get_language(bot, guild_id) == language_runtime.LANG_EN
+    levels = sum("xp" in row or "level" in row for row in records)
+    economy = sum("cash" in row or "bank" in row for row in records)
+    description = (
+        f"{len(records)} users · {levels} XP/level records · {economy} economy records.\n"
+        "**Add missing** keeps current data. **Replace** overwrites only fields included in this file.\n"
+        "No changes are made until you explicitly confirm. Back up the database first."
+        if english else
+        f"{len(records)} utilisateurs · {levels} entrées XP/niveaux · {economy} entrées économie.\n"
+        "**Ajouter les absents** conserve les données actuelles. **Remplacer** modifie uniquement les champs présents dans le fichier.\n"
+        "Aucune donnée n'est modifiée avant confirmation. Sauvegardez la base avant l'import."
+    )
+    embed = discord.Embed(
+        title="Data import · Preview" if english else "Importation · Aperçu",
+        description=description,
+        colour=discord.Colour.blurple(),
+    )
+    return embed, ImportConfirm(bot, guild_id, author_id, records, english)
+
+
+class ImportFileModal(discord.ui.Modal):
+    """Private, native Discord 2.7 file upload from within the setup panel."""
+
+    def __init__(self, bot, guild_id: int, author_id: int, english: bool):
+        super().__init__(
+            title="Import data from another bot" if english else "Importer les données d'un bot",
+            timeout=300,
+        )
+        self.bot = bot
+        self.guild_id = int(guild_id)
+        self.author_id = int(author_id)
+        self.english = english
+        self.upload = discord.ui.FileUpload(required=True, min_values=1, max_values=1)
+        self.add_item(discord.ui.Label(
+            text="JSON export" if english else "Fichier d'export JSON",
+            description="One file · max 1 MB" if english else "Un fichier · 1 Mo maximum",
+            component=self.upload,
+        ))
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        member = interaction.user
+        if (
+            interaction.guild is None
+            or interaction.guild.id != self.guild_id
+            or member.id != self.author_id
+            or not isinstance(member, discord.Member)
+            or not member.guild_permissions.manage_guild
+        ):
+            return await interaction.response.send_message(
+                "Manage Server is required." if self.english
+                else "Permission Gérer le serveur requise.",
+                ephemeral=True,
+            )
+        if not self.upload.values:
+            return await interaction.response.send_message(
+                "No file was attached." if self.english else "Aucun fichier joint.",
+                ephemeral=True,
+            )
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            embed, view = await preview_attachment(
+                self.bot, self.guild_id, self.author_id, self.upload.values[0],
+            )
+        except ValueError as exc:
+            return await interaction.followup.send(
+                f"Invalid export: {exc}" if self.english else f"Export invalide : {exc}",
+                ephemeral=True,
+            )
+        await panels.envoyer(
+            interaction.followup,
+            panels.avec_composants(panels.depuis_embed(embed), view),
+            ephemere=True,
+        )
+
+
 class ImportData(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -154,30 +239,24 @@ class ImportData(commands.Cog):
     @commands.command(name="import-data")
     @commands.guild_only()
     @commands.has_guild_permissions(manage_guild=True)
-    async def import_data(self, ctx: commands.Context, file: discord.Attachment):
-        english = await language_runtime.get_language(self.bot, ctx.guild.id) == language_runtime.LANG_EN
-        if not file.filename.lower().endswith(".json") or file.size > MAX_UPLOAD_SIZE:
-            return await ctx.send("Attach a JSON file of up to 1 MB." if english else
-                                  "Joignez un fichier JSON de 1 Mo maximum.")
+    async def import_data(self, ctx: commands.Context, file: discord.Attachment = None):
+        """Keep the historical command; /setup uses the same preview workflow."""
+        if file is None:
+            english = await language_runtime.get_language(self.bot, ctx.guild.id) == language_runtime.LANG_EN
+            return await ctx.send(
+                "Attach a .json file to the command message (1 MB max)." if english
+                else "Joignez un fichier .json au message de commande (1 Mo maximum)."
+            )
         try:
-            records = parse_export(await file.read())
+            embed, view = await preview_attachment(
+                self.bot, ctx.guild.id, ctx.author.id, file,
+            )
         except ValueError as exc:
-            return await ctx.send(f"Invalid export: {exc}" if english else f"Export invalide : {exc}")
-        levels = sum("xp" in row or "level" in row for row in records)
-        economy = sum("cash" in row or "bank" in row for row in records)
-        description = (
-            f"{len(records)} users · {levels} XP/level records · {economy} economy records.\n"
-            "**Add missing** leaves existing records unchanged. **Replace** changes only fields present in the file.\n"
-            "Level formulas may differ between bots. Check values before confirming."
-            if english else
-            f"{len(records)} utilisateurs · {levels} entrées XP/niveaux · {economy} entrées économie.\n"
-            "**Ajouter les absents** conserve les données existantes. **Remplacer** modifie seulement les champs fournis.\n"
-            "Les calculs de niveau peuvent différer selon les bots. Vérifiez les valeurs."
+            return await ctx.send(f"Export invalide : {exc}")
+        await panels.envoyer(
+            ctx, panels.avec_composants(panels.depuis_embed(embed), view),
+            allowed_mentions=discord.AllowedMentions.none(),
         )
-        embed = discord.Embed(title="Data import · Preview" if english else
-                               "Importation · Aperçu", description=description, color=discord.Colour.blurple())
-        view = ImportConfirm(self.bot, ctx.guild.id, ctx.author.id, records, english)
-        await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embed), view), allowed_mentions=discord.AllowedMentions.none())
 
 
 async def setup(bot: commands.Bot):
