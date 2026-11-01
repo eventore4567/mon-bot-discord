@@ -1924,7 +1924,7 @@ class Utility(commands.Cog, name="Utility"):
             logger.warning("Traduction indisponible (langue=%s)", cible, exc_info=True)
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(
                 guild_id, title="Traduction indisponible", kind="danger",
-                description="Impossible de traduire ce texte pour l'instant. Vérifiez la langue (fr, en, es...) et réessaie.",
+                description="Impossible de traduire ce texte pour l'instant. Vérifiez la langue (fr, en, es...) et réessayez.",
             )))
 
         # Texte externe : aucune mention ni mise en forme arbitraire ne doit être injectée.
