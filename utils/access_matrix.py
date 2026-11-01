@@ -41,7 +41,7 @@ logger = logging.getLogger("bot.access-matrix")
 
 PUBLIC_COMMANDS = frozenset({
     # Aide et utilitaires
-    "help", "ping", "setup", "avatar", "info", "userinfo", "status", "about", "profile-card",
+    "help", "ping", "avatar", "info", "userinfo", "status", "about", "profile-card",
     "channelinfo", "membercount", "emoji-list", "poll", "remind",
     "reminder-list", "reminder-cancel", "translate", "timestamp", "weather", "suggest",
     "report-bug", "afk", "roll", "choose", "privacy-policy",
@@ -868,6 +868,8 @@ async def evaluate(bot, *, command_name: Any, author: Any, guild: Any) -> Access
     # Setup is a public read-only entrypoint; editing remains permission-checked
     # inside the setup controller and its interactive components.
     if name == "setup":
+        if _is_guild_owner(author, guild):
+            return AccessDecision(True, policy="guild-owner:setup-recovery")
         return AccessDecision(True, policy="public-setup-readonly")
 
     # (4) module désactivé
