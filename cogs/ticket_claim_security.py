@@ -359,11 +359,11 @@ def install(bot: commands.Bot) -> None:
         log_embed = discord.Embed(
             title=(f"Ticket #{ticket_id} closed" if english else f"Ticket n°{ticket_id} fermé"),
             description=(
-                (f"**Channel:** {safe_channel}\\n"
-                 f"**Moderator:** {moderator_ref}\\n"
+                (f"**Channel:** {safe_channel}\n"
+                 f"**Moderator:** {moderator_ref}\n"
                  f"**Reason:** {reason_text}" if english else
-                 f"**Salon :** {safe_channel}\\n"
-                 f"**Modérateur :** {moderator_ref}\\n"
+                 f"**Salon :** {safe_channel}\n"
+                 f"**Modérateur :** {moderator_ref}\n"
                  f"**Raison :** {reason_text}")
             )[:1200],
             colour=discord.Colour(0xA05CFF),
