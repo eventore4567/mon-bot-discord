@@ -767,7 +767,20 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
         # /sticky set #salon texte n'impose plus le mode texte par défaut :
         # l'utilisateur choisit en boutons, avec ou sans bandeau.
         if mode is None and raw:
-            return await self.sticky_add.callback(self, ctx, message=f"{channel.mention} {raw}")
+            # L'ancien /sticky set ne doit pas exiger un préfixe text:/embed: :
+            # le mini panneau permet de choisir explicitement le format.
+            from .sticky_setup_ui import StickySetupView
+            setup_view = StickySetupView(self, ctx.guild.id, ctx.author.id, default_channel=channel)
+            setup_view.content = raw
+            panel = panels.Panneau(
+                titre="Sticky · format", kind="moderation", banniere=True,
+                sous_titre="Choisissez les salons et le format avant la publication.",
+                sections=[panels.Section("Texte", texte=raw[:350])],
+            )
+            return await panels.envoyer(
+                ctx, panels.avec_composants(panel, setup_view),
+                ephemere=bool(ctx.interaction),
+            )
         if not raw or len(raw) > 1700:
             return await ctx.send("Indiquez un message de 1 à 1700 caractères.")
         if not channel.permissions_for(ctx.author).manage_messages:
