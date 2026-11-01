@@ -1652,20 +1652,24 @@ async def _send_setup_v74(self, target):
     view = SentriXSetupV74(self.bot, guild, member.id)
     await view.prepare()
 
+    # Le panneau est visible dans le salon ; ses actions restent protégées
+    # par les permissions Discord et les contrôles d'interaction du Setup.
     if isinstance(target, commands.Context):
-        # Discord ne fournit pas d'éphémère pour une commande préfixée.
-        # Ne pas publier la configuration complète devant tout le serveur.
         return await target.send(
-            "Ouvre **/setup** pour configurer SentriX en privé (visible uniquement par toi).",
-            delete_after=15,
+            **v73.joindre_banniere({"view": view}),
             allowed_mentions=discord.AllowedMentions.none(),
         )
     if target.response.is_done():
-        return await target.followup.send(**v73.joindre_banniere({"view": view}), ephemeral=True)
-    # joindre_banniere consulte la MÊME condition que poser_banniere : la
-    # galerie et la pièce jointe ne peuvent plus diverger. Les éditions de
-    # navigation passent par le refresh hérité de V73.
-    return await target.response.send_message(**v73.joindre_banniere({"view": view}), ephemeral=True)
+        return await target.followup.send(
+            **v73.joindre_banniere({"view": view}),
+            ephemeral=False,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+    return await target.response.send_message(
+        **v73.joindre_banniere({"view": view}),
+        ephemeral=False,
+        allowed_mentions=discord.AllowedMentions.none(),
+    )
 
 
 def install(bot: commands.Bot) -> None:
