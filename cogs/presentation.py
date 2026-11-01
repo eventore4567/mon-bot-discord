@@ -5,6 +5,7 @@ natif. Aucune URL d'invitation n'est affichée dans le corps du message.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import discord
@@ -47,125 +48,191 @@ def _invite_url(bot: commands.Bot) -> str | None:
     )
 
 
-def _presentation(invite_url: str, *, with_banner: bool = True) -> panels.Panneau:
-    return panels.Panneau(
-        titre="SentriX",
-        sous_titre="Un seul bot pour protéger, organiser et animer votre serveur Discord.",
-        kind="brand",
-        banniere=with_banner,
-        sections=(
-            panels.Section(
-                "Sécurité et modération",
-                texte="**Protection** contre le spam, les liens suspects et les raids. "
-                      "**Sanctions**, permissions et outils pour le staff.",
-            ),
-            panels.Section(
-                "Organisation du serveur",
-                texte="**Tickets**, journaux détaillés, accueil des membres, "
-                      "vérification et automatisations.",
-            ),
-            panels.Section(
-                "Communauté",
-                texte="**Niveaux**, économie, jeux, événements, musique "
-                      "et outils d'intelligence artificielle.",
-            ),
-            panels.Section(
-                "Pour commencer",
-                texte="Ajoutez SentriX à votre serveur avec le bouton ci-dessous, "
-                      "puis utilisez `/setup` pour le configurer.",
-            ),
-        ),
-        pied="SentriX • Installation et configuration guidées",
-        boutons=(panels.Bouton(libelle="Ajouter SentriX", url=invite_url),),
+def _presentation(invite_url: str, *, with_banner: bool = False,
+                  english: bool = False, bot: commands.Bot | None = None) -> panels.Panneau:
+    """Concise public panel, with a permanent Give feedback action."""
+    from .presentation_feedback import FeedbackButton
+
+    if english:
+        sections = (
+            panels.Section("Security & moderation", texte="Anti-spam, anti-raid, sanctions and staff tools."),
+            panels.Section("Server management", texte="Tickets, logs, welcome, verification and automation."),
+            panels.Section("Community", texte="Levels, economy, games, events, music and AI."),
+        )
+        subtitle = "Secure, manage and grow your Discord server."
+        foot = "Add SentriX and run /setup to configure your server."
+        add_label = "Add SentriX"
+    else:
+        sections = (
+            panels.Section("Sécurité & modération", texte="Anti-spam, anti-raid, sanctions et outils du staff."),
+            panels.Section("Gestion du serveur", texte="Tickets, logs, bienvenue, vérification et automatisations."),
+            panels.Section("Communauté", texte="Niveaux, économie, jeux, événements, musique et IA."),
+        )
+        subtitle = "Protégez et organisez votre serveur avec un seul bot."
+        foot = "Ajoutez SentriX et lancez /setup pour le configurer."
+        add_label = "Ajouter SentriX"
+
+    panel = panels.Panneau(
+        titre="SentriX", sous_titre=subtitle, sections=sections,
+        kind="brand", banniere=with_banner, pied=foot,
+        boutons=(panels.Bouton(libelle=add_label, url=invite_url),),
+    )
+    if bot is not None:
+        container = next((item for item in panel.children if isinstance(item, discord.ui.Container)), None)
+        if container is not None:
+            rows = [item for item in container.children if isinstance(item, discord.ui.ActionRow)]
+            if rows and len(rows[-1].children) < 5:
+                rows[-1].add_item(FeedbackButton(bot, english))
+            else:
+                container.add_item(discord.ui.ActionRow(FeedbackButton(bot, english)))
+    return panel
+
+
+def _is_old_presentation(message: discord.Message, bot_user_id: int) -> bool:
+    """Match only older SentriX install panels, not unrelated bot messages."""
+    if getattr(message.author, "id", None) != bot_user_id:
+        return False
+    try:
+        data = "\n".join(str(component.to_dict()) for component in message.components)
+    except (AttributeError, TypeError):
+        return False
+    return (
+        ("Add SentriX" in data or "Ajouter SentriX" in data)
+        and "/setup" in data
     )
 
 
 class SentriXPresentation(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self.feedback_locks: dict[tuple[int, int], asyncio.Lock] = {}
 
     @app_commands.command(
         name="presentation",
-        description="Post a SentriX introduction with an Add SentriX button.",
+        description="Publish or refresh the public SentriX presentation.",
     )
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
-    @app_commands.describe(salon="Text channel to post in (current channel by default)")
+    @app_commands.describe(salon="Channel to publish or refresh the presentation")
     async def presentation(
         self,
         interaction: discord.Interaction,
         salon: discord.TextChannel | None = None,
     ) -> None:
-        if interaction.guild is None:
-            await interaction.response.send_message(
-                "Cette commande fonctionne uniquement dans un serveur.", ephemeral=True,
-            )
-            return
+        from . import language_runtime
 
-        member_permissions = getattr(interaction.user, "guild_permissions", None)
-        if not member_permissions or not member_permissions.manage_guild:
-            await interaction.response.send_message(
-                "Vous devez avoir la permission **Gérer le serveur**.",
+        if interaction.guild is None:
+            return await interaction.response.send_message(
+                "This command requires a server.", ephemeral=True,
+            )
+        english = (
+            await language_runtime.get_language(self.bot, interaction.guild.id)
+            == language_runtime.LANG_EN
+        )
+        permissions = getattr(interaction.user, "guild_permissions", None)
+        if not permissions or not permissions.manage_guild:
+            return await interaction.response.send_message(
+                "Manage Server permission required." if english
+                else "Permission Gérer le serveur requise.",
                 ephemeral=True,
             )
-            return
-
         target = salon or interaction.channel
         if not isinstance(target, discord.TextChannel):
-            await interaction.response.send_message(
-                "Choisissez un salon textuel avec l'option `salon`.",
+            return await interaction.response.send_message(
+                "Select a text channel." if english else "Choisissez un salon textuel.",
                 ephemeral=True,
             )
-            return
-
         bot_member = interaction.guild.me
         if bot_member is None:
-            await interaction.response.send_message(
-                "Impossible de vérifier mes permissions dans ce serveur.",
+            return await interaction.response.send_message(
+                "Cannot verify bot permissions." if english
+                else "Impossible de vérifier les permissions de SentriX.",
                 ephemeral=True,
             )
-            return
-
         bot_permissions = target.permissions_for(bot_member)
         if not (bot_permissions.view_channel and bot_permissions.send_messages):
-            await interaction.response.send_message(
-                "Je n'ai pas la permission d'envoyer des messages dans ce salon.",
+            return await interaction.response.send_message(
+                "SentriX cannot post in this channel." if english
+                else "SentriX ne peut pas publier dans ce salon.",
                 ephemeral=True,
             )
-            return
-
         invite_url = _invite_url(self.bot)
         if not invite_url:
-            await interaction.response.send_message(
-                "L'invitation SentriX est momentanément indisponible.",
+            return await interaction.response.send_message(
+                "Install link unavailable." if english
+                else "Le lien d'installation est indisponible.",
                 ephemeral=True,
             )
-            return
 
         await interaction.response.defer(ephemeral=True, thinking=True)
-        panneau = _presentation(invite_url, with_banner=bot_permissions.attach_files)
+        panel = _presentation(invite_url, english=english, bot=self.bot)
+        existing = None
         try:
-            await panels.envoyer(target, panneau)
-        except discord.Forbidden:
-            await interaction.followup.send(
-                "Publication refusée : vérifiez les permissions de SentriX dans ce salon.",
-                ephemeral=True,
+            tracked = await self.bot.db.fetchone(
+                "SELECT message_id FROM sentrix_presentation_posts "
+                "WHERE guild_id=? AND channel_id=?",
+                (interaction.guild.id, target.id),
             )
-            return
-        except discord.HTTPException:
-            logger.exception("Échec de la publication de /presentation dans %s.", target.id)
-            await interaction.followup.send(
-                "La présentation n'a pas pu être publiée. Réessayez.",
-                ephemeral=True,
-            )
-            return
+            if tracked:
+                message = await target.fetch_message(int(tracked["message_id"]))
+                if message.author.id == self.bot.user.id:
+                    existing = message
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            pass
+        except Exception:
+            logger.exception("Presentation lookup failed")
 
+        # Try to update an older presentation already posted by SentriX.
+        if existing is None and bot_permissions.read_message_history:
+            try:
+                async for message in target.history(limit=75):
+                    if _is_old_presentation(message, self.bot.user.id):
+                        existing = message
+                        break
+            except (discord.Forbidden, discord.HTTPException):
+                pass
+
+        updated = False
+        if existing is not None:
+            try:
+                await existing.edit(view=panel, attachments=[])
+                updated = True
+                sent = existing
+            except (discord.Forbidden, discord.HTTPException):
+                logger.warning("Could not refresh previous presentation")
+        if not updated:
+            try:
+                sent = await panels.envoyer(target, panel)
+            except (discord.Forbidden, discord.HTTPException):
+                logger.exception("Presentation publishing failed in channel %s", target.id)
+                return await interaction.followup.send(
+                    "The presentation could not be published." if english
+                    else "La présentation n'a pas pu être publiée.",
+                    ephemeral=True,
+                )
+        try:
+            await self.bot.db.execute(
+                "INSERT INTO sentrix_presentation_posts (guild_id,channel_id,message_id) "
+                "VALUES (?,?,?) ON CONFLICT(guild_id,channel_id) "
+                "DO UPDATE SET message_id=excluded.message_id",
+                (interaction.guild.id, target.id, sent.id),
+            )
+        except Exception:
+            logger.exception("Failed to persist presentation message ID")
+        outcome = (
+            "Presentation updated" if updated else "Presentation posted"
+        ) if english else (
+            "Présentation mise à jour" if updated else "Présentation publiée"
+        )
         await interaction.followup.send(
-            f"Présentation SentriX publiée dans {target.mention}.",
-            ephemeral=True,
-            allowed_mentions=discord.AllowedMentions.none(),
+            f"{outcome} : {target.mention}.",
+            ephemeral=True, allowed_mentions=discord.AllowedMentions.none(),
         )
 
 
 async def setup(bot: commands.Bot) -> None:
+    from .presentation_feedback import FeedbackPersistentView, ensure_schema
+
+    await ensure_schema(bot)
+    bot.add_view(FeedbackPersistentView(bot))
     await bot.add_cog(SentriXPresentation(bot))
