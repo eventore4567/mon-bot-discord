@@ -31,6 +31,34 @@ _KNOWN_PRIVATE_SETUP_ACK = contextvars.ContextVar(
     "sentrix_known_private_setup_ack", default=False,
 )
 
+async def _prepare_private_setup_interaction(interaction: discord.Interaction) -> bool:
+    """Acquitte en privé ou garantit qu'un followup sera réellement privé.
+
+    discord.py ne permet pas de convertir un defer public en message privé.
+    Le premier followup d'un defer non terminé peut hériter du flag public.
+    Nous supprimons donc l'original inconnu avant de créer le panneau privé.
+
+    Retourne True si le panneau doit partir par interaction.followup.
+    """
+    if not interaction.response.is_done():
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        return False
+    if _KNOWN_PRIVATE_SETUP_ACK.get():
+        return False
+
+    if (
+        interaction.response.type
+        == discord.InteractionResponseType.deferred_channel_message
+    ):
+        try:
+            await interaction.delete_original_response()
+        except discord.NotFound:
+            pass
+        # Toute autre erreur doit interrompre la commande. Il vaut mieux
+        # ne pas ouvrir /setup que risquer d'éditer un message public.
+    return True
+
+
 CATEGORY = "invitations"
 LABEL = "Invitations"
 # On accepte aussi la faute montrée en production : +setup invition.
@@ -440,32 +468,13 @@ def _patch_setup_v74(bot: commands.Bot) -> None:
         )
         private_followup = False
         if isinstance(slash, discord.Interaction):
-            if not slash.response.is_done():
-                # C'est NOUS qui fixons le caractère éphémère, de façon fiable.
-                await slash.response.defer(ephemeral=True, thinking=True)
-            elif not _KNOWN_PRIVATE_SETUP_ACK.get():
-                # D'autres wrappers (/config, intercepteurs, anciennes couches)
-                # peuvent avoir déjà consommé la réponse de départ, en public.
-                # Ne jamais éditer cet original. Si c'est un defer de type
-                # channel_message, le PREMIER followup pourrait réutiliser ce
-                # message et hériter de son flag PUBLIC malgré ephemeral=True.
-                # Le supprimer d'abord garantit un nouveau followup privé.
-                if (
-                    slash.response.type
-                    == discord.InteractionResponseType.deferred_channel_message
-                ):
-                    try:
-                        await slash.delete_original_response()
-                    except discord.NotFound:
-                        # L'original est déjà absent, donc ne peut être réécrit.
-                        pass
-                    except discord.HTTPException:
-                        logger.exception(
-                            "Impossible de supprimer le defer de /setup : "
-                            "aucun panneau potentiellement public ne sera envoyé."
-                        )
-                        return None
-                private_followup = True
+            try:
+                private_followup = await _prepare_private_setup_interaction(slash)
+            except discord.HTTPException:
+                logger.exception(
+                    "Impossible de sécuriser le transport de /setup : panneau non envoyé."
+                )
+                return None
 
         if not await setup_ui._can_setup(self.bot, member, guild):
             if isinstance(slash, discord.Interaction) and private_followup:
