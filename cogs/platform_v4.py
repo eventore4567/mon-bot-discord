@@ -602,6 +602,7 @@ class PlatformV4(commands.Cog):
             )
             if row["embed_title"]:
                 embed = discord.Embed(title=row["embed_title"], description=response, color=int(row["embed_color"] or 8228095))
+                embed.set_footer(text=brand_label())
                 # Envoyer un VRAI embed Discord, pas convertir l'embed
                 # demandé en panneau Components V2 ni créer de second message.
                 await message.channel.send(content=ping, embed=embed, allowed_mentions=mentions)
