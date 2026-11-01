@@ -132,7 +132,9 @@ def test_other_message_and_moderation_logs_keep_their_original_render_path():
 
 def test_ticket_close_short_fields_are_sourced_from_audit_without_fake_values():
     embed = ticket_embed()
-    assert wide_logs.ticket_close_blocks(embed)[0].startswith("**🎫")
+    # Icône SentriX custom si disponible ; aucun emoji Discord Unicode décoratif.
+    assert wide_logs.ticket_close_blocks(embed)[0].startswith("**")
+    assert "Dossier du ticket" in wide_logs.ticket_close_blocks(embed)[0]
     assert "Non renseigné" not in "\n".join(wide_logs.ticket_close_blocks(embed))
     embed2 = discord.Embed(title="Ticket fermé")
     sections = wide_logs.ticket_close_blocks(embed2)

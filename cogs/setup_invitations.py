@@ -49,21 +49,46 @@ async def _prepare_private_setup_interaction(interaction: discord.Interaction) -
         interaction.response.type
         == discord.InteractionResponseType.deferred_channel_message
     ):
-        # Ne jamais supprimer l'original : Discord affichait ensuite
-        # « Le message n'a pas pu être chargé » dans les réponses à /setup.
-        # Aucun rôle, salon, réglage, contenu de panneau n'est publié ici.
-        from . import premium_style_runtime
-        raw_edit = premium_style_runtime._ORIGINALS.get("interaction_edit_original")
-        kwargs = {
-            "content": "Ton panneau de configuration s'ouvre en privé.",
-            "embed": None,
-            "view": None,
-        }
-        if callable(raw_edit) and isinstance(interaction, discord.Interaction):
-            await raw_edit(interaction, **kwargs)
-        else:
-            await interaction.edit_original_response(**kwargs)
+        # Si le defer était déjà privé, le vrai panneau remplace directement
+        # sa réponse initiale : zéro « Ton panneau s'ouvre... » supplémentaire.
+        try:
+            original = await interaction.original_response()
+            if getattr(getattr(original, "flags", None), "ephemeral", False):
+                return False
+        except (discord.HTTPException, AttributeError):
+            pass
+
+        # Une ancienne couche a fait un defer PUBLIC. Le supprimer avant le
+        # followup éphémère ; ne plus laisser de panneau « Information »
+        # dans le salon simplement parce qu'un vieux runtime a ACK en public.
+        try:
+            await interaction.delete_original_response()
+        except (discord.HTTPException, AttributeError):
+            logger.debug("ACK setup public déjà supprimé.", exc_info=True)
     return True
+
+
+def _readonly_setup_view(guild) -> discord.ui.LayoutView:
+    """Un membre peut ouvrir le centre sans recevoir de boutons qui écrivent.
+
+    Ne pas construire SentriXSetupV74 pour les membres ordinaires : plusieurs
+    menus secondaires hérités ne vérifient que l'auteur des clics. Un panneau
+    purement statique est une frontière de permission simple et sûre.
+    """
+    view = discord.ui.LayoutView(timeout=180)
+    container = discord.ui.Container(accent_colour=0x5865F2)
+    container.add_item(discord.ui.TextDisplay(
+        "## SentriX · Centre du serveur\n"
+        f"**{discord.utils.escape_markdown(str(getattr(guild, 'name', 'Serveur')))}**"
+    ))
+    container.add_item(discord.ui.Separator())
+    container.add_item(discord.ui.TextDisplay(
+        "Tu peux consulter ce centre. Les réglages du serveur sont réservés "
+        "aux personnes disposant de **Gérer le serveur** ou **Administrateur**.\n"
+        "-# Aucun réglage n'est modifié."
+    ))
+    view.add_item(container)
+    return view
 
 
 CATEGORY = "invitations"
@@ -476,8 +501,10 @@ def _patch_setup_v74(bot: commands.Bot) -> None:
             if guild is None or member is None:
                 return await target.send("La configuration est disponible uniquement sur un serveur.")
             if not await setup_ui._can_setup(self.bot, member, guild):
-                return await target.send(
-                    "Tu n'as pas la permission d'ouvrir la configuration de ce serveur.",
+                # Accès +setup public pour tous, mais AUCUN contrôle mutable
+                # pour les membres sans droits. Ne pas afficher un gros refus.
+                return await panels.envoyer(
+                    target, _readonly_setup_view(guild), ephemere=False,
                     allowed_mentions=discord.AllowedMentions.none(),
                 )
             view = cls(self.bot, guild, member.id)
@@ -506,14 +533,12 @@ def _patch_setup_v74(bot: commands.Bot) -> None:
                 return None
 
         if not await setup_ui._can_setup(self.bot, member, guild):
-            if isinstance(slash, discord.Interaction) and private_followup:
-                return await slash.followup.send(
-                    "Tu n'as pas la permission d'utiliser /setup.",
-                    ephemeral=True,
-                    allowed_mentions=discord.AllowedMentions.none(),
-                )
-            return await setup_ui._permission_error(
-                slash if isinstance(slash, discord.Interaction) else target
+            readonly = _readonly_setup_view(guild)
+            if private_followup:
+                return await panels.envoyer(slash.followup, readonly, ephemere=True)
+            return await panels.envoyer(
+                slash if isinstance(slash, discord.Interaction) else target,
+                readonly, ephemere=True,
             )
 
         if isinstance(target, commands.Context):

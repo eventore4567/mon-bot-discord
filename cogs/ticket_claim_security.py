@@ -582,7 +582,9 @@ def install(bot: commands.Bot) -> None:
             event_key=event_key,
             identity_name=(owner.display_name if owner else f"Membre {ticket['user_id']}"),
             identity_id=int(ticket["user_id"]),
-            identity_icon=(str(owner.display_avatar.url) if owner else None),
+            # Sans énorme miniature d'avatar : le journal garde seulement
+            # la mention cliquable, le vrai rôle de chacun et la bande fine.
+            identity_icon=None,
         )
 
         dm_enabled = not conf or bool(conf["ticket_transcript_dm"])

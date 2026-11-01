@@ -146,9 +146,8 @@ async def test_slash_setup_ack_private_and_recover_unknown_deferred_without_publ
     fresh.response.defer.assert_awaited_once_with(ephemeral=True, thinking=True)
     fresh.delete_original_response.assert_not_awaited()
 
-    # Régression des captures : un autre chemin avait déjà consommé /setup.
-    # On FINALISE son original public avec un texte neutre sans le supprimer,
-    # puis on envoie un NOUVEAU followup éphémère.
+    # Régression des captures : si une ancienne couche a différé PUBLIQUEMENT,
+    # on retire son message superflu puis on envoie le panneau privé.
     old_defer = SimpleNamespace(
         response=SimpleNamespace(
             is_done=lambda: True,
@@ -158,11 +157,8 @@ async def test_slash_setup_ack_private_and_recover_unknown_deferred_without_publ
         edit_original_response=AsyncMock(),
     )
     assert await _prepare_private_setup_interaction(old_defer) is True
-    old_defer.delete_original_response.assert_not_awaited()
-    old_defer.edit_original_response.assert_awaited_once_with(
-        content="Ton panneau de configuration s'ouvre en privé.",
-        embed=None, view=None,
-    )
+    old_defer.delete_original_response.assert_awaited_once()
+    old_defer.edit_original_response.assert_not_awaited()
 
     private = SimpleNamespace(
         response=SimpleNamespace(

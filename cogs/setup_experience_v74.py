@@ -466,6 +466,8 @@ class SentriXSetupV74(v73.SentriXSetupV73):
              "Règles et actions automatiques"),
             ("language", "Langue du serveur", "settings",
              "Français ou English"),
+            ("import_bot", "Importer depuis un autre bot", "download",
+             "Économie, XP, niveaux, messages, vocal et réputation"),
         )
         options.extend(
             discord.SelectOption(
@@ -483,6 +485,11 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             selected = choice.values[0]
             if selected == "embeds":
                 return await self._open_embed_builder(interaction)
+            if selected == "import_bot":
+                from . import bot_data_import
+                return await bot_data_import.open_import_panel(
+                    self.bot, interaction, self.guild.id,
+                )
             if selected == "language":
                 from .language_official_bridge import OfficialLanguageSelect
                 panneau = discord.ui.LayoutView(timeout=180)

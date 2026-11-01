@@ -1023,6 +1023,20 @@ async def evaluate(bot, *, command_name: Any, author: Any, guild: Any) -> Access
         return _deny("Cette commande doit être utilisée dans un serveur.", "guild-required")
     guild_id = int(guild_id)
 
+    # Setup n'est PAS une commande administrative ouverte au public :
+    # l'ENTRÉE est consultable, mais le rendu pour un membre non staff est
+    # exclusivement statique. Conserver le classement "configuration" dans
+    # la matrice évite un conflit de niveaux et protège chaque mutation.
+    # Le Cog Setup applique _can_setup avant de construire le moindre contrôle
+    # interactif. Cette exception ne s'applique qu'à l'entrée, pas aux autres
+    # commandes de configuration ni aux sous-commandes.
+    if name == "setup":
+        if _is_guild_owner(author, guild):
+            return AccessDecision(True, policy="guild-owner:setup-recovery")
+        if _is_administrator(author) or _has_discord_permission(author, "manage_guild"):
+            return AccessDecision(True, policy="setup:editable-entry")
+        return AccessDecision(True, policy="setup:readonly-entry")
+
     # (4) module désactivé
     module = module_for_command(name)
     if module and not await backend.module_enabled(guild_id, module):

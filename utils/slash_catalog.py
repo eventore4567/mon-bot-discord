@@ -392,7 +392,7 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("role give", "giverole", "Give a role to a member."),
     _e("role remove", "removerole", "Remove a role from a member."),
     _e("role info", "info role", "Show information about a role."),
-    _e("role mass", "massrole", "Add or remove a role for every member."),
+    _e("role mass", "massrole", "Add or remove a role for humans, bots, or both."),
     _e("role menu", "rolepanel dropdown", "Post a self-role dropdown menu."),
     _e("role reactions", "rolepanel reaction", "Post a self-role reaction panel."),
     _e("role refresh", "rolepanel-refresh", "Refresh a role selection panel."),
@@ -979,8 +979,9 @@ OPTION_OVERRIDES: dict[tuple[str, str], str] = {
     ("warn", "member"): "The member to warn.",
     ("warn", "reason"): "Why they are warned. Shown in the logs.",
     ("clear", "count"): "Number of messages to delete, from 2 to 100.",
-    ("role mass", "action"): "Use add for every human member, or remove for every human member.",
-    ("role mass", "role"): "Role to add to or remove from every human member.",
+    ("role mass", "action"): "Choose: add a role, or remove a role.",
+    ("role mass", "role"): "Role to add or remove. Bot must rank above the role.",
+    ("role mass", "target"): "Who: human members, bots, or both. Default: members.",
     ("moderation tempban", "member"): "The member to ban.",
     ("moderation tempban", "duration"): "How long, e.g. 1h, 2d.",
     ("moderation warnings", "member"): "Whose warnings to show.",
@@ -1026,6 +1027,8 @@ def _english_options(command: Any, path: str) -> None:
     for python_name, param in params.items():
         shown = param.display_name
         english = OPTION_NAMES.get(shown, shown)
+        if path == "role mass" and shown == "cible":
+            english = "target"
         if english in used:
             # Deux options ne peuvent pas porter le même nom : on garde l'original
             # plutôt que de publier une commande que Discord refuserait.
@@ -1038,6 +1041,17 @@ def _english_options(command: Any, path: str) -> None:
             changes["_rename"] = english
         if description:
             changes["description"] = description
+        if path == "role mass" and english in {"action", "target"}:
+            # Discord propose un vrai menu de choix au lieu d'obliger
+            # le modérateur à deviner les textes acceptés.
+            from discord import app_commands
+            options = (
+                (("Ajouter", "add"), ("Retirer", "remove"))
+                if english == "action" else
+                (("Membres", "members"), ("Bots", "bots"), ("Les deux", "both"))
+            )
+            changes["choices"] = [app_commands.Choice(name=label, value=value)
+                                  for label, value in options]
         renamed[python_name] = dataclasses.replace(param, **changes) if changes else param
     command._params = renamed
 

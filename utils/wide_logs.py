@@ -19,6 +19,7 @@ import aiosqlite
 import discord
 
 import config
+from utils import sentrix_emojis
 from utils.log_banners import COLORS, get_banner
 from utils.premium_log_banners import BANNER_FILENAME, get_premium_log_banner
 from utils.log_categories import (
@@ -1467,49 +1468,49 @@ def ticket_close_blocks(embed: discord.Embed, language: str = "fr") -> list[str]
     if english:
         blocks = [
             "\n".join((
-                "**🎫  Ticket record**",
+                f"**{sentrix_emojis.titre('ticket', 'Ticket record')}**",
                 f"{ticket} · {salon}",
                 f"**Opened by**  {demandeur}  ·  **Closed by**  {ferme_par}",
             )),
             "\n".join((
-                "**🕒  Times & duration**",
+                f"**{sentrix_emojis.titre('clock', 'Times & duration')}**",
                 f"**Opened:** {ouvert}  ·  **Closed:** {ferme}",
                 f"**Duration:** {duree}",
             )),
         ]
         if unclaimed:
-            blocks.append("**👥  Support team**\nNot claimed")
+            blocks.append(f"**{sentrix_emojis.titre('users', 'Support team')}**\nNot claimed")
         else:
-            team = ["**👥  Support team**", f"**Handler:** {titulaire}"]
+            team = [f"**{sentrix_emojis.titre('users', 'Support team')}**", f"**Handler:** {titulaire}"]
             if equipe not in {"No staff member recorded", "Non renseigné"} and equipe not in titulaire:
                 team.append(f"**Staff involved:** {equipe}")
             if delai not in {"No claim recorded", "Unavailable", "Non renseigné"}:
                 team.append(f"**First claim:** {delai} after opening")
             blocks.append("\n".join(team))
-        blocks.append("**📝  Closing reason**\n" + discord.utils.escape_markdown(motif))
+        blocks.append(f"**{sentrix_emojis.titre('note', 'Closing reason')}**\n" + discord.utils.escape_markdown(motif))
     else:
         blocks = [
             "\n".join((
-                "**🎫  Dossier du ticket**",
+                f"**{sentrix_emojis.titre('ticket', 'Dossier du ticket')}**",
                 f"{ticket} · {salon}",
                 f"**Ouvert par**  {demandeur}  ·  **Fermé par**  {ferme_par}",
             )),
             "\n".join((
-                "**🕒  Horaires & durée**",
+                f"**{sentrix_emojis.titre('clock', 'Horaires & durée')}**",
                 f"**Ouverture :** {ouvert}  ·  **Fermeture :** {ferme}",
                 f"**Durée totale :** {duree}",
             )),
         ]
         if unclaimed:
-            blocks.append("**👥  Équipe de support**\nAucune prise en charge enregistrée")
+            blocks.append(f"**{sentrix_emojis.titre('users', 'Équipe de support')}**\nAucune prise en charge enregistrée")
         else:
-            team = ["**👥  Équipe de support**", f"**Responsable :** {titulaire}"]
+            team = [f"**{sentrix_emojis.titre('users', 'Équipe de support')}**", f"**Responsable :** {titulaire}"]
             if equipe not in {"Aucun membre du staff enregistré", "Non renseigné"} and equipe not in titulaire:
                 team.append(f"**Intervenants :** {equipe}")
             if delai not in {"Aucune prise en charge enregistrée", "Durée indisponible", "Non renseigné"}:
                 team.append(f"**Première prise :** {delai} après l'ouverture")
             blocks.append("\n".join(team))
-        blocks.append("**📝  Motif de fermeture**\n" + discord.utils.escape_markdown(motif))
+        blocks.append(f"**{sentrix_emojis.titre('note', 'Motif de fermeture')}**\n" + discord.utils.escape_markdown(motif))
 
     # Une chronologie ouverture+fermeture ne répète que les identités déjà
     # affichées. Garder les actions vraiment informatives (claim/transfert,
@@ -1524,7 +1525,7 @@ def ticket_close_blocks(embed: discord.Embed, language: str = "fr") -> list[str]
     ]
     if actions:
         blocks.append(
-            ("**🧭  Recent actions**\n" if english else "**🧭  Dernières actions**\n")
+            (f"**{sentrix_emojis.titre('tracking', 'Recent actions')}**\n" if english else f"**{sentrix_emojis.titre('tracking', 'Dernières actions')}**\n")
             + "\n".join(actions[-3:])[:660]
         )
     if reference and reference != "Non renseigné":
@@ -1583,9 +1584,9 @@ def _add_ticket_log_content(
         if filename.startswith("sentrix-ticket-") and filename.endswith("-transcript.txt"):
             container.add_item(_sep())
             container.add_item(discord.ui.TextDisplay(
-                ("**📄  Full transcript**\n-# Ticket messages and actions · open or download the TXT file."
+                (f"**{sentrix_emojis.titre('file', 'Full transcript')}**\n-# Ticket messages and actions · open or download the TXT file."
                  if language == "en" else
-                 "**📄  Transcript complet**\n-# Messages et actions du ticket · fichier TXT à ouvrir ou télécharger.")
+                 f"**{sentrix_emojis.titre('file', 'Transcript complet')}**\n-# Messages et actions du ticket · fichier TXT à ouvrir ou télécharger.")
             ))
             file_cls = getattr(discord.ui, "File", None)
             if file_cls is not None:

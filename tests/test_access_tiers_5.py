@@ -88,7 +88,7 @@ def test_niveau1_membre_peut_utiliser_les_commandes_publiques(command):
     assert ok, f"{command} refuse a un membre : {decision.message}"
 
 
-@pytest.mark.parametrize("command", ["ban", "kick", "clear", "setup", "antinuke",
+@pytest.mark.parametrize("command", ["ban", "kick", "clear", "antinuke",
                                      "wipe-server", "reset-economy", "sync", "bl",
                                      "season start", "sentrixpro lockdown"])
 def test_niveau1_membre_ne_peut_rien_faire_de_sensible(command):
@@ -114,7 +114,7 @@ def test_niveau2_une_permission_manquante_bloque_la_commande_correspondante():
     assert allowed("kick", sans_ban)[0], "kick refuse malgre kick_members"
 
 
-@pytest.mark.parametrize("command", ["setup", "antinuke", "wipe-server", "sync"])
+@pytest.mark.parametrize("command", ["antinuke", "wipe-server", "sync"])
 def test_niveau2_moderateur_ne_touche_pas_a_la_configuration(command):
     assert not allowed(command, MODERATEUR)[0], f"{command} accessible a un moderateur"
 
@@ -258,3 +258,18 @@ def test_le_niveau_est_identique_en_prefixe_et_en_slash():
         commande = FauxCommande(qualified, racine)
         nom = permission_guard.command_root_name(commande)
         assert M.access_tier(nom) == M.access_tier(M.resolve_name(qualified, racine))
+
+
+def test_setup_member_and_moderator_can_only_open_readonly_not_change_server():
+    from cogs import setup_invitations
+    from types import SimpleNamespace
+    import discord
+    # L'autorisation d'invoquer la racine n'ouvre aucun bouton interactif :
+    # tous les changements passent le garde _can_setup, jamais le membre.
+    for persona in (MEMBRE, MODERATEUR):
+        ok, _ = allowed("setup", persona)
+        assert ok
+    readonly = setup_invitations._readonly_setup_view(SimpleNamespace(name="Serveur test"))
+    assert isinstance(readonly, discord.ui.LayoutView)
+    assert not any(isinstance(x, (discord.ui.Button, discord.ui.Select))
+                   for x in readonly.walk_children())
