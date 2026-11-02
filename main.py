@@ -392,10 +392,10 @@ class BotAllInOne(commands.Bot):
         await self.change_presence(activity=discord.CustomActivity(name=text))
         logger.info("Statut Discord actualisé : %s", text)
 
-    @tasks.loop(minutes=2)
+    @tasks.loop(seconds=30)
     async def rotate_usage_presence(self) -> None:
-        """Alterne français/anglais sans nouvelle commande ni statut figé."""
-        self._usage_presence_index = (self._usage_presence_index + 1) % 4
+        """Alterne le statut d'origine entre français et anglais toutes les 30 secondes."""
+        self._usage_presence_index = (self._usage_presence_index + 1) % 2
         try:
             await self.refresh_usage_presence()
         except Exception:
@@ -405,7 +405,7 @@ class BotAllInOne(commands.Bot):
     async def _before_rotate_usage_presence(self) -> None:
         await self.wait_until_ready()
         # on_ready publie déjà le premier statut ; attendre le prochain créneau.
-        await asyncio.sleep(120)
+        await asyncio.sleep(30)
 
     async def close(self) -> None:
         if self.rotate_usage_presence.is_running():
