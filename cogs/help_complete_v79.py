@@ -5,7 +5,7 @@ les commandes préfixées, puis elle affichait séparément un compteur slash. U
 slash sans équivalent + n'apparaissait donc jamais dans les catégories.
 
 V79 construit un catalogue unifié à partir de :
-- toutes les commandes préfixées enregistrées, y compris celles marquées hidden ;
+- les commandes préfixées réellement visibles dans le catalogue (les commandes hidden restent internes) ;
 - toutes les commandes slash chat-input finales, y compris les sous-commandes de groupes.
 
 Les commandes qui existent en + et / sont fusionnées sur une seule fiche. Les commandes
@@ -102,6 +102,16 @@ def _category_from_name(cog_name: str, invocation: str) -> str:
     return "administration"
 
 
+def _prefix_hidden(command: commands.Command) -> bool:
+    """Respecte le masquage d'une commande ou de l'un de ses groupes parents."""
+    current = command
+    while current is not None:
+        if bool(getattr(current, "hidden", False)):
+            return True
+        current = getattr(current, "parent", None)
+    return False
+
+
 def _walk_slash(bot: commands.Bot):
     """Retourne uniquement les commandes chat-input réellement invocables."""
     def walk(node, parent: str = ""):
@@ -120,9 +130,11 @@ def _walk_slash(bot: commands.Bot):
 def _catalog(bot: commands.Bot) -> list[HelpEntry]:
     entries: dict[str, HelpEntry] = {}
 
-    # Ne pas filtrer command.hidden : l'utilisateur a demandé que toutes les commandes
-    # réellement enregistrées restent consultables, y compris les commandes admin/owner.
+    # Le catalogue final respecte la politique command_catalog_cleanup : une commande
+    # hidden reste disponible techniquement mais ne doit pas réapparaître dans /help.
     for command in bot.walk_commands():
+        if _prefix_hidden(command):
+            continue
         name = command.qualified_name.strip()
         key = _normalise(name)
         if not key:
