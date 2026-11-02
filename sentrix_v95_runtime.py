@@ -34,6 +34,19 @@ logger = logging.getLogger("bot.v95")
 
 DIRECT_ROOTS = frozenset({"help", "setup", "ping", "sentrix"})
 EXCLUDED_COMMANDS = frozenset({"logsdiag"})
+PRIVATE_SLASH_ACTIONS = frozenset({
+    "ban", "tempban", "unban", "kick", "mute", "unmute", "warn", "unwarn",
+    "clear", "clearwarnings", "slowmode", "lock", "unlock", "hide", "show",
+    "nickname", "resetnick", "move", "disconnect",
+    "giverole", "removerole", "massrole",
+})
+
+
+def _private_slash_response(command: commands.Command) -> bool:
+    qualified = str(getattr(command, "qualified_name", "") or "").casefold().strip()
+    root = qualified.split(" ", 1)[0]
+    name = str(getattr(command, "name", "") or "").casefold().strip()
+    return qualified in PRIVATE_SLASH_ACTIONS or root in PRIVATE_SLASH_ACTIONS or name in PRIVATE_SLASH_ACTIONS
 MAX_ROOT_COMMANDS = 100
 MAX_CHILDREN = 25
 MAX_OPTIONS = 25
@@ -374,7 +387,10 @@ async def _invoke_original(
     kwargs: dict,
 ) -> None:
     if not interaction.response.is_done():
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(
+            thinking=True,
+            ephemeral=_private_slash_response(command),
+        )
 
     ctx = await commands.Context.from_interaction(interaction)
     # Conserver le Context personnalisé de SentriX lorsque Bot.get_context l'utilise.
