@@ -746,7 +746,7 @@ def install(bot: commands.Bot) -> None:
 
     bot._sentrix_help_complete_v79 = True
     logger.info(
-        "%s installé : +help et /help listent désormais toutes les commandes + et /, y compris slash-only.",
+        "%s installé : +help et /help listent la surface utile/visible, y compris les slash-only publics.",
         RUNTIME_MARKER,
     )
 
