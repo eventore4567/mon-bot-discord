@@ -68,3 +68,13 @@ def test_collision_suffix_is_readable() -> None:
 def test_me_and_profile_are_not_public_direct_slash_commands() -> None:
     assert "profile" not in surface.STANDARD_DIRECT_SLASH
     assert "me" not in surface.STANDARD_DIRECT_SLASH.values()
+
+
+def test_grouped_surface_merges_into_existing_groups_instead_of_replacing_them():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "sentrix_command_surface_v110.py").read_text(encoding="utf-8")
+    assert "existing_root = tree.get_command" in source
+    assert "isinstance(existing_root, app_commands.Group)" in source
+    assert "root.add_command(slash, override=True)" in source
+    assert "if group.name in created_groups" in source
