@@ -12,6 +12,7 @@ import unittest
 from cogs.command_catalog_cleanup import (
     ADMIN_DIRECT_COMMANDS,
     HELP_VISIBLE_EXTRA_COMMANDS,
+    LOW_VALUE_HIDDEN_COMMANDS,
     NORMAL_DIRECT_COMMANDS,
 )
 
@@ -36,6 +37,8 @@ class HelpVisibilityBatchTests(unittest.TestCase):
         self.assertNotIn("set-bio", HELP_VISIBLE_EXTRA_COMMANDS)
         self.assertNotIn("economy", HELP_VISIBLE_EXTRA_COMMANDS)
         self.assertNotIn("logs", HELP_VISIBLE_EXTRA_COMMANDS)
+        self.assertNotIn("setmodrole", NORMAL_DIRECT_COMMANDS)
+        self.assertIn("setmodrole", LOW_VALUE_HIDDEN_COMMANDS)
 
     def test_aucune_de_ces_commandes_ne_consomme_le_budget_slash(self):
         """Non-régression : ce lot d'orphelines reste +help uniquement.
