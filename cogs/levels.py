@@ -291,7 +291,7 @@ class StatsEconomyModal(discord.ui.Modal, title="Économie et réputation"):
     def __init__(self, view: "StatsConfigView"):
         super().__init__()
         self.view_ref = view
-        self.emoji = discord.ui.TextInput(label="Emoji de l'économie (ex: 🪙, 💵, 🥇)", default=view.pending.get("economy_emoji", "🪙"), max_length=10)
+        self.emoji = discord.ui.TextInput(label="Emoji de l'économie (ex: 🪙, 💵, 🥇)", default=view.pending.get("economy_emoji", "🪙"), max_length=64)
         self.rep_cooldown = discord.ui.TextInput(
             label="Cooldown de réputation (en heures)",
             default=str(view.pending.get("reputation_cooldown", 86400) // 3600),
@@ -568,6 +568,16 @@ class StatsConfigView(discord.ui.View):
         for field in ("xp_min", "xp_max", "xp_cooldown"):
             to_save.pop(field, None)
         await self.cog.bot.db.set_stats_settings(self.guild.id, to_save)
+        if self.category == "economy" and "economy_emoji" in to_save:
+            # L'écran Niveaux/Profils pouvait modifier un autre emoji que la
+            # boutique et le classement. Re-synchroniser leur source unique.
+            from cogs import setup_v2_core as currency
+            current = await currency.economy_settings(self.cog.bot, self.guild.id)
+            await currency.set_currency(
+                self.cog.bot, self.guild.id,
+                current["currency_singular"], current["currency_plural"],
+                str(to_save["economy_emoji"]), actor_id=interaction.user.id,
+            )
         embed = self.build_summary_embed()
         embed.set_footer(text="● Enregistré — ces réglages sont actifs immédiatement et resteront après un redémarrage.")
         await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(embed), self))
