@@ -24,6 +24,7 @@ from discord.ext import commands
 
 from utils import embeds
 from utils import sentrix_panels as panels
+from utils.log_banners import nom_fichier
 from utils.command_permissions import (
     ADMIN_COGS,
     COMMAND_PERMISSION_FALLBACKS,
@@ -41,6 +42,7 @@ logger = logging.getLogger("bot.help-complete-v79")
 RUNTIME_MARKER = "Help Complete Catalog V79"
 HOME_PAGE_SIZE = 6
 LIST_PAGE_SIZE = 6
+HELP_BANNER_FAMILY = "config"
 
 
 @dataclass
@@ -357,6 +359,20 @@ class SentriXHelpV79(discord.ui.LayoutView):
         self.return_index = 0
         self.return_query: str | None = None
 
+    def fichiers(self) -> list[discord.File]:
+        """Bannière transparente ultra-fine, identique au moteur des logs."""
+        if self.mode == "closed":
+            return []
+        fichier = panels.fichier_de_famille(HELP_BANNER_FAMILY)
+        return [fichier] if fichier is not None else []
+
+    def _container(self) -> discord.ui.Container:
+        container = self._container()
+        galerie = discord.ui.MediaGallery()
+        galerie.add_item(media=f"attachment://{nom_fichier(HELP_BANNER_FAMILY)}")
+        container.add_item(galerie)
+        return container
+
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if int(interaction.user.id) == self.author_id:
             return True
@@ -424,7 +440,7 @@ class SentriXHelpV79(discord.ui.LayoutView):
 
     async def _edit(self, interaction: discord.Interaction) -> None:
         self.rebuild()
-        await interaction.edit_original_response(content=None, embed=None, attachments=[], view=self)
+        await panels.editer(interaction, self)
 
     def rebuild(self) -> None:
         self.clear_items()
@@ -455,7 +471,7 @@ class SentriXHelpV79(discord.ui.LayoutView):
         start = self.home_index * HOME_PAGE_SIZE
         page_keys = keys[start:start + HOME_PAGE_SIZE]
 
-        container = discord.ui.Container(accent_colour=setup_v73.ACCENT)
+        container = self._container()
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -540,7 +556,7 @@ class SentriXHelpV79(discord.ui.LayoutView):
         pages = _chunks(self.rows)
         self.index = min(max(self.index, 0), len(pages) - 1)
         chunk = pages[self.index]
-        container = discord.ui.Container(accent_colour=setup_v73.ACCENT)
+        container = self._container()
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -621,7 +637,7 @@ class SentriXHelpV79(discord.ui.LayoutView):
         if prefix_usage:
             usage_lines.append(f"`{prefix_usage}`")
 
-        container = discord.ui.Container(accent_colour=setup_v73.ACCENT)
+        container = self._container()
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(f"# {_title(entry, self.prefix)}\n{_description(entry)}"),
@@ -692,10 +708,10 @@ async def _send_help_v79(self, target, query: str | None = None):
     await view.prepare()
 
     if isinstance(target, commands.Context):
-        return await target.send(content=None, embed=None, view=view)
+        return await panels.envoyer(target, view)
     if target.response.is_done():
-        return await target.followup.send(content=None, embed=None, view=view)
-    return await target.response.send_message(content=None, embed=None, view=view)
+        return await panels.envoyer(target.followup, view)
+    return await panels.envoyer(target.response, view)
 
 
 def install(bot: commands.Bot) -> None:
