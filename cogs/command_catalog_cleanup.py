@@ -38,7 +38,7 @@ NORMAL_DIRECT_COMMANDS = frozenset({
     "security", "antiraid", "antinuke", "panic", "syncbl",
     "sentrix", "image", "ai-translate", "chat-reset",
     "balance", "daily", "work", "pay", "inventory", "banque",
-    "economyleaderboard", "leaderboard-money",
+    "economyleaderboard",
     "level", "stats", "set-xp", "add-xp", "set-level-role", "remove-level-role",
     "reset-levels",
     "ticket", "giveaway", "giveaway-reroll",
@@ -84,12 +84,13 @@ PROOF_VISIBLE_COMMANDS = frozenset({
 
 PURE_DUPLICATE_COMMANDS = frozenset({
     "rank", "buyrole", "ask", "chat", "embed-create", "latency", "levelroles",
+    "economy", "leaderboard-money",
     # raccourci texte de +info role (/serverinfo est, lui, une racine slash canonique V110)
     "roleinfo",
 })
 
 SETUP_MERGED_COMMANDS = frozenset({
-    "config-view", "config-reset", "create-logs", "logsetup", "logs-status",
+    "config-view", "config-reset", "create-logs", "logs-status",
     "designsetup", "welcome-config", "shopsetup", "aisetup",
     "setwelcomechannel", "setwelcomemessage", "setgoodbyechannel",
     "setgoodbyemessage", "setlogchannel", "setticketlogchannel", "setwarnrole",
@@ -154,13 +155,14 @@ HELP_VISIBLE_EXTRA_COMMANDS = frozenset({
     # Logs/notifications/serveur : seules commandes réelles pour ces réglages,
     # jamais fusionnées dans /setup contrairement à leurs voisines (logsetup,
     # create-logs, automod-status...).
+    "logsetup",
     "notifs-ping", "notifs-list", "notifs-remove",
-    "logs", "logevent", "logsearch",
+    "logevent", "logsearch",
     "server-audit", "server-health", "server-growth", "server-managed",
     # Économie/niveaux : commandes membres et admin de base, masquées par accident
     # (buy/sell/gamble sans leur propre commande "shop"/"economy" visible, weekly
     # traité différemment de daily/work sans raison documentée).
-    "economy", "rob", "buy", "sell", "gamble", "deposit", "withdraw",
+    "rob", "buy", "sell", "gamble", "deposit", "withdraw",
     "give-money", "reset-economy", "shoppanel", "shoprole", "shop", "weekly",
     "set-bio", "rep", "reputation", "repleaderboard", "rephistory",
     "voice-time", "level-roles",
