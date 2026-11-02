@@ -347,7 +347,9 @@ async def _massrole_all_members(
             progress_line = f"**{processed_now:,}** membres traités"
             progress_bar = "▱" * 10
 
+        action_label = "Ajout" if mode == "add" else "Retrait"
         details = [
+            f"**{action_label}** de {role.mention} sur tous les membres du serveur.",
             progress_line.replace(",", " "),
             f"`{progress_bar}`",
             (
