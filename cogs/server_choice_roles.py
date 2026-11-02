@@ -317,6 +317,7 @@ async def _massrole_all_members(
     batch_size = 15
     last_progress_edit = 0.0
     last_reported = 0
+    handled_member_ids: set[int] = set()
 
     total_members = int(guild.member_count or 0)
     started_at = time.monotonic()
@@ -406,6 +407,7 @@ async def _massrole_all_members(
                 continue
             await __import__("asyncio").gather(*(apply(member) for member in batch))
             processed += len(batch)
+            handled_member_ids.update(member.id for member in batch)
             batch = []
             now_mono = time.monotonic()
             if processed - last_reported >= 250 and now_mono - last_progress_edit >= 2.0:
@@ -421,15 +423,29 @@ async def _massrole_all_members(
         if batch:
             await __import__("asyncio").gather(*(apply(member) for member in batch))
             processed += len(batch)
+            handled_member_ids.update(member.id for member in batch)
     except (discord.Forbidden, discord.HTTPException):
         # Si Discord refuse l'énumération REST, le cache local est utilisé plutôt que
         # d'abandonner entièrement l'opération. Le résultat indique alors ce qui a été
         # réellement traité, sans inventer de succès.
-        remaining = [member for member in guild.members if member not in batch]
+        # Conserver le lot REST en attente, puis compléter avec le cache sans
+        # retraiter les membres déjà terminés. L'ancien fallback pouvait doubler les
+        # compteurs ou perdre le dernier lot partiel.
+        remaining: list[discord.Member] = []
+        pending_ids: set[int] = set()
+        for member in [*batch, *guild.members]:
+            if member.id in handled_member_ids or member.id in pending_ids:
+                continue
+            pending_ids.add(member.id)
+            remaining.append(member)
+        if not total_members:
+            total_members = processed + len(remaining)
+
         for offset in range(0, len(remaining), batch_size):
             current = remaining[offset:offset + batch_size]
             await __import__("asyncio").gather(*(apply(member) for member in current))
             processed += len(current)
+            handled_member_ids.update(member.id for member in current)
             now_mono = time.monotonic()
             if processed - last_reported >= 250 and now_mono - last_progress_edit >= 2.0:
                 try:
