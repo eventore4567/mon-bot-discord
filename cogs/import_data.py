@@ -14,8 +14,8 @@ from . import language_runtime
 from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.import-data")
-MAX_UPLOAD_SIZE = 1024 * 1024
-MAX_USERS = 5000
+MAX_UPLOAD_SIZE = 16 * 1024 * 1024
+MAX_USERS = 50000
 # UnbelievaBoat peut avoir des soldes bien au-dessus de 10**12.
 # SQLite utilise des INTEGER signés 64 bits. Garder 4e18 par portefeuille
 # et par banque garantit que (cash + bank) reste dans cet espace.
@@ -39,7 +39,7 @@ class BalanceOverflowError(ValueError):
 
 def _currency_divisor(maximum: int) -> int:
     factor = 1
-    while maximum // factor > MAX_CURRENCY_VALUE:
+    while abs(maximum) // factor > MAX_CURRENCY_VALUE:
         factor *= 10
     return factor
 
@@ -51,7 +51,7 @@ def parse_export(raw: bytes, *, scale_currency: bool = False) -> list[dict]:
     values require an explicit UI opt-in; never auto-truncate or silently cap.
     """
     if len(raw) > MAX_UPLOAD_SIZE:
-        raise ValueError("File exceeds the 1 MB limit.")
+        raise ValueError("Le fichier dépasse 16 Mo.")
     try:
         payload = json.loads(raw.decode("utf-8-sig"))
     except (UnicodeError, json.JSONDecodeError, ValueError) as exc:
@@ -60,7 +60,7 @@ def parse_export(raw: bytes, *, scale_currency: bool = False) -> list[dict]:
         raise ValueError('Expected a JSON object with a "users" array.')
     rows = payload["users"]
     if not 1 <= len(rows) <= MAX_USERS:
-        raise ValueError("The export must contain between 1 and 5000 users.")
+        raise ValueError("Le fichier doit contenir entre 1 et 50 000 membres.")
     seen = set()
     cleaned = []
     maximum_money = 0
@@ -81,13 +81,16 @@ def parse_export(raw: bytes, *, scale_currency: bool = False) -> list[dict]:
             value = row[key]
             if isinstance(value, bool) or not isinstance(value, int):
                 raise ValueError(f"{key} must be an integer (user {user_id}).")
-            if value < 0 or (key == "level" and value > 100000) or (
-                key == "xp" and value > MAX_XP_VALUE
+            if (key == "level" and not 0 <= value <= 100000) or (
+                key == "xp" and not 0 <= value <= MAX_XP_VALUE
             ):
                 raise ValueError(f"{key} is outside the allowed range (user {user_id}).")
+            # UnbelievaBoat peut exporter des soldes négatifs (dettes) :
+            # ils sont légitimes pour une économie à entiers SIGNÉS.
+            # Toute valeur cash/bank est valide si elle tient en SQLite / BIGINT.
             values[key] = value
             if key in ("cash", "bank"):
-                maximum_money = max(maximum_money, value)
+                maximum_money = max(maximum_money, abs(value))
         if len(values) == 1:
             raise ValueError(f"User {user_id} has no supported data.")
         cleaned.append(values)
@@ -99,7 +102,10 @@ def parse_export(raw: bytes, *, scale_currency: bool = False) -> list[dict]:
         for row in cleaned:
             for field in ("cash", "bank"):
                 if field in row:
-                    row[field] //= factor
+                    value = row[field]
+                    # Vers zéro plutôt que //, qui arrondit une dette
+                    # négative dans le mauvais sens.
+                    row[field] = (1 if value >= 0 else -1) * (abs(value) // factor)
     return cleaned
 
 
@@ -274,7 +280,7 @@ async def preview_attachment(bot, guild_id: int, author_id: int, attachment: dis
     """Shared preview path for +import-data and the /setup upload modal."""
     if (not str(attachment.filename).lower().endswith(".json")
             or attachment.size > MAX_UPLOAD_SIZE):
-        raise ValueError("Le fichier doit être un JSON de 1 Mo maximum.")
+        raise ValueError("Le fichier doit être un JSON de 16 Mo maximum.")
     try:
         raw = await attachment.read()
     except (discord.HTTPException, OSError) as exc:
@@ -345,7 +351,7 @@ class ImportFileModal(discord.ui.Modal):
         self.upload = discord.ui.FileUpload(required=True, min_values=1, max_values=1)
         self.add_item(discord.ui.Label(
             text="JSON export" if english else "Fichier d'export JSON",
-            description="One file · max 1 MB" if english else "Un fichier · 1 Mo maximum",
+            description="One file · max 16 MB" if english else "Un fichier · 16 Mo maximum",
             component=self.upload,
         ))
 
