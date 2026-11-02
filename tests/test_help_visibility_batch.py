@@ -24,9 +24,7 @@ class HelpVisibilityBatchTests(unittest.TestCase):
             "ticketsetup", "logsetup",
             "notifs-ping", "notifs-list", "notifs-remove",
             "logevent", "logsearch",
-            "server-audit", "server-health", "server-growth", "server-managed",
             "rob", "buy", "sell", "gamble", "deposit", "withdraw",
-            "give-money", "reset-economy", "shoppanel", "shoprole",
             "rep", "reputation", "repleaderboard", "rephistory",
             "voice-time", "level-roles",
             "addemoji", "deleteemoji", "emoji-list",
@@ -38,6 +36,11 @@ class HelpVisibilityBatchTests(unittest.TestCase):
         self.assertNotIn("set-bio", HELP_VISIBLE_EXTRA_COMMANDS)
         self.assertNotIn("economy", HELP_VISIBLE_EXTRA_COMMANDS)
         self.assertNotIn("logs", HELP_VISIBLE_EXTRA_COMMANDS)
+        for name in (
+            "server-audit", "server-health", "server-growth", "server-managed",
+            "give-money", "reset-economy", "shoppanel", "shoprole",
+        ):
+            self.assertNotIn(name, HELP_VISIBLE_EXTRA_COMMANDS)
         self.assertNotIn("setmodrole", NORMAL_DIRECT_COMMANDS)
         self.assertIn("setmodrole", LOW_VALUE_HIDDEN_COMMANDS)
 
