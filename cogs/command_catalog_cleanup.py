@@ -159,11 +159,11 @@ HELP_VISIBLE_EXTRA_COMMANDS = frozenset({
     "notifs-ping", "notifs-list", "notifs-remove",
     "logevent", "logsearch",
     "server-audit", "server-health", "server-growth", "server-managed",
-    # Économie/niveaux : commandes membres et admin de base, masquées par accident
-    # (buy/sell/gamble sans leur propre commande "shop"/"economy" visible, weekly
-    # traité différemment de daily/work sans raison documentée).
+    # Économie/niveaux : commandes membres et admin utiles qui n'ont pas déjà une
+    # porte d'entrée claire dans la surface courte. +shop/+weekly restent volontairement
+    # masquées ici : elles sont accessibles sous /economy sans encombrer +help.
     "rob", "buy", "sell", "gamble", "deposit", "withdraw",
-    "give-money", "reset-economy", "shoppanel", "shoprole", "shop", "weekly",
+    "give-money", "reset-economy", "shoppanel", "shoprole",
     "rep", "reputation", "repleaderboard", "rephistory",
     "voice-time", "level-roles",
     # Émojis : aucun chemin de découverte sans les connaître déjà par cœur.
