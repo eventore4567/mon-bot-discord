@@ -784,9 +784,13 @@ class CurrencyModal(discord.ui.Modal, title="Nom de la monnaie"):
     plural = discord.ui.TextInput(label="Pluriel", placeholder="Coins", max_length=32)
     symbol = discord.ui.TextInput(label="Symbole / emoji", placeholder="🪙 ou <:piece:123…>", max_length=64)
 
-    def __init__(self, owner):
+    def __init__(self, owner, settings=None):
         super().__init__()
         self.owner = owner
+        settings = settings or {}
+        self.singular.default = settings.get("currency_singular", "Pièce")
+        self.plural.default = settings.get("currency_plural", "Pièces")
+        self.symbol.default = settings.get("currency_symbol", "🪙")
 
     async def on_submit(self, interaction):
         await core.set_currency(
@@ -820,9 +824,14 @@ class EconomyManageView(discord.ui.View):
         await core.set_module_enabled(self.bot, self.guild.id, "economy", not current, actor_id=interaction.user.id)
         await panels.envoyer(interaction.response, panels.depuis_embed(embeds.success(f"Économie {('activée' if not current else 'désactivée')}. Les soldes sont conservés.")), ephemere=True)
 
-    @discord.ui.button(label="Changer le nom de l’argent", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(label="Nom et emoji de la monnaie", style=discord.ButtonStyle.secondary, row=0)
     async def currency(self, interaction, _button):
-        await interaction.response.send_modal(CurrencyModal(self.setup_view))
+        settings = await core.economy_settings(self.bot, self.guild.id)
+        await interaction.response.send_modal(CurrencyModal(self.setup_view, settings))
+
+    @discord.ui.button(label="Importer un emoji", style=discord.ButtonStyle.secondary, row=1)
+    async def upload_currency(self, interaction, _button):
+        await interaction.response.send_modal(CurrencyEmojiUploadModal(self))
 
 
 class LevelRewardModal(discord.ui.Modal, title="Récompense de niveau"):
