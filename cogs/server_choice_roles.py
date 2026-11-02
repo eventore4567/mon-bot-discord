@@ -10,6 +10,7 @@ le rôle choisi à tous les membres humains ; ``+massrole del @Role`` le retire 
 from __future__ import annotations
 
 import logging
+import time
 
 import discord
 from discord.ext import commands
@@ -308,25 +309,66 @@ async def _massrole_all_members(
             panels.depuis_embed(discord.Embed(title="Massrole — impossible", description=problem)),
         )
 
-    progress = await panels.envoyer(
-        ctx,
-        panels.depuis_embed(
-            discord.Embed(
-                title="Massrole — traitement en cours",
-                description=(
-                    f"{'Ajout' if mode == 'add' else 'Retrait'} de {role.mention} sur tous les membres du serveur. "
-                    "SentriX traite les membres par lots pour respecter les limites Discord."
-                ),
-            )
-        ),
-    )
-
     added_or_removed = 0
     failed = 0
     skipped = 0
     protected = 0
     processed = 0
     batch_size = 15
+    last_progress_edit = 0.0
+    last_reported = 0
+
+    total_members = int(guild.member_count or 0)
+    started_at = time.monotonic()
+
+    def _duration(seconds: float) -> str:
+        seconds = max(0, int(round(seconds)))
+        minutes, sec = divmod(seconds, 60)
+        hours, minutes = divmod(minutes, 60)
+        if hours:
+            return f"{hours} h {minutes:02d} min"
+        if minutes:
+            return f"{minutes} min {sec:02d} s"
+        return f"{sec} s"
+
+    def _progress_embed(*, processed_now: int, done: bool = False) -> discord.Embed:
+        elapsed = max(time.monotonic() - started_at, 0.001)
+        rate = processed_now / elapsed if processed_now else 0.0
+        remaining = max(total_members - processed_now, 0) if total_members else 0
+        eta = (remaining / rate) if rate > 0 and total_members else None
+        percent = min(100.0, (processed_now / total_members * 100.0)) if total_members else 0.0
+
+        if total_members:
+            progress_line = f"**{processed_now:,}/{total_members:,}** membres traités (**{percent:.0f} %**)"
+        else:
+            progress_line = f"**{processed_now:,}** membres traités"
+
+        details = [
+            progress_line.replace(",", " "),
+            (
+                f"**{added_or_removed:,}** modifié(s) • **{skipped:,}** ignoré(s) • "
+                f"**{failed:,}** échec(s)"
+            ).replace(",", " "),
+            f"Temps écoulé : **{_duration(elapsed)}**",
+        ]
+        if rate > 0:
+            details.append(f"Vitesse moyenne : **{rate:.1f} membre(s)/s**")
+        if not done:
+            if eta is not None:
+                details.append(f"Fin estimée dans : **~{_duration(eta)}**")
+            else:
+                details.append("Fin estimée : **calcul en cours…**")
+
+        return discord.Embed(
+            title="Massrole terminé" if done else "Massrole — traitement en cours",
+            description="\n".join(details),
+        )
+
+    progress = await panels.envoyer(
+        ctx,
+        panels.depuis_embed(_progress_embed(processed_now=0)),
+    )
+
 
     async def apply(member: discord.Member) -> None:
         nonlocal added_or_removed, failed, skipped, protected
@@ -364,17 +406,15 @@ async def _massrole_all_members(
             await __import__("asyncio").gather(*(apply(member) for member in batch))
             processed += len(batch)
             batch = []
-            if processed % 2000 == 0:
+            now_mono = time.monotonic()
+            if processed - last_reported >= 250 and now_mono - last_progress_edit >= 2.0:
                 try:
                     await panels.editer(
                         progress,
-                        panels.depuis_embed(
-                            discord.Embed(
-                                title="Massrole — progression",
-                                description=f"**{processed}/{guild.member_count or '?'}** membres traités • **{added_or_removed}** modification(s) appliquée(s).",
-                            )
-                        ),
+                        panels.depuis_embed(_progress_embed(processed_now=processed)),
                     )
+                    last_progress_edit = now_mono
+                    last_reported = processed
                 except discord.HTTPException:
                     pass
         if batch:
@@ -391,20 +431,21 @@ async def _massrole_all_members(
             processed += len(current)
 
     verb = "ajouté" if mode == "add" else "retiré"
-    result = discord.Embed(
-        title="Massrole terminé",
-        description=f"Rôle {role.mention} **{verb}** pour **{added_or_removed}** membre(s).",
-    )
-    result.add_field(name="Traités", value=str(processed), inline=True)
-    result.add_field(name="Ignorés", value=str(skipped), inline=True)
-    result.add_field(name="Échecs", value=str(failed), inline=True)
+    result = _progress_embed(processed_now=processed, done=True)
+    result.description = (
+        f"Rôle {role.mention} **{verb}** pour **{added_or_removed:,}** membre(s).\n\n"
+        + (result.description or "")
+    ).replace(",", " ")
     if protected:
         result.add_field(
             name="Protégés",
             value=f"{protected} compte(s) propriétaire(s) SentriX conservé(s) intact(s).",
             inline=False,
         )
-    await panels.envoyer(ctx, panels.depuis_embed(result))
+    try:
+        await panels.editer(progress, panels.depuis_embed(result))
+    except discord.HTTPException:
+        await panels.envoyer(ctx, panels.depuis_embed(result))
 
 
 def _install_massrole_global(bot: commands.Bot) -> None:
