@@ -70,18 +70,8 @@ STANDARD_DIRECT_SLASH: dict[str, str] = {
     "set-xp": "setxp",
     "add-xp": "addxp",
 
-    # Économie — garder les noms évidents, sans préfixe /economy inutile.
+    # Économie — /balance reste direct ; le reste est regroupé sous /economy.
     "balance": "balance",
-    "daily": "daily",
-    "weekly": "weekly",
-    "work": "work",
-    "rob": "rob",
-    "pay": "pay",
-    "shop": "shop",
-    "inventory": "inventory",
-    "gamble": "gamble",
-    "deposit": "deposit",
-    "withdraw": "withdraw",
 
     # Musique — /play reste direct. Les contrôles secondaires sont regroupés
     # sous /music pour éviter onze racines slash séparées.
@@ -108,6 +98,18 @@ STANDARD_GROUPED_SLASH: dict[str, tuple[str, str]] = {
     "music join": ("music", "join"),
     "music leave": ("music", "leave"),
     "music seek": ("music", "seek"),
+
+    # Économie : une seule racine /economy pour les actions membres courantes.
+    "daily": ("economy", "daily"),
+    "weekly": ("economy", "weekly"),
+    "work": ("economy", "work"),
+    "rob": ("economy", "rob"),
+    "pay": ("economy", "pay"),
+    "shop": ("economy", "shop"),
+    "inventory": ("economy", "inventory"),
+    "gamble": ("economy", "gamble"),
+    "deposit": ("economy", "deposit"),
+    "withdraw": ("economy", "withdraw"),
 }
 
 # /play est fourni par la commande top-level `play`, qui appelle déjà le même moteur que
@@ -280,6 +282,8 @@ def _install_standard_slash_surface(bot) -> tuple[int, list[str]]:
                         if root_name == "role"
                         else "Lecture audio, file d'attente et contrôles musique."
                         if root_name == "music"
+                        else "Solde, récompenses, banque, boutique et économie."
+                        if root_name == "economy"
                         else f"Commandes {root_name} de SentriX."
                     )[:100],
                 )
