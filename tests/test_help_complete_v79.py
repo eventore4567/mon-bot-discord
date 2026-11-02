@@ -39,6 +39,15 @@ def test_v79_catalog_includes_leaf_slash_commands_and_subcommands():
     assert "entry.slash_command = slash_command" in source
 
 
+def test_v79_uses_runtime_slash_mapping_to_merge_grouped_paths():
+    source = _source(V79)
+
+    assert "_sentrix_v95_slash_mapping" in source
+    assert "_sentrix_v110_direct_mapping" in source
+    assert 'slash_mapping.get(f"/{slash_name}", {})' in source
+    assert 'mapping.get("original")' in source
+
+
 def test_v79_merges_matching_prefix_and_slash_invocations():
     source = _source(V79)
 
