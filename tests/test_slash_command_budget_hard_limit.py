@@ -24,7 +24,8 @@ quand même. Le budget doit absorber ce refus au lieu de le laisser remonter.
 from __future__ import annotations
 
 import os
-from unittest.mock import Mock
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 os.environ.setdefault("DISCORD_TOKEN", "x")
 
@@ -66,6 +67,33 @@ def test_une_racine_refusee_par_discord_py_est_absorbee_pas_propagee():
     result = bot.tree.add_command(_fake_command("embed"))
     assert result is None
     assert "embed" in bot._sentrix_skipped_global_slash
+
+
+def test_finalize_reduit_la_surface_publique_a_85_racines():
+    class Tree:
+        def __init__(self):
+            self.items = [SimpleNamespace(name=f"root-{index}") for index in range(90)]
+
+        def get_commands(self, **_kwargs):
+            return list(self.items)
+
+        def remove_command(self, name, **_kwargs):
+            self.items = [item for item in self.items if item.name != name]
+
+    tree = Tree()
+    bot = SimpleNamespace(tree=tree)
+    required = {f"root-{index}" for index in range(10)}
+    preferred = required | {f"root-{index}" for index in range(10, 30)}
+
+    with (
+        patch.object(slash_command_budget, "_required_names", return_value=required),
+        patch.object(slash_command_budget, "_preferred_names", return_value=preferred),
+        patch.object(slash_command_budget, "_excluded_names", return_value=set()),
+    ):
+        slash_command_budget.finalize(bot)
+
+    assert len(tree.items) == slash_command_budget.PUBLIC_CHAT_INPUT_TARGET
+    assert required <= {item.name for item in tree.items}
 
 
 def test_les_ajouts_normaux_continuent_de_fonctionner():
