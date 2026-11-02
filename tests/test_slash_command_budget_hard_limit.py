@@ -69,7 +69,7 @@ def test_une_racine_refusee_par_discord_py_est_absorbee_pas_propagee():
     assert "embed" in bot._sentrix_skipped_global_slash
 
 
-def test_finalize_reduit_la_surface_publique_a_85_racines():
+def test_finalize_reduit_la_surface_publique_a_la_cible_produit():
     class Tree:
         def __init__(self):
             self.items = [SimpleNamespace(name=f"root-{index}") for index in range(90)]
@@ -118,3 +118,10 @@ if __name__ == "__main__":
     import unittest
 
     unittest.main()
+
+
+def test_owner_et_more_ne_sont_plus_des_racines_slash_publiques():
+    assert "owner" in slash_command_budget.LOW_VALUE_LEGACY_ROOTS
+    assert "more" in slash_command_budget.LOW_VALUE_LEGACY_ROOTS
+    assert "owner" not in slash_command_budget._canonical_group_root_names()
+    assert "more" not in slash_command_budget._canonical_group_root_names()
