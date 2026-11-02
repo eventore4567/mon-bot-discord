@@ -94,8 +94,12 @@ async def run() -> int:
         root_names = [str(item.name).casefold() for item in roots]
         if len(root_names) != len(set(root_names)):
             errors.append("racines slash dupliquées")
-        if len(roots) > 100:
-            errors.append(f"budget slash dépassé: {len(roots)}/100")
+        from cogs import slash_command_budget
+        if len(roots) > slash_command_budget.PUBLIC_CHAT_INPUT_TARGET:
+            errors.append(
+                f"surface slash trop large: {len(roots)}/"
+                f"{slash_command_budget.PUBLIC_CHAT_INPUT_TARGET}"
+            )
 
         # V110 : les actions quotidiennes restent directes, tandis que les familles
         # secondaires sont regroupées pour garder le menu slash compact.
