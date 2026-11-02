@@ -360,7 +360,9 @@ async def _massrole_all_members(
             details.append(f"Vitesse moyenne : **{rate:.1f} membre(s)/s**")
         if not done:
             if eta is not None:
+                finish_unix = int(time.time() + eta)
                 details.append(f"Fin estimée dans : **~{_duration(eta)}**")
+                details.append(f"Fin estimée : <t:{finish_unix}:R> · <t:{finish_unix}:T>")
                 details.append(f"Durée totale estimée : **~{_duration(elapsed + eta)}**")
             else:
                 details.append("Fin estimée : **calcul en cours…**")
