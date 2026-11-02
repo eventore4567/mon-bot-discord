@@ -51,6 +51,12 @@ class SetupExperienceV74Tests(unittest.TestCase):
         service = (V74_PATH.parent.parent / "services" / "moderation.py").read_text(encoding="utf-8")
         self.assertIn("_apply_mute_role", service)
 
+    def test_v74_keeps_transparent_banner_and_private_slash_setup(self):
+        source = V74_PATH.read_text(encoding="utf-8")
+        self.assertIn("container = self._container()", source)
+        self.assertIn("panels.envoyer(target.followup, view, ephemere=True)", source)
+        self.assertIn("panels.envoyer(target.response, view, ephemere=True)", source)
+
     def test_v74_is_installed_after_v73(self):
         source = INIT_PATH.read_text(encoding="utf-8")
         self.assertIn("install_setup_experience_v74", source)
