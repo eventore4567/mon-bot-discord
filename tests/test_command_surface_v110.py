@@ -35,6 +35,7 @@ def test_info_level_and_music_use_common_names() -> None:
 def test_role_management_uses_role_group() -> None:
     assert surface.STANDARD_GROUPED_SLASH["giverole"] == ("role", "give")
     assert surface.STANDARD_GROUPED_SLASH["removerole"] == ("role", "remove")
+    assert surface.STANDARD_GROUPED_SLASH["massrole"] == ("role", "massrole")
 
 
 def test_roots_are_not_arbitrarily_abbreviated() -> None:
