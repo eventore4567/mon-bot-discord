@@ -445,8 +445,8 @@ async def _open_currency_config(view, interaction: discord.Interaction) -> None:
     overview = discord.Embed(
         title="Personnaliser la monnaie",
         description=(
-            f"Nom : **{values['currency_singular']}** / **{values['currency_plural']}**\\n"
-            f"Emoji : {values['currency_symbol']}\\n\\n"
+            f"Nom : **{values['currency_singular']}** / **{values['currency_plural']}**\n"
+            f"Emoji : {values['currency_symbol']}\n\n"
             "Choisissez le nom et l'emoji, ou importez une image depuis votre appareil. "
             "Aucun solde ne sera modifié."
         ),
