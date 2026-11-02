@@ -299,7 +299,12 @@ async def run() -> int:
             )
 
         print(f"SentriX audit: {len(active)} commandes texte/hybrides chargées")
-        print(f"SentriX audit: {len(app_roots)}/100 racines slash enregistrées")
+        print(
+            f"SentriX audit: {len(app_roots)}/"
+            f"{slash_command_budget.PUBLIC_CHAT_INPUT_TARGET} racines slash publiques "
+            f"(limite Discord {slash_command_budget.GLOBAL_CHAT_INPUT_BUDGET})"
+        )
+        print("Racines slash finales: " + ", ".join(sorted(app_root_names)))
         print(f"SentriX audit: {len(command_catalog_cleanup.NORMAL_DIRECT_COMMANDS)} commandes normales directes")
         print(f"SentriX audit: {len(command_catalog_cleanup.ADMIN_DIRECT_COMMANDS)} commandes admin directes + uniquement")
         print(f"SentriX audit: {len(command_catalog_cleanup.PROOF_VISIBLE_COMMANDS)} commandes proof visibles")
