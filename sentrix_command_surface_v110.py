@@ -83,21 +83,9 @@ STANDARD_DIRECT_SLASH: dict[str, str] = {
     "deposit": "deposit",
     "withdraw": "withdraw",
 
-    # Musique — vocabulaire commun aux bots musique majeurs.
-    # +play reste la commande préfixée historique ; les autres restent aussi accessibles
-    # via +music <action> côté préfixe.
+    # Musique — /play reste direct. Les contrôles secondaires sont regroupés
+    # sous /music pour éviter onze racines slash séparées.
     "play": "play",
-    "music pause": "pause",
-    "music resume": "resume",
-    "music skip": "skip",
-    "music stop": "stop",
-    "music queue": "queue",
-    "music nowplaying": "nowplaying",
-    "music volume": "volume",
-    "music shuffle": "shuffle",
-    "music join": "join",
-    "music leave": "leave",
-    "music seek": "seek",
 }
 
 # Les rôles sont plus lisibles sous un petit groupe /role que sous des chemins profonds.
@@ -107,6 +95,19 @@ STANDARD_GROUPED_SLASH: dict[str, tuple[str, str]] = {
     # Distribution globale : /role massrole action:add role:@Rôle
     # conserve la logique de +massrole add/del sans consommer une nouvelle racine slash.
     "massrole": ("role", "massrole"),
+
+    # Contrôles musique : une seule racine /music au lieu de onze commandes plates.
+    "music pause": ("music", "pause"),
+    "music resume": ("music", "resume"),
+    "music skip": ("music", "skip"),
+    "music stop": ("music", "stop"),
+    "music queue": ("music", "queue"),
+    "music nowplaying": ("music", "nowplaying"),
+    "music volume": ("music", "volume"),
+    "music shuffle": ("music", "shuffle"),
+    "music join": ("music", "join"),
+    "music leave": ("music", "leave"),
+    "music seek": ("music", "seek"),
 }
 
 # /play est fourni par la commande top-level `play`, qui appelle déjà le même moteur que
@@ -266,7 +267,13 @@ def _install_standard_slash_surface(bot) -> tuple[int, list[str]]:
         if root is None:
             root = app_commands.Group(
                 name=v95._safe_name(root_name),
-                description=("Gestion courante des rôles du serveur." if root_name == "role" else f"Commandes {root_name} de SentriX.")[:100],
+                description=(
+                    "Gestion courante des rôles du serveur."
+                    if root_name == "role"
+                    else "Lecture audio, file d'attente et contrôles musique."
+                    if root_name == "music"
+                    else f"Commandes {root_name} de SentriX."
+                )[:100],
             )
             groups[root_name] = root
         callback, native = v95._make_callback(bot, command)
