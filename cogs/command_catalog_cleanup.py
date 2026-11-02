@@ -50,10 +50,10 @@ NORMAL_DIRECT_COMMANDS = frozenset({
 # Commandes admin encore découvrables. Les commandes owner privées (blacklist globale,
 # sync global et wipe serveur) restent chargées/permissionnées mais ne sont plus montrées
 # dans +help : elles ne doivent pas apparaître dans la surface administrative publique.
-ADMIN_DIRECT_COMMANDS = frozenset({
-    "setstatus", "status-rotate", "footer", "theme", "set-bot",
-    "bot-servers", "bot-leave", "roleall", "massrole",
-})
+# Outils internes/maintenance : ils restent chargés et permissionnés, mais ne
+# doivent plus encombrer +help. Les administrateurs qui les connaissent peuvent
+# toujours les utiliser en préfixe.
+ADMIN_DIRECT_COMMANDS = frozenset()
 
 PRIVATE_OWNER_COMMANDS = frozenset({
     "bl", "blinfo", "unbl", "editbl", "sync", "syncguild", "wipe-server",
