@@ -573,7 +573,7 @@ class Economy(commands.Cog, name="Economy"):
             membre = ctx.guild.get_member(row["user_id"])
             if membre is not None and membre.bot:
                 continue
-            nom = membre.display_name if membre else f"Utilisateur {row['user_id']}"
+            nom = membre.display_name if membre else f"Membre #{str(row['user_id'])[-5:]}"
             classement.append((row["user_id"], nom, int(row["cash"] + row["bank"])))
 
         if not classement:
