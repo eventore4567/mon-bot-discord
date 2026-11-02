@@ -54,6 +54,11 @@ class SetupComponentsV73Tests(unittest.TestCase):
         self.assertIn("await panels.editer(interaction, self)", source)
         self.assertIn("await panels.envoyer(target, view)", source)
 
+    def test_slash_setup_is_private_to_invoker(self):
+        source = V73_PATH.read_text(encoding="utf-8")
+        self.assertIn("panels.envoyer(target.followup, view, ephemere=True)", source)
+        self.assertIn("panels.envoyer(target.response, view, ephemere=True)", source)
+
     def test_v73_replaces_only_official_setup_sender(self):
         source = V73_PATH.read_text(encoding="utf-8")
         self.assertIn("setup_ui.OfficialSetup.send_setup = _send_setup_v73", source)
