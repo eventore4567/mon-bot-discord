@@ -77,9 +77,9 @@ STANDARD_DIRECT_SLASH: dict[str, str] = {
 STANDARD_GROUPED_SLASH: dict[str, tuple[str, str]] = {
     "giverole": ("role", "give"),
     "removerole": ("role", "remove"),
-    # Distribution globale : /role massrole action:add role:@Rôle
+    # Distribution globale : /role mass action:add role:@Rôle
     # conserve la logique de +massrole add/del sans consommer une nouvelle racine slash.
-    "massrole": ("role", "massrole"),
+    "massrole": ("role", "mass"),
 
     # Contrôles musique : une seule racine /music au lieu de onze commandes plates.
     "music pause": ("music", "pause"),
