@@ -82,6 +82,8 @@ class MassroleProgressPanelEditTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('"▰" * filled + "▱" * (10 - filled)', source)
         self.assertIn("Fin estimée dans", source)
         self.assertIn("Durée totale estimée", source)
+        self.assertIn("finish_unix = int(time.time() + eta)", source)
+        self.assertIn("<t:{finish_unix}:R>", source)
         self.assertIn("processed - last_reported >= 100", source)
         self.assertIn("now_mono - last_progress_edit >= 2.0", source)
         self.assertIn("await panels.editer(progress, panels.depuis_embed(result))", source)
