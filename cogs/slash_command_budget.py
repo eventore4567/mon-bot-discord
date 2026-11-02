@@ -11,9 +11,9 @@ from discord.ext import commands
 logger = logging.getLogger("bot.slash-budget")
 GLOBAL_CHAT_INPUT_BUDGET = 100
 # Cible produit : SentriX ne doit plus remplir les 100 emplacements juste parce
-# qu'ils existent. Les contrôles musique secondaires sont regroupés sous /music,
-# ce qui permet de garder une petite marge au-dessus du tier obligatoire.
-PUBLIC_CHAT_INPUT_TARGET = 72
+# qu'ils existent. Musique et économie sont regroupées, ce qui permet de garder
+# une marge raisonnable au-dessus des racines réellement obligatoires.
+PUBLIC_CHAT_INPUT_TARGET = 64
 
 # Discord limite les commandes chat-input globales à 100 racines. Les quatre entrées
 # proof ci-dessous doivent rester disponibles même quand le catalogue historique remplit
