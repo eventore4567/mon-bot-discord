@@ -64,9 +64,11 @@ EXPLICITLY_REMOVED_COMMANDS = frozenset({
 # Nouveau système transverse : visible dans +help sans le classer dans les anciennes
 # commandes admin « + uniquement ». Le budget slash décide séparément quelles racines
 # peuvent être publiées sans dépasser la limite Discord de 100 commandes globales.
+# Ne montrer que les points d'entrée du module de preuves.
+# Les commandes d'exemples et de réinitialisation restent utilisables par les
+# administrateurs qui les connaissent, sans encombrer +help.
 PROOF_VISIBLE_COMMANDS = frozenset({
-    "proof", "proofstatus", "proofsetup", "proofexample", "proofexample-remove",
-    "proofexamples", "proofpanel", "proofreset",
+    "proof", "proofstatus", "proofsetup", "proofpanel",
 })
 
 PURE_DUPLICATE_COMMANDS = frozenset({
