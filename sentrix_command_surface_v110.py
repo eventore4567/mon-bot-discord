@@ -258,6 +258,7 @@ def _install_standard_slash_surface(bot) -> tuple[int, list[str]]:
         installed += 1
 
     groups: dict[str, app_commands.Group] = {}
+    created_groups: set[str] = set()
     for source_name, (root_name, leaf_name) in STANDARD_GROUPED_SLASH.items():
         command = _find_command(bot, source_name)
         if command is None:
@@ -265,16 +266,24 @@ def _install_standard_slash_surface(bot) -> tuple[int, list[str]]:
             continue
         root = groups.get(root_name)
         if root is None:
-            root = app_commands.Group(
-                name=v95._safe_name(root_name),
-                description=(
-                    "Gestion courante des rôles du serveur."
-                    if root_name == "role"
-                    else "Lecture audio, file d'attente et contrôles musique."
-                    if root_name == "music"
-                    else f"Commandes {root_name} de SentriX."
-                )[:100],
-            )
+            existing_root = tree.get_command(v95._safe_name(root_name))
+            if isinstance(existing_root, app_commands.Group):
+                # V95/V98 peut déjà avoir construit /role, /music, /economy, etc.
+                # On complète ce groupe au lieu de l'écraser et de perdre ses autres
+                # sous-commandes historiques.
+                root = existing_root
+            else:
+                root = app_commands.Group(
+                    name=v95._safe_name(root_name),
+                    description=(
+                        "Gestion courante des rôles du serveur."
+                        if root_name == "role"
+                        else "Lecture audio, file d'attente et contrôles musique."
+                        if root_name == "music"
+                        else f"Commandes {root_name} de SentriX."
+                    )[:100],
+                )
+                created_groups.add(root.name)
             groups[root_name] = root
         callback, native = v95._make_callback(bot, command)
         slash = app_commands.Command(
@@ -282,7 +291,7 @@ def _install_standard_slash_surface(bot) -> tuple[int, list[str]]:
             description=v95._description(command),
             callback=callback,
         )
-        root.add_command(slash)
+        root.add_command(slash, override=True)
         direct_report[f"/{root.name} {slash.name}"] = {
             "original": str(command.qualified_name),
             "native_options": bool(native),
@@ -290,7 +299,8 @@ def _install_standard_slash_surface(bot) -> tuple[int, list[str]]:
         installed += 1
 
     for group in groups.values():
-        tree.add_command(group, override=True)
+        if group.name in created_groups:
+            tree.add_command(group, override=True)
 
     roots = list(tree.get_commands(guild=None, type=discord.AppCommandType.chat_input))
     if len(roots) > v95.MAX_ROOT_COMMANDS:
