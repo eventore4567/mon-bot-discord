@@ -109,6 +109,20 @@ async def test_ack_slash_peut_etre_ephemere():
     response.defer.assert_awaited_once_with(ephemeral=True)
 
 
+@pytest.mark.parametrize(
+    "command_name",
+    [
+        "ban", "tempban", "unban", "kick", "mute", "unmute", "warn", "unwarn",
+        "clearwarnings", "slowmode", "lock", "unlock", "hide", "show",
+        "nickname", "resetnick", "move", "disconnect",
+    ],
+)
+def test_actions_de_moderation_slash_demandent_un_ack_prive(command_name):
+    command = getattr(Moderation, command_name)
+    source = inspect.getsource(command.callback)
+    assert "_ack(ctx, ephemere=True)" in source
+
+
 @pytest.mark.asyncio
 async def test_ban_repond_par_une_ligne_et_journalise_la_fiche_complete():
     cog = _cog()
