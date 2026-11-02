@@ -66,7 +66,7 @@ PRIVATE_OWNER_COMMANDS = frozenset({
 # Commandes explicitement retirées du bot à la demande du produit. Elles ne doivent
 # rester ni en préfixe, ni en slash, ni être réinjectées par les couches de restauration.
 EXPLICITLY_REMOVED_COMMANDS = frozenset({
-    "blacklist-add", "blacklist-users",
+    "blacklist-add", "blacklist-users", "set-bio",
     # Ancien alias du profil retiré : +stats est la surface préfixe canonique et
     # la carte profil vit dans la surface slash/dashboard.
     "me",
@@ -164,7 +164,7 @@ HELP_VISIBLE_EXTRA_COMMANDS = frozenset({
     # traité différemment de daily/work sans raison documentée).
     "rob", "buy", "sell", "gamble", "deposit", "withdraw",
     "give-money", "reset-economy", "shoppanel", "shoprole", "shop", "weekly",
-    "set-bio", "rep", "reputation", "repleaderboard", "rephistory",
+    "rep", "reputation", "repleaderboard", "rephistory",
     "voice-time", "level-roles",
     # Émojis : aucun chemin de découverte sans les connaître déjà par cœur.
     "addemoji", "deleteemoji", "emoji-list",
