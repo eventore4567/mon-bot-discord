@@ -20,12 +20,16 @@ logger = logging.getLogger("bot.hybrid-slash-restore-v3")
 
 
 def install(bot: commands.Bot) -> None:
-    from .command_catalog_cleanup import NORMAL_DIRECT_COMMANDS
+    from .command_catalog_cleanup import GAME_COMMANDS, NORMAL_DIRECT_COMMANDS
 
     restored = 0
     for direct_name in sorted(NORMAL_DIRECT_COMMANDS):
         if direct_name == "nickname":
             # /nick possède son alias slash court dédié avec ses contrôles de hiérarchie.
+            continue
+        if direct_name in GAME_COMMANDS:
+            # Les mini-jeux ont déjà leur surface canonique sous /game via V95/V98.
+            # Les restaurer ici recréerait des racines /blackjack, /dice, etc. en doublon.
             continue
 
         command = bot.get_command(direct_name)
