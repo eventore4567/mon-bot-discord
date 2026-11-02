@@ -224,7 +224,9 @@ def apply_surface(bot: commands.Bot) -> None:
         elif name in direct:
             command.hidden = False
         elif name in PURE_DUPLICATE_COMMANDS:
-            continue
+            # Le prune principal les retire du registre. Si une couche historique les
+            # réinjecte temporairement, elles restent au minimum invisibles dans +help.
+            command.hidden = True
         else:
             command.hidden = True
 
