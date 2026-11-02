@@ -49,34 +49,36 @@ async def run() -> int:
         if not command_catalog_cleanup._INSTALLED:
             errors.append("politique canonique du catalogue non installée")
 
-        # La surface historique comptait 97 commandes directes après le passage de la
-        # musique en groupe /music. Une suppression produit explicitement documentée doit
-        # réduire ce nombre, sans obliger à réintroduire une commande juste pour satisfaire
-        # un compteur de CI. Au 13/09/2026, blacklist-add et blacklist-users sont retirées.
+        # La surface publique est volontairement plus courte qu'avant. L'audit ne
+        # doit plus imposer un nombre historique fixe : il vérifie les invariants
+        # fonctionnels (commandes réellement chargées, retraits explicites et absence
+        # de doublons) plus bas.
         explicit_removed = set(
             getattr(command_catalog_cleanup, "EXPLICITLY_REMOVED_COMMANDS", frozenset())
         )
-        # Contrat actuel : 97 commandes directes historiques moins les deux retraits
-        # produit blacklist-add/blacklist-users = 95. L'ancien alias `me` est aussi
-        # marqué retiré, mais n'appartenait pas à ces 97 commandes directes : sa surface
-        # canonique est désormais `stats`, qui reste directe.
-        expected_normal_direct = 97
-        if len(command_catalog_cleanup.NORMAL_DIRECT_COMMANDS) != expected_normal_direct:
+        forbidden_direct = (
+            set(command_catalog_cleanup.PURE_DUPLICATE_COMMANDS)
+            | explicit_removed
+        ) & set(command_catalog_cleanup.NORMAL_DIRECT_COMMANDS)
+        if forbidden_direct:
             errors.append(
-                "la surface normale doit contenir exactement "
-                f"{expected_normal_direct} commandes directes après retraits produit, "
-                f"obtenu: {len(command_catalog_cleanup.NORMAL_DIRECT_COMMANDS)}"
+                "doublons/retraits produit présents dans la surface directe: "
+                + ", ".join(sorted(forbidden_direct))
             )
-        # 45 depuis l'ajout de +collec, la collection de prises des expéditions.
-        # Ce compte est figé volontairement : ajouter un jeu à la surface directe
-        # doit être un geste explicite, pas un effet de bord.
+
+        # Le catalogue complet des jeux reste chargé pour compatibilité préfixe, mais
+        # seulement dix jeux représentatifs doivent encombrer la surface publique.
         expected_games = 45
         if len(command_catalog_cleanup.GAME_COMMANDS) != expected_games:
             errors.append(
-                f"les {expected_games} jeux doivent rester directs, "
+                f"le catalogue complet doit conserver {expected_games} jeux, "
                 f"obtenu: {len(command_catalog_cleanup.GAME_COMMANDS)}"
             )
-
+        public_games = set(getattr(command_catalog_cleanup, "PUBLIC_GAME_COMMANDS", frozenset()))
+        if len(public_games) != 10:
+            errors.append(f"la surface publique doit exposer 10 jeux, obtenu: {len(public_games)}")
+        if not public_games <= set(command_catalog_cleanup.GAME_COMMANDS):
+            errors.append("la surface publique des jeux contient une commande absente du catalogue complet")
         expected_pruned = command_catalog_cleanup.PURE_DUPLICATE_COMMANDS | frozenset(explicit_removed)
         if main.PRUNED_COMMANDS != expected_pruned:
             errors.append(
@@ -298,7 +300,7 @@ async def run() -> int:
         print(f"SentriX audit: {len(command_catalog_cleanup.NORMAL_DIRECT_COMMANDS)} commandes normales directes")
         print(f"SentriX audit: {len(command_catalog_cleanup.ADMIN_DIRECT_COMMANDS)} commandes admin directes + uniquement")
         print(f"SentriX audit: {len(command_catalog_cleanup.PROOF_VISIBLE_COMMANDS)} commandes proof visibles")
-        print(f"SentriX audit: {len(command_catalog_cleanup.GAME_COMMANDS)} jeux directs")
+        print(f"SentriX audit: {len(command_catalog_cleanup.PUBLIC_GAME_COMMANDS)} jeux publics / {len(command_catalog_cleanup.GAME_COMMANDS)} jeux chargés")
         print(
             "Slash V110 standards: "
             + ", ".join(sorted(v110_public_roots & app_root_names))
