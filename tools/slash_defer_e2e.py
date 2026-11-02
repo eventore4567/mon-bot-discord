@@ -56,7 +56,7 @@ async def main() -> int:
         return since, t0
 
     # 1. Rapides : une seule réponse directe.
-    for spec in ("help", "ping", "economy balance", "server info"):
+    for spec in ("help", "ping", "balance", "info server"):
         since, _t0 = await slash(spec)
         kinds = [k for _t, k in responses(since)]
         check(kinds == [4], f"/{spec} répond directement, sans « réfléchit… »", str(kinds))

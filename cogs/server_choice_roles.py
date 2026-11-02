@@ -14,7 +14,6 @@ import logging
 import discord
 from discord.ext import commands
 from utils import checks, sentrix_panels as panels
-from utils.owner_access import is_bot_owner_id
 
 logger = logging.getLogger("bot.server-choice-roles")
 _INSTALLED = False
@@ -257,7 +256,7 @@ async def publish_or_refresh(
 @commands.command(
     name="massrole",
     help="Ajouter ou retirer un rôle pour tous les membres humains du serveur.",
-    usage="<add|remove> <rôle>",
+    usage="<add|del> <rôle>",
 )
 @commands.guild_only()
 @checks.is_owner_or_admin()
@@ -285,8 +284,8 @@ async def _massrole_all_members(
                     title="Rôles en masse — action invalide",
                     description=(
                         "Choisissez une action claire :\n"
-                        "• `add @Rôle` — ajouter le rôle à tous les membres humains ;\n"
-                        "• `remove @Rôle` — retirer le rôle à tous les membres humains."
+                        "• `+massrole add @Rôle` — ajouter le rôle à tous les membres humains ;\n"
+                        "• `+massrole del @Rôle` — retirer le rôle à tous les membres humains."
                     ),
                 )
             ),
@@ -303,6 +302,12 @@ async def _massrole_all_members(
         problem = "SentriX a besoin de la permission **Gérer les rôles**."
     elif role >= me.top_role:
         problem = "Le rôle de SentriX doit être placé au-dessus du rôle à distribuer."
+    elif (
+        getattr(ctx.author, "id", None) != getattr(guild, "owner_id", None)
+        and getattr(ctx.author, "top_role", None) is not None
+        and role >= ctx.author.top_role
+    ):
+        problem = "Ce rôle est au-dessus du vôtre (ou au même niveau) : vous ne pouvez pas le distribuer."
     else:
         problem = None
 
@@ -312,103 +317,21 @@ async def _massrole_all_members(
             panels.depuis_embed(discord.Embed(title="Rôles en masse — impossible", description=problem)),
         )
 
-    progress = await panels.envoyer(
-        ctx,
-        panels.depuis_embed(
-            discord.Embed(
-                title="Rôles en masse — traitement en cours",
-                description=(
-                    f"{'Ajout' if mode == 'add' else 'Retrait'} de {role.mention} sur tous les membres du serveur. "
-                    "SentriX traite les membres par lots pour respecter les limites Discord."
-                ),
-            )
-        ),
+    # Un seul message, mis à jour pendant tout le traitement (utils/mass_role.py) :
+    # traités / total, restants, %, barre, vitesse, temps écoulé, ETA, fin estimée.
+    from utils import mass_role
+
+    suivi = mass_role.Progression(action=mode, role_mention=role.mention, cible="members")
+    progress = await panels.envoyer(ctx, suivi.panneau())
+
+    async def rafraichir(etat: mass_role.Progression) -> None:
+        await panels.editer(progress, etat.panneau())
+
+    await mass_role.executer(
+        guild, role, action=mode, cible="members",
+        raison=f"Massrole global par {ctx.author}",
+        progression=suivi, rafraichir=rafraichir,
     )
-
-    added_or_removed = 0
-    failed = 0
-    skipped = 0
-    protected = 0
-    processed = 0
-    batch_size = 15
-
-    async def apply(member: discord.Member) -> None:
-        nonlocal added_or_removed, failed, skipped, protected
-        if member.bot:
-            skipped += 1
-            return
-        has_role = role in member.roles
-        if mode == "add" and has_role:
-            skipped += 1
-            return
-        if mode == "remove" and not has_role:
-            skipped += 1
-            return
-        # L'immunité propriétaire est aussi appliquée en garde bas niveau sur
-        # Member.remove_roles ; on l'évite ici explicitement pour que le compteur final
-        # ne prétende jamais qu'un derank protégé a réussi.
-        if mode == "remove" and is_bot_owner_id(member.id):
-            protected += 1
-            return
-        try:
-            if mode == "add":
-                await member.add_roles(role, reason=f"Massrole global par {ctx.author}")
-            else:
-                await member.remove_roles(role, reason=f"Massrole global par {ctx.author}")
-            added_or_removed += 1
-        except (discord.Forbidden, discord.HTTPException):
-            failed += 1
-
-    batch: list[discord.Member] = []
-    try:
-        async for member in guild.fetch_members(limit=None):
-            batch.append(member)
-            if len(batch) < batch_size:
-                continue
-            await __import__("asyncio").gather(*(apply(member) for member in batch))
-            processed += len(batch)
-            batch = []
-            if processed % 2000 == 0:
-                try:
-                    await panels.editer(
-                        progress,
-                        panels.depuis_embed(
-                            discord.Embed(
-                                title="Massrole — progression",
-                                description=f"**{processed}/{guild.member_count or '?'}** membres traités • **{added_or_removed}** modification(s) appliquée(s).",
-                            )
-                        ),
-                    )
-                except discord.HTTPException:
-                    pass
-        if batch:
-            await __import__("asyncio").gather(*(apply(member) for member in batch))
-            processed += len(batch)
-    except (discord.Forbidden, discord.HTTPException):
-        # Si Discord refuse l'énumération REST, le cache local est utilisé plutôt que
-        # d'abandonner entièrement l'opération. Le résultat indique alors ce qui a été
-        # réellement traité, sans inventer de succès.
-        remaining = [member for member in guild.members if member not in batch]
-        for offset in range(0, len(remaining), batch_size):
-            current = remaining[offset:offset + batch_size]
-            await __import__("asyncio").gather(*(apply(member) for member in current))
-            processed += len(current)
-
-    verb = "ajouté" if mode == "add" else "retiré"
-    result = discord.Embed(
-        title="Rôles en masse — terminé",
-        description=f"Rôle {role.mention} **{verb}** pour **{added_or_removed}** membre(s).",
-    )
-    result.add_field(name="Traités", value=str(processed), inline=True)
-    result.add_field(name="Ignorés", value=str(skipped), inline=True)
-    result.add_field(name="Échecs", value=str(failed), inline=True)
-    if protected:
-        result.add_field(
-            name="Protégés",
-            value=f"{protected} compte(s) propriétaire(s) SentriX conservé(s) intact(s).",
-            inline=False,
-        )
-    await panels.envoyer(ctx, panels.depuis_embed(result))
 
 
 def _install_massrole_global(bot: commands.Bot) -> None:

@@ -53,6 +53,9 @@ def test_setup_public_ack_never_leaves_dead_reply():
 
 
 def test_mass_role_uses_thin_components_panel():
+    # Le panneau privé devient le suivi de l'opération (utils/mass_role.py),
+    # toujours en Components V2 : jamais d'édition « content= ».
     source = inspect.getsource(MassRoleView)
-    assert "_sentrix_panel_view" in source
-    assert "interaction.followup.send" in source
+    assert "panels.editer(interaction.response, suivi.panneau())" in source
+    assert "mass_role.executer(" in source
+    assert "content=" not in source

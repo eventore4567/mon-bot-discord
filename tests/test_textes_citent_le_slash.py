@@ -15,8 +15,14 @@ def test_hors_du_code_la_commande_devient_sa_route_slash():
 
 
 def test_dans_le_code_les_arguments_suivent_la_route():
+    assert panels.commandes_en_code("`+pay @x 10` — paie") == "`/economy pay @x 10` — paie"
+
+
+def test_sous_commande_hors_menu_garde_le_prefixe():
+    # « shoprole add » n'est plus dans le menu « / » (31/10/2026) : citer
+    # « /shop roles add » montrerait une commande qui n'existe pas.
     texte = "`+shoprole add @VIP 500` — ajoute un rôle"
-    assert panels.commandes_en_code(texte) == "`/shop role-add @VIP 500` — ajoute un rôle"
+    assert panels.commandes_en_code(texte) == texte
 
 
 def test_sans_route_publiee_le_texte_reste_tel_quel():

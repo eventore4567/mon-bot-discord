@@ -278,18 +278,18 @@ async def _build_home(self, original: discord.Embed) -> discord.Embed:
     active = sum(state == setup_ui.ConfigState.ACTIVE for state, _, _ in statuses.values())
     panel = _panel(
         "SentriX Setup",
-        "Configuration simple en 3 étapes. Choisis une page dans le menu ci-dessous.",
+        "Configuration simple en 3 étapes. Choisissez une page dans le menu ci-dessous.",
     )
     panel.add_field(name="Serveur", value=f"**{self.guild.name}**", inline=True)
     panel.add_field(name="Modules actifs", value=f"**{active} / {len(statuses)}**", inline=True)
     panel.add_field(name="Configuration", value=f"**{setup_ui._completion(statuses)} %**", inline=True)
 
     panel.add_field(
-        name="Commence ici",
+        name="Commencez ici",
         value=(
-            "**1. Sécurité** — choisis seulement les protections utiles.\n"
-            "**2. Logs** — sélectionne où recevoir les événements.\n"
-            "**3. Bienvenue ou Tickets** — active uniquement ce dont tu as besoin."
+            "**1. Sécurité** — choisissez seulement les protections utiles.\n"
+            "**2. Logs** — sélectionnez où recevoir les événements.\n"
+            "**3. Bienvenue ou Tickets** — activez uniquement ce dont vous avez besoin."
         ),
         inline=False,
     )

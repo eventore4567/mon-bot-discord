@@ -1,10 +1,10 @@
-"""Traduction — /translate text et le menu contextuel « Translate Message ».
+"""Traduction — /translate et le menu contextuel « Translate Message ».
 
 La logique vit dans services/translation.py (fournisseur, langues, délais, codes
 d'erreur), testé sans bot. Ce cog expose trois portes vers le même service :
 
 - `+translate <langue> <texte>` en préfixe ;
-- `/translate text`, commande native avec autocomplétion des langues ;
+- `/translate`, commande native avec autocomplétion des langues ;
 - clic droit sur un message > Applications > « Translate Message » : traduit le
   message dans la langue de TON Discord, en réponse privée. C'est l'équivalent
   d'un bouton « Traduire » sous chaque message, sans ajouter de commande slash.
@@ -151,7 +151,7 @@ class Translation(commands.Cog):
 
 
 def _native_translate(bot: commands.Bot) -> app_commands.Command:
-    """/translate text, avec autocomplétion des langues."""
+    """/translate, avec autocomplétion des langues."""
 
     async def callback(interaction: discord.Interaction, language: str, text: str, source: str = "auto") -> None:
         cog = bot.get_cog("Translation")

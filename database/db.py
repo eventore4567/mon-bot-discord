@@ -2891,10 +2891,25 @@ class Database:
 
     # ---------- Réglages de /stats, /level et +statsconfig ----------
 
+    #: Fonction (symbole -> symbole affichable) posée par cogs/setup_v2_core : un
+    #: emoji personnalisé supprimé du serveur s'afficherait en texte brut partout.
+    display_symbol = None
+
     async def get_stats_settings(self, guild_id: int) -> dict:
         """Fusionne les réglages enregistrés en base avec DEFAULT_STATS_SETTINGS, pour
         que toute clé absente (serveur pas encore configuré, ou nouveau réglage ajouté
         après coup) garde une valeur sûre plutôt que de faire planter l'affichage."""
+        merged = await self._stats_settings_saved(guild_id)
+        resolver = self.display_symbol
+        if resolver is not None and merged.get("economy_emoji"):
+            try:
+                merged["economy_emoji"] = resolver(str(merged["economy_emoji"]))
+            except Exception:
+                pass
+        return merged
+
+    async def _stats_settings_saved(self, guild_id: int) -> dict:
+        """Réglages tels qu'enregistrés (sans adaptation d'affichage)."""
         conf = await self.get_guild_config(guild_id)
         raw = conf["stats_settings_json"] if conf and conf["stats_settings_json"] else "{}"
         try:
@@ -2908,7 +2923,7 @@ class Database:
     async def set_stats_settings(self, guild_id: int, updates: dict) -> dict:
         """Fusionne `updates` avec les réglages actuels puis enregistre le tout en une
         fois (un seul blob JSON, voir DEFAULT_STATS_SETTINGS)."""
-        current = await self.get_stats_settings(guild_id)
+        current = await self._stats_settings_saved(guild_id)
         current.update(updates)
         await self.set_guild_config(guild_id, "stats_settings_json", json.dumps(current))
         return current

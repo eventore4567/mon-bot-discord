@@ -766,7 +766,11 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
                 mode, raw = selected, raw[len(prefix):].strip()
                 break
         # /sticky set #salon texte n'impose plus le mode texte par défaut :
-        # l'utilisateur choisit en boutons, avec ou sans bandeau.
+        # l'utilisateur choisit en boutons, avec ou sans bandeau. En préfixe,
+        # +sticky-set #salon texte reste direct (mode texte) : le mini setup
+        # interactif s'ouvre avec +sticky.
+        if mode is None and raw and ctx.interaction is None:
+            mode = "text"
         if mode is None and raw:
             # L'ancien /sticky set ne doit pas exiger un préfixe text:/embed: :
             # le mini panneau permet de choisir explicitement le format.
@@ -804,12 +808,12 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
         every = max(1, min(50, int(every)))
         row = await self.bot.db.fetchone("SELECT channel_id FROM sentrix_sticky WHERE channel_id=?", (channel.id,))
         if not row:
-            return await ctx.send("No sticky configured in this channel.")
+            return await ctx.send("Aucun sticky configuré dans ce salon.")
         await self.bot.db.execute(
             "UPDATE sentrix_sticky SET every_messages=?,counter=0 WHERE channel_id=?",
             (every, channel.id),
         )
-        await ctx.send(f"Sticky in {channel.mention} now refreshes every {every} message(s).")
+        await ctx.send(f"Le sticky de {channel.mention} est republié tous les {every} message(s).", allowed_mentions=discord.AllowedMentions.none())
 
     @commands.command(name="sticky-off")
     @commands.guild_only()
@@ -824,7 +828,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
                 pass
         await self.bot.db.execute("DELETE FROM sentrix_sticky WHERE channel_id=?", (channel.id,))
         self._no_sticky[int(channel.id)] = True
-        await ctx.send(f"Sticky disabled in {channel.mention}.")
+        await ctx.send(f"Sticky désactivé dans {channel.mention}.", allowed_mentions=discord.AllowedMentions.none())
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):

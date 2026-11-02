@@ -27,7 +27,8 @@ def test_l_accuse_de_reception_slash_reste_bloquant():
     doit être attendu, contrairement à l'indicateur de frappe."""
     source = inspect.getsource(Moderation._ack)
     avant_retour = source[:source.index("return")]
-    assert "await ctx.interaction.response.defer()" in avant_retour
+    # Defer bloquant, privé pour une action de modération (utils/slash_privacy).
+    assert "await ctx.interaction.response.defer(ephemeral=reponse_privee(ctx))" in avant_retour
 
 
 def test_l_indicateur_de_frappe_ne_bloque_plus():

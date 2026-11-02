@@ -731,7 +731,9 @@ class Logs(commands.Cog, name="Logs"):
     @staticmethod
     def _delete_actor_text(actor) -> str:
         if actor is None:
-            return "Exécuteur inconnu · suppression par l’auteur possible"
+            # Pas d'entrée d'audit : Discord n'en crée pas quand l'auteur supprime
+            # son propre message (ni pour un bot).
+            return "L’auteur lui-même ou un bot"
         actor_id = getattr(actor, "id", None)
         name = getattr(actor, "display_name", None) or getattr(actor, "name", None) or str(actor)
         if actor_id:

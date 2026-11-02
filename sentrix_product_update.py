@@ -438,12 +438,9 @@ def _remove_ticket_configuration(bot: commands.Bot) -> tuple[str, ...]:
         setup_ui.CATEGORY_ORDER = tuple(item for item in setup_ui.CATEGORY_ORDER if item != "tickets")
     except Exception:
         logger.debug("Legacy setup ticket category cleanup skipped.", exc_info=True)
-    try:
-        from cogs import setup_experience_v74 as v74
-        v74.CATEGORY_META.pop("tickets", None)
-        v74.CATEGORY_ORDER = tuple(item for item in v74.CATEGORY_ORDER if item != "tickets")
-    except Exception:
-        logger.debug("V74 setup ticket category cleanup skipped.", exc_info=True)
+    # 02/11/2026 : la page Tickets du /setup actuel (V74 : types, panel, activation à
+    # la publication) remplace ces commandes. Elle reste donc dans le menu d'accueil ;
+    # seul l'ancien centre de configuration en embed la perd.
 
     return tuple(removed)
 
@@ -582,7 +579,7 @@ async def install_runtime(bot: commands.Bot) -> None:
 
     bot.sentrix_product_update_state = {
         "rolepanel_custom_emojis": custom_emoji,
-        "ticket_setup_dashboard_only": True,
+        "ticket_setup_in_setup_page": True,
         "removed_ticket_config_commands": removed,
         "ticket_prefix_available": ticket_prefix,
         "unknown_command_silent": unknown,

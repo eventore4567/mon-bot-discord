@@ -627,8 +627,10 @@ def install(dashboard) -> None:
         app.router.add_get("/operations", handle_operations_page)
 
         app.router.add_get("/api/guilds/{guild_id}/ops/summary", bind(api_summary))
-        app.router.add_get("/api/guilds/{guild_id}/ops/access", bind(api_access_get))
-        app.router.add_put("/api/guilds/{guild_id}/ops/access", bind(api_access_put))
+        # /ops/access appartient au dashboard unifié (web/dashboard_ops_suite_plus.py :
+        # rôles d'accès au dashboard). Cette ancienne version passait devant lui et
+        # répondait 503 dès que le cog OperationsCenter n'était pas chargé — le cas
+        # en production : la page « Accès » ne s'ouvrait jamais (02/11/2026).
         app.router.add_get("/api/guilds/{guild_id}/ops/member/{user_id}", bind(api_member_get))
         app.router.add_post("/api/guilds/{guild_id}/ops/member/{user_id}/notes", bind(api_member_note_post))
         app.router.add_delete("/api/guilds/{guild_id}/ops/notes/{note_id}", bind(api_member_note_delete))

@@ -24,6 +24,7 @@ from discord.ext import commands
 from utils.audit_trail import noter_acteur
 
 from utils import embeds, checks, design_system, visual_v5, rules_flow
+from utils.slash_privacy import reponse_privee
 from utils import sentrix_panels as panels
 from database.db import now
 
@@ -1238,7 +1239,7 @@ class Verification(commands.Cog, name="Verification"):
         if not error and isinstance(ctx.author, discord.Member):
             error = checks.check_role_target(ctx.author, role)
         if error and ctx.author.id != ctx.guild.owner_id:
-            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Action refusée', description=error, kind='danger')))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Action refusée', description=error, kind='danger')), ephemere=reponse_privee(ctx))
         try:
             noter_acteur(self.bot, ctx.guild.id, membre.id, "member_role_update", ctx.author.id)
             await membre.add_roles(role, reason=f"Ajouté par {ctx.author}")
@@ -1248,7 +1249,7 @@ class Verification(commands.Cog, name="Verification"):
         # que cogs/logs.py journalise déjà avec le modérateur (lu dans le journal
         # d'audit, grâce au `reason` ci-dessus). Une carte de plus faisait DEUX
         # cartes pour un seul rôle (mesuré le 08/10/2026).
-        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Rôle attribué', description=f'Rôle {role.mention} donné à {membre.mention}.', kind='success')))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Rôle attribué', description=f'Rôle {role.mention} donné à {membre.mention}.', kind='success')), ephemere=reponse_privee(ctx))
 
     @commands.hybrid_command(name="removerole", aliases=["delrole"], description="Retirer un rôle à un membre.")
     @app_commands.describe(membre="Le membre visé", role="Le rôle à retirer")
@@ -1263,7 +1264,7 @@ class Verification(commands.Cog, name="Verification"):
         if not error and isinstance(ctx.author, discord.Member):
             error = checks.check_role_target(ctx.author, role)
         if error and ctx.author.id != ctx.guild.owner_id:
-            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Action refusée', description=error, kind='danger')))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Action refusée', description=error, kind='danger')), ephemere=reponse_privee(ctx))
         try:
             noter_acteur(self.bot, ctx.guild.id, membre.id, "member_role_update", ctx.author.id)
             await membre.remove_roles(role, reason=f"Retiré par {ctx.author}")
@@ -1273,73 +1274,34 @@ class Verification(commands.Cog, name="Verification"):
         # que cogs/logs.py journalise déjà avec le modérateur (lu dans le journal
         # d'audit, grâce au `reason` ci-dessus). Une carte de plus faisait DEUX
         # cartes pour un seul rôle (mesuré le 08/10/2026).
-        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Rôle retiré', description=f'Rôle {role.mention} retiré à {membre.mention}.', kind='success')))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Rôle retiré', description=f'Rôle {role.mention} retiré à {membre.mention}.', kind='success')), ephemere=reponse_privee(ctx))
 
     @commands.hybrid_command(name="roleall", description="Donner un rôle à tous les membres du serveur.", with_app_command=False)
     @app_commands.describe(role="Le rôle à attribuer à tout le monde")
     @checks.is_owner_or_manager()
     async def roleall(self, ctx: commands.Context, role: discord.Role):
-        # Sur un très gros serveur (ex: 200 000 membres), traiter les membres un par un,
-        # en attendant chaque requête l'une après l'autre, prendrait des HEURES (chaque
-        # aller-retour vers Discord coûte ~200-300ms). On traite donc les membres par
-        # petits lots envoyés en concurrence : Discord limite toujours le débit global,
-        # mais son limiteur interne (discord.py) répartit ces lots bien plus efficacement
-        # qu'une file strictement séquentielle.
-        BATCH_SIZE = 15
-        progress_msg = await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Attribution en cours', description=f"⏳ Attribution du rôle {role.mention} à ~{ctx.guild.member_count} membres en cours. Sur un très gros serveur, ça peut prendre un moment — un message de progression s'affichera régulièrement, merci de patienter...")))
-        count = 0
-        failed = 0
-        processed = 0
+        # Ancien nom de +massrole add : même moteur, même progression
+        # (utils/mass_role.py), membres humains uniquement.
+        from utils import mass_role
 
-        async def apply_role(member: discord.Member):
-            nonlocal count, failed
-            if member.bot or role in member.roles:
-                return
-            try:
-                await member.add_roles(role, reason=f"Attribution en masse par {ctx.author}")
-                count += 1
-            except discord.HTTPException:
-                failed += 1
+        me = ctx.guild.me
+        if role.is_default() or role.managed or me is None or role >= me.top_role:
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(
+                ctx.guild.id, title="Action refusée", kind="danger",
+                description="Ce rôle ne peut pas être distribué : rôle géré par Discord, @everyone, "
+                            "ou placé au-dessus du rôle de SentriX.",
+            )))
+        suivi = mass_role.Progression(action="add", role_mention=role.mention, cible="members")
+        progress_msg = await panels.envoyer(ctx, suivi.panneau())
 
-        batch = []
-        async for member in ctx.guild.fetch_members(limit=None):
-            batch.append(member)
-            if len(batch) >= BATCH_SIZE:
-                await asyncio.gather(*(apply_role(m) for m in batch))
-                processed += len(batch)
-                batch = []
-                if processed % 2000 == 0:
-                    try:
-                        await panels.editer(progress_msg, panels.depuis_embed(await self._embed(ctx.guild.id, title='Progression', description=f"⏳ Progression : **{processed}/{ctx.guild.member_count}** membres traités, **{count}** rôle(s) attribué(s) jusqu'ici...")))
-                    except discord.HTTPException:
-                        pass
-        if batch:
-            await asyncio.gather(*(apply_role(m) for m in batch))
+        async def rafraichir(etat: mass_role.Progression) -> None:
+            await panels.editer(progress_msg, etat.panneau())
 
-        result = await self._embed(ctx.guild.id, title="Attribution terminée", description=f"Rôle {role.mention} attribué à **{count}** membre(s).", kind="success")
-        if failed:
-            result.add_field(name="⚠️ Échecs", value=f"{failed} membre(s) n'ont pas pu recevoir le rôle (permissions insuffisantes).", inline=False)
-        await panels.envoyer(ctx, panels.depuis_embed(result))
-
-    @commands.hybrid_command(name="massrole", description="Ajouter ou retirer un rôle sur une liste de membres.", with_app_command=False)
-    @app_commands.describe(role="Le rôle concerné", action="add ou remove", membres="Membres séparés par des espaces (mentions)")
-    @app_commands.choices(action=[app_commands.Choice(name="Ajouter", value="add"), app_commands.Choice(name="Retirer", value="remove")])
-    @checks.is_owner_or_manager()
-    async def massrole(self, ctx: commands.Context, role: discord.Role, action: str, membres: commands.Greedy[discord.Member]):
-        if not membres:
-            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Membres manquants', description='Mentionnez au moins un membre.', kind='danger')))
-        count = 0
-        for m in membres:
-            try:
-                if action == "add":
-                    await m.add_roles(role, reason=f"Massrole par {ctx.author}")
-                else:
-                    await m.remove_roles(role, reason=f"Massrole par {ctx.author}")
-                count += 1
-            except discord.Forbidden:
-                pass
-        verb = "ajouté" if action == "add" else "retiré"
-        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Massrole terminé', description=f'Rôle {role.mention} {verb} pour **{count}** membre(s).', kind='success')))
+        await mass_role.executer(
+            ctx.guild, role, action="add", cible="members",
+            raison=f"Attribution en masse par {ctx.author}",
+            progression=suivi, rafraichir=rafraichir,
+        )
 
 
 async def setup(bot: commands.Bot):

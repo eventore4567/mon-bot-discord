@@ -534,7 +534,9 @@ def narrative_body(
             if actor_mention:
                 lines.append(f"**Supprimé par :** {actor_mention}")
             else:
-                lines.append("**Supprimé par :** Non identifié (Discord ne confirme pas toujours l’exécuteur).")
+                # Discord n'inscrit au journal d'audit que la suppression par un
+                # AUTRE membre : sans entrée, c'est l'auteur lui-même ou un bot.
+                lines.append("**Supprimé par :** l’auteur lui-même ou un bot")
     elif event_type == "message_edit":
         # Auteur + salon sont déjà dans l'en-tête compact : ne pas les répéter
         # dans une phrase supplémentaire.

@@ -14,10 +14,11 @@ def test_automod_summary_reads_real_state_and_never_enables_modules():
         ("antilink", "Anti-liens", "Liens dangereux"),
         ("antiraid", "Anti-raid", "Arrivées coordonnées"),
     ]
+    # Tableau court (31/10/2026) : « famille · actives/total » puis les actives.
     empty = _resume_familles_automod(set(), options)
-    assert "0/1 actifs" in empty
-    assert "Aucune protection n'est activée automatiquement" in empty
+    assert "**Messages et mentions** · 0/1\n-# Aucune" in empty
+    assert "Anti-spam" not in empty
     active = _resume_familles_automod({"antispam", "antiraid"}, options)
-    assert "Anti-spam" in active and "Anti-raid" in active
-    assert "Activés : Anti-liens" not in active
-    assert "Centre de sécurité" in active
+    assert "**Messages et mentions** · 1/1\n-# Anti-spam" in active
+    assert "**Arrivées et raids** · 1/1\n-# Anti-raid" in active
+    assert "**Liens et arnaques** · 0/1\n-# Aucune" in active

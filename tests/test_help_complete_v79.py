@@ -10,13 +10,23 @@ def _source(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_v79_catalog_includes_all_prefix_commands_without_hidden_filter():
-    source = _source(V79)
+def test_v79_catalog_hides_hidden_internal_and_merged_commands():
+    """02/11/2026 : plus de commandes cachées, internes ni doublons dans l'aide ;
+    leur fiche reste accessible par leur nom exact (avec_masquees)."""
+    from types import SimpleNamespace
 
+    from cogs import help_complete_v79 as v79
+
+    def command(name, *, hidden=False, cog="Moderation", parents=()):
+        return SimpleNamespace(qualified_name=name, name=name, hidden=hidden, cog_name=cog, parents=list(parents))
+
+    assert v79._cachee(command("debug", hidden=True))
+    assert v79._cachee(command("bot-leave", cog="Owner"))
+    assert v79._cachee(command("blacklist add", parents=[SimpleNamespace(hidden=True)]))
+    assert not v79._cachee(command("ban"))
+    source = _source(V79)
     assert "for command in bot.walk_commands():" in source
-    assert "command.hidden" in source  # documented intentionally, not used as a filter
-    assert "if command.hidden" not in source
-    assert "legacy._visible" not in source
+    assert "_commandes_retirees_de_l_aide()" in source
 
 
 def test_v79_catalog_includes_leaf_slash_commands_and_subcommands():
@@ -47,7 +57,7 @@ def test_v79_merges_matching_prefix_and_slash_invocations(monkeypatch):
     monkeypatch.setattr(v79.v77, "_category_key", lambda command: "economy")
 
     def prefix(name):
-        return SimpleNamespace(qualified_name=name, name=name, hidden=False)
+        return SimpleNamespace(qualified_name=name, name=name, hidden=False, cog_name="Economy", parents=[])
 
     def slash(name, source):
         callback = lambda: None  # noqa: E731
@@ -86,12 +96,11 @@ def test_v79_has_complete_catalog_button_and_paginated_listing():
     assert "self.rows = _catalog(self.bot)" in source
 
 
-def test_v79_reports_prefix_slash_and_slash_only_counts():
+def test_v79_home_shows_one_short_count():
+    # Plus de « 512 commandes · 511 en + · 256 en / · 1 uniquement en / ».
     source = _source(V79)
-
-    assert "prefix_count" in source
-    assert "slash_count" in source
-    assert "slash_only" in source
+    assert 'f"**{len(entries)} commandes**"' in source
+    assert "slash_only" not in source and "prefix_count" not in source
 
 
 def test_v79_is_installed_by_v78_after_v78_patch():

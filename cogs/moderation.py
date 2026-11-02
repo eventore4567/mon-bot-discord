@@ -34,6 +34,7 @@ from discord.ext import commands, tasks
 
 import config
 from utils import embeds, checks, helpers, design_system, log_service
+from utils.slash_privacy import reponse_privee
 from utils.audit_trail import journaliser, noter_acteur
 from utils import sentrix_panels as panels
 from utils.helpers import parse_duration
@@ -620,6 +621,8 @@ class Moderation(commands.Cog):
 
     async def _reply(self, ctx: commands.Context, message: str, *, ephemere: bool = False):
         """Erreurs de hiérarchie en carte courte, autres messages en texte."""
+        # En « / », la réponse d'une action de modération est privée (utils/slash_privacy).
+        ephemere = ephemere or reponse_privee(ctx)
         panneau = _hierarchy_refusal_panel(message)
         if panneau is not None:
             return await panels.envoyer(ctx, panneau, ephemere=ephemere)
@@ -637,7 +640,11 @@ class Moderation(commands.Cog):
             reason=reason, case_number=case_number,
             suffix=suffix, duration=duration,
         )
-        message = await panels.envoyer(ctx, view, allowed_mentions=_SANS_PING)
+        privee = reponse_privee(ctx)
+        message = await panels.envoyer(ctx, view, ephemere=privee, allowed_mentions=_SANS_PING)
+        if privee:
+            # Visible du seul modérateur : rien à retirer du salon.
+            return message
         tache = asyncio.create_task(
             _retirer_la_confirmation(ctx, message, DELAI_RETRAIT_CONFIRMATION_SECONDES)
         )
@@ -659,7 +666,7 @@ class Moderation(commands.Cog):
             # Obligatoire et bloquant : Discord ferme l'interaction sans accusé
             # sous trois secondes.
             if not ctx.interaction.response.is_done():
-                await ctx.interaction.response.defer()
+                await ctx.interaction.response.defer(ephemeral=reponse_privee(ctx))
             return
         # En préfixe, l'indicateur de frappe n'a besoin que d'être DEMANDÉ pour
         # apparaître ; attendre sa confirmation ajoutait un aller-retour Discord

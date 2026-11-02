@@ -54,7 +54,7 @@ def test_commande_lente_defer_avant_la_limite(monkeypatch):
         await fix._defer_if_slow(interaction)
 
     asyncio.run(run())
-    assert interaction.response.calls == [("defer", {"thinking": True})]
+    assert interaction.response.calls == [("defer", {"thinking": True, "ephemeral": False})]
     assert interaction.extras["sentrix_slow_defer"] is True
     assert fix.SLOW_COMMAND_DEFER_SECONDS < 3
 

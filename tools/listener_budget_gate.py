@@ -72,7 +72,8 @@ BUDGETS: dict[str, int] = {
     # était chargé au démarrage du dashboard, hors de ce relevé ; il est
     # maintenant chargé avec le bot (cogs/custom_commands).
     "on_message": 25,
-    "on_ready": 38,
+    # +1 le 30/10/2026 : cogs/sentrix_name_style (lance une tâche, coût négligeable).
+    "on_ready": 39,
     "on_member_join": 18,
     "on_command_completion": 14,
     "on_member_remove": 9,

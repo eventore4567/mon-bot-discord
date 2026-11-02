@@ -260,6 +260,20 @@ def patch_dashboard_runtime(dashboard=None) -> None:
             "metrics": metrics,
         }
 
+    async def _guild_payload_with_prefix(bot, guild) -> dict:
+        """Le payload du serveur et son préfixe personnalisé, dans LE calcul partagé :
+        le préfixe était relu à chaque requête, hors coalescence (une lecture SQL de
+        plus par onglet ouvert)."""
+        from utils.command_prefixes import get_custom_prefix
+
+        payload = dict(await _assemble_guild_payload_fail_soft(bot.db, guild))
+        payload["settings"] = dict(payload.get("settings") or {})
+        try:
+            payload["settings"]["custom_prefix"] = await get_custom_prefix(bot, guild.id)
+        except Exception:
+            logger.warning("Préfixe personnalisé illisible pour le dashboard guild=%s", guild.id, exc_info=True)
+        return payload
+
     async def resilient_handle_guild(request: web.Request):
         try:
             guild_id = int(request.match_info["guild_id"])
@@ -279,20 +293,10 @@ def patch_dashboard_runtime(dashboard=None) -> None:
         inflight = dashboard._guild_payload_inflight
         future = inflight.get(guild_id)
         if future is None:
-            future = asyncio.ensure_future(
-                _assemble_guild_payload_fail_soft(request.app["bot"].db, guild)
-            )
+            future = asyncio.ensure_future(_guild_payload_with_prefix(request.app["bot"], guild))
             inflight[guild_id] = future
             future.add_done_callback(lambda _f: inflight.pop(guild_id, None))
-        payload = await future
-        from utils.command_prefixes import get_custom_prefix
-        from types import SimpleNamespace
-        payload = dict(payload)
-        payload["settings"] = dict(payload.get("settings") or {})
-        payload["settings"]["custom_prefix"] = await get_custom_prefix(
-            SimpleNamespace(db=request.app["bot"].db), guild_id
-        )
-        return web.json_response(payload)
+        return web.json_response(await future)
 
     resilient_handle_guild._sentrix_oxyde_hotfix = True
     dashboard.handle_guild = resilient_handle_guild

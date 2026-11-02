@@ -57,13 +57,19 @@ async def main() -> int:
                 return [(c["name"], c["value"]) for c in js["data"]["choices"]]
         return []
 
+    def param_of_or_none(path: str):
+        command = bot.tree.get_command(path.split()[0])
+        for part in path.split()[1:]:
+            command = command.get_command(part) if command is not None else None
+        return command
+
     def choices_of(path: str, name: str) -> list[str]:
         param, _ = param_of(path, name)
         return [c.name for c in param.choices]
 
     # Choix perdus par la surface « / » et repris de la commande d'origine.
-    check(choices_of("security antispam", "etat") == ["Activer", "Désactiver"],
-          "/security antispam propose de nouveau « Activer / Désactiver »", str(choices_of("security antispam", "etat")))
+    check(choices_of("security antinuke", "etat") == ["Activer", "Désactiver"],
+          "/security antinuke propose de nouveau « Activer / Désactiver »", str(choices_of("security antinuke", "etat")))
     check(choices_of("play rps", "choix") == ["Pierre", "Feuille", "Ciseaux"],
           "/play rps propose Pierre / Feuille / Ciseaux", str(choices_of("play rps", "choix")))
 
@@ -109,9 +115,15 @@ async def main() -> int:
     automod = bot.get_cog("Automod")
     await db.execute("INSERT INTO blacklist_words (guild_id, word) VALUES (?, ?)", (h.GID, "arnaque-test"))
     automod.blacklist_words_cache.pop(h.GID, None)
-    shown = await suggest("protection word-remove", "mot", "arn")
-    check(any(value == "arnaque-test" for _, value in shown),
-          "/protection word-remove : les mots interdits enregistrés sont proposés", str(shown))
+    # Ajout et retrait des mots interdits : dans /setup (menu « / » simplifié,
+    # 31/10/2026). La liste reste publiée, le retrait reste possible en « + ».
+    check(param_of_or_none("protection word-remove") is None and param_of_or_none("protection words") is not None,
+          "/protection words publiée, le retrait vit dans /setup")
+    await asyncio.wait_for(h.run_prefix(bot, guild, "+mots-interdits-retirer arnaque-test",
+                                        author_id=h.ADMIN_ID, author_roles=(h.ADMIN_ROLE_ID,)), 15)
+    await h.settle(idle=0.3, maximum=2)
+    left = await db.fetchone("SELECT 1 FROM blacklist_words WHERE guild_id=? AND word=?", (h.GID, "arnaque-test"))
+    check(left is None, "+mots-interdits-retirer retire le mot enregistré")
 
     # Un membre qui tape ne déclenche rien d'autre qu'une liste (aucun message, aucune action).
     since = len(h.CALLS)

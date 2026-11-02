@@ -35,10 +35,12 @@ def test_deleted_log_displays_deleter_in_narration_once():
 
 def test_deleted_log_unverified_actor_is_explicit():
     text = wide_logs.narrative_body(
-        _embed("Exécuteur inconnu · suppression par l’auteur possible"),
+        _embed("L’auteur lui-même ou un bot"),
         log_type="message_delete",
     )
-    assert "Non identifié" in text
+    # Sans entrée d'audit, Discord dit implicitement qui : l'auteur ou un bot.
+    assert "**Supprimé par :** l’auteur lui-même ou un bot" in text
+    assert "Non identifié" not in text
     assert "<@1457325087928881000>" not in text
 
 

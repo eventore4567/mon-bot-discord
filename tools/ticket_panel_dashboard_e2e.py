@@ -112,23 +112,23 @@ async def main() -> int:
     check(status == 200 and await core.module_enabled(bot, h.GID, "welcome"),
           "une fois le salon choisi, le module s'active", f"{status} {data}")
 
-    # /setup → Tickets → « Activer » sur un serveur sans catégorie ni panneau : le
-    # refus doit dire quoi configurer (avant : « Une erreur est survenue… »).
+    # /setup → Tickets sur un serveur sans catégorie ni panneau. Depuis le 31/10/2026
+    # (PR #598), un module s'active quand il est configuré : pas de bouton « Activer »
+    # qui échouerait, la page mène à la création d'un type, et ouvrir la page
+    # n'active rien.
     import discord
-    from setup_sweep import build, controls, interaction
+    from setup_sweep import build, controls
 
     await bot.db.set_guild_config(h.GID, "ticket_category", None)
     await bot.db.execute("DELETE FROM ticket_panels_v2 WHERE guild_id = ?", (h.GID,))
     await bot.db.execute("DELETE FROM module_settings WHERE guild_id = ? AND module = 'tickets'", (h.GID,))
+    # Écriture SQL directe : vider le cache comme le ferait set_module_enabled.
+    core.invalidate_module_cache(h.GID, "tickets")
     page = await build(bot, guild, "tickets")
-    activer = next((i for i in controls(page) if isinstance(i, discord.ui.Button) and str(i.label) == "Activer"), None)
-    since = len(h.CALLS)
-    await page._scheduled_task(activer, interaction(bot))
-    await h.settle(idle=0.4, maximum=3)
-    shown = h.visible_text(h.CALLS[since:])
-    check(activer is not None and "Configurez d’abord une catégorie" in shown and "Une erreur est survenue" not in shown
-          and not await core.module_enabled(bot, h.GID, "tickets"),
-          "/setup : activer les tickets sans catégorie explique quoi configurer", shown[:200])
+    labels = [str(i.label) for i in controls(page) if isinstance(i, discord.ui.Button)]
+    check("Activer" not in labels and "Créer un type" in labels
+          and await core.module_state(bot, h.GID, "tickets") == core.MODULE_STATE_NOT_CONFIGURED,
+          "/setup : tickets non configurés → « Créer un type », rien d'activé à l'ouverture", str(labels))
 
     failed = [r for r in RESULTS if not r[0]]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} étapes réussies.")

@@ -12,7 +12,7 @@ log = logging.getLogger("bot.sticky-setup")
 class StickyTextModal(discord.ui.Modal, title="Texte du sticky"):
     text = discord.ui.TextInput(
         label="Message", style=discord.TextStyle.paragraph, min_length=1,
-        max_length=1700, required=True, placeholder="Écris le message à conserver en bas du salon",
+        max_length=1700, required=True, placeholder="Écrivez le message à conserver en bas du salon",
     )
 
     def __init__(self, owner: "StickySetupView"):
@@ -24,7 +24,7 @@ class StickyTextModal(discord.ui.Modal, title="Texte du sticky"):
     async def on_submit(self, interaction: discord.Interaction):
         self.owner.content = str(self.text.value).strip()
         await interaction.response.send_message(
-            "Texte enregistré. Choisis les salons puis clique sur Appliquer.",
+            "Texte enregistré. Choisissez les salons puis cliquez sur Appliquer.",
             ephemeral=True,
         )
 
@@ -100,7 +100,7 @@ class StickySetupView(discord.ui.View):
     @discord.ui.button(label="Prévisualiser", style=discord.ButtonStyle.secondary)
     async def preview(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not self.content and self.action not in {"list", "remove"}:
-            return await interaction.response.send_message("Écris d'abord le texte du sticky.", ephemeral=True)
+            return await interaction.response.send_message("Écrivez d'abord le texte du sticky.", ephemeral=True)
         if self.action in {"list", "remove"}:
             return await interaction.response.send_message(
                 "Cette action n'a pas besoin d'aperçu de texte.", ephemeral=True
@@ -127,9 +127,9 @@ class StickySetupView(discord.ui.View):
         if self._busy:
             return await interaction.response.send_message("Une opération est déjà en cours.", ephemeral=True)
         if self.action != "list" and not self.channel_ids:
-            return await interaction.response.send_message("Choisis au moins un salon.", ephemeral=True)
+            return await interaction.response.send_message("Choisissez au moins un salon.", ephemeral=True)
         if self.action in {"add", "edit"} and not self.content:
-            return await interaction.response.send_message("Écris le texte à publier.", ephemeral=True)
+            return await interaction.response.send_message("Écrivez le texte à publier.", ephemeral=True)
         await interaction.response.defer(ephemeral=True, thinking=True)
         self._busy = True
         try:
@@ -206,13 +206,13 @@ async def open_sticky_setup(ctx: commands.Context, cog) -> None:
     view = StickySetupView(cog, ctx.guild.id, ctx.author.id, default_channel=ctx.channel)
     panneau = panels.Panneau(
         titre="Sticky · configuration",
-        sous_titre="Crée, modifie ou supprime tes messages persistants.",
+        sous_titre="Créez, modifiez ou supprimez vos messages persistants.",
         kind="moderation",
         banniere=True,
         sections=[
             panels.Section("01 · Salons", texte="Sélectionne jusqu'à cinq salons."),
             panels.Section("02 · Format", texte="Texte normal, embed, ou embed avec bande ultra-fine."),
-            panels.Section("03 · Texte", texte="Utilise Écrire le texte, puis Appliquer."),
+            panels.Section("03 · Texte", texte="Utilisez Écrire le texte, puis Appliquer."),
         ],
     )
     panneau = panels.avec_composants(panneau, view)

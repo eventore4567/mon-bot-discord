@@ -76,8 +76,10 @@ async def main() -> int:
     await h.settle(idle=0.4, maximum=3)
     shown = h.visible_text(h.CALLS[since:])
     raw = json.dumps([js for _m, _p, js in h.CALLS[since:]])
-    check("Demande" in shown and ("Catégories disponibles" in shown or "Comment ça marche" in shown),
-          "choisir « Partenariat » affiche son panel et ses catégories", shown[:200])
+    # Panel compact : le titre du panel, puis ses catégories dans le menu.
+    options = [o.get("label") for menu in _selects(h.CALLS[since:]) for o in menu.get("options", [])]
+    check("Partenariat" in shown and options == ["Demande"],
+          "choisir « Partenariat » affiche son panel et ses catégories", f"{shown[:120]} | {options}")
     check("erreur" not in shown.lower() and "build_panel_embed" not in raw,
           "aucune erreur au choix de la catégorie", shown[:160])
     check(original is None or not errors, "pas d'exception relevée")

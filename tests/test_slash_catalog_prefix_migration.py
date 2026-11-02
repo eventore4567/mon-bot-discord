@@ -26,7 +26,7 @@ def test_prefix_only_actions_get_clear_category_paths():
         "tournament-create": "events tournament-create",
         "invite-stats": "invites stats",
         "staff-reminder": "staff remind",
-        "dm": "user dm",
+        "dm": "staff dm",
     }
     # Masquées faute d'usage le 16/10/2026 (utils/unused_commands.py) : hors du
     # menu, mais leur chemin reste défini pour le jour où on les remet.

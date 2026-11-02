@@ -59,7 +59,7 @@ def _install_setup_initial_response_guard() -> None:
     response_cls = discord.InteractionResponse
 
     original_defer = response_cls.defer
-    if not getattr(original_defer, "_sentrix_setup_private_guard", False):
+    if getattr(original_defer, "_sentrix_setup_private_guard", False) is not True:
         async def private_defer(self, *args, **kwargs):
             interaction = getattr(self, "_parent", None)
             if _is_setup_slash(interaction):
@@ -74,7 +74,7 @@ def _install_setup_initial_response_guard() -> None:
         response_cls.defer = private_defer
 
     original_send = response_cls.send_message
-    if not getattr(original_send, "_sentrix_setup_private_guard", False):
+    if getattr(original_send, "_sentrix_setup_private_guard", False) is not True:
         async def private_initial_message(self, *args, **kwargs):
             interaction = getattr(self, "_parent", None)
             if _is_setup_slash(interaction):
@@ -542,7 +542,7 @@ def _patch_setup_v74(bot: commands.Bot) -> None:
                 return await target.send("La configuration est disponible uniquement sur un serveur.")
             if not await setup_ui._can_setup(self.bot, member, guild):
                 return await target.send(
-                    "Tu n'as pas la permission d'ouvrir la configuration de ce serveur.",
+                    "Vous n'avez pas la permission d'ouvrir la configuration de ce serveur.",
                     allowed_mentions=discord.AllowedMentions.none(),
                 )
             view = cls(self.bot, guild, member.id)
@@ -573,7 +573,7 @@ def _patch_setup_v74(bot: commands.Bot) -> None:
         if not await setup_ui._can_setup(self.bot, member, guild):
             if isinstance(slash, discord.Interaction) and private_followup:
                 return await slash.followup.send(
-                    "Tu n'as pas la permission d'utiliser /setup.",
+                    "Vous n'avez pas la permission d'utiliser /setup.",
                     ephemeral=True,
                     allowed_mentions=discord.AllowedMentions.none(),
                 )

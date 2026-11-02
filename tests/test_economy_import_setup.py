@@ -83,7 +83,7 @@ async def _test_atomic_add_replace_idempotent():
         conn.commit()
         conn.close()
 
-        fake_bot = SimpleNamespace(db=SimpleNamespace(path=path, _economy_lock=asyncio.Lock()))
+        fake_bot = SimpleNamespace(db=SimpleNamespace(path=path, backend="sqlite", _economy_lock=asyncio.Lock()))
         incoming = [module.MemberBalance(USER_A, 100000, 10), module.MemberBalance(USER_B, 50, 0)]
         batch, delta = await module.apply_import(fake_bot, 1, USER_A, incoming, "add", "foreign.csv")
         assert batch == 1

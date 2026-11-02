@@ -59,10 +59,9 @@ async def main() -> int:
           "la page explique pourquoi et propose « Ouvrir l'installation de la vérification »")
     check(sum(1 for _ in items(view)) <= 40, f"la page tient dans la limite Discord ({len(items(view))} composants)")
 
-    await button(view, "Activer toutes les protections").callback(interaction(bot))
-    await h.settle(idle=0.2, maximum=2)
-    check(await flags() == (False, False), "« Activer toutes les protections » ne les active pas pour rien",
-          str(await flags()))
+    # 31/10/2026 (PR #596) : plus d'activation groupée, chaque protection se choisit.
+    check(button(view, "Activer toutes les protections") is None,
+          "pas de bouton « Activer toutes les protections » : rien n'est activé en bloc")
 
     v74_view = await build(bot, guild, "security")
     await v74_view._set_security_profile(True, h.ADMIN_ID)
@@ -83,7 +82,7 @@ async def main() -> int:
 
     original = v75._honeypot_resources_ready
 
-    async def ready(_view):
+    async def ready(_view, **_options):
         return True
 
     v75._honeypot_resources_ready = ready
@@ -120,8 +119,10 @@ async def main() -> int:
         await activate.callback(interaction(bot))
         await h.settle(idle=0.2, maximum=3)
         shown = h.visible_text(h.CALLS[since:])
-        check("Vérification web activée" in shown and await flags() == (True, True),
-              "« Activer » installe les salons, publie les panneaux et active les deux protections", shown[-240:])
+        # Depuis le 31/10/2026, « Vérification seule » par défaut : le salon piège
+        # (Honeypot) reste un choix séparé, jamais activé avec la vérification.
+        check("Vérification web activée" in shown and await flags() == (False, True),
+              "« Activer » installe le portail et active la vérification, sans salon piège", shown[-240:])
         check(not any("/interactions/" in p or "/webhooks/" in p for m, p, js in h.CALLS[since:]
                       if m == "PATCH" and js and js.get("embeds")),
               "le panneau ouvert est réédité en panneau, jamais avec un embed (sinon Discord renvoie 400)")

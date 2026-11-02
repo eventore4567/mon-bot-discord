@@ -383,7 +383,7 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
     ))
     container.add_item(discord.ui.Separator())
     container.add_item(discord.ui.TextDisplay(
-        "### Modifier les filtres\n-# Coche ou décoche les protections voulues."
+        "### Modifier les filtres\n-# Cochez ou décochez les protections voulues."
     ))
 
     protection_select = discord.ui.Select(

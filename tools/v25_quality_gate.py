@@ -229,7 +229,7 @@ async def _runtime_checks(errors: list[str]) -> None:
                 yield from _chemins(enfant, chemin)
 
         chemins = {c for racine in bot.tree.get_commands() for c in _chemins(racine)}
-        for name in ("help", "economy balance", "play rps", "ban", "timeout"):
+        for name in ("help", "balance", "play rps", "ban", "timeout"):
             if name not in chemins:
                 errors.append(f"commande slash critique absente: /{name}")
 
