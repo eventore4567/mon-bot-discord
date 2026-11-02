@@ -120,10 +120,10 @@ def _preferred_names() -> set[str]:
 def _excluded_names() -> set[str]:
     from .command_catalog_cleanup import GAME_COMMANDS, INTERNAL_MAINTENANCE_COMMANDS, MERGED_COMMANDS
 
-    # MERGED_COMMANDS décrit la visibilité historique des commandes préfixées. V110 peut
-    # réutiliser l'un de ces noms comme racine slash standard (ex. /queue, /resume,
-    # /profile, /shop, /weekly). Ces racines sont intentionnelles et ne doivent donc pas
-    # être bloquées par le filtre legacy du budget.
+    # MERGED_COMMANDS décrit la visibilité historique des commandes préfixées.
+    # Certaines familles sont désormais regroupées sous une racine V110 (/music,
+    # /economy, /info, /level, /role). On retire donc les anciens noms historiques,
+    # puis on réautorise uniquement les vraies racines publiques finales de V110.
     legacy_excluded = (
         set(INTERNAL_MAINTENANCE_COMMANDS)
         | set(MERGED_COMMANDS)
