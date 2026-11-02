@@ -597,49 +597,34 @@ class Economy(commands.Cog, name="Economy"):
             )
 
         nombre = stats_service.format_number
-        medailles = ("1er", "2e", "3e")
-        podium = [
-            sx_panels.Ligne(medailles[i], f"**{nom}**", indice=f"{nombre(total)} {emoji}")
-            for i, (_uid, nom, total) in enumerate(classement[:3])
-        ]
-        suite = [
-            sx_panels.Ligne(f"{i}", f"{nom} · {nombre(total)}")
-            for i, (_uid, nom, total) in enumerate(classement[3:10], start=4)
-        ]
-
-        sections = [sx_panels.Section("Podium", podium)]
-        if suite:
-            sections.append(sx_panels.Section("Suivants", suite, aligne=True))
+        # Une seule liste courte. Pas de tableau monospace : il affichait les
+        # emojis personnalisés littéralement (<:piece:id>) et même **#10**.
+        top = []
+        for rang_top, (_uid, nom, total) in enumerate(classement[:10], start=1):
+            name = discord.utils.escape_markdown(str(nom)[:35])
+            top.append(f"**{rang_top}.** {name} · **{nombre(total)}** {emoji}")
 
         rang = next(
-            (i for i, (uid, *_r) in enumerate(classement, start=1) if uid == ctx.author.id), None
+            (i for i, (uid, *_r) in enumerate(classement, start=1)
+             if uid == ctx.author.id), None,
         )
-        if rang is not None:
-            _uid, _nom, total = classement[rang - 1]
-            ecart = classement[rang - 2][2] - total if rang > 1 else 0
-            lignes = [
-                sx_panels.Ligne("Rang", f"**#{rang}** sur {len(classement)}"),
-                sx_panels.Ligne("Fortune", f"{nombre(total)} {emoji}"),
-            ]
-            if ecart > 0:
-                lignes.append(sx_panels.Ligne("Pour passer devant", f"{nombre(ecart + 1)} {emoji}"))
-            sections.append(sx_panels.Section("Votre position", lignes, aligne=True))
+        if rang is None:
+            position = "Tu n'es pas encore classé."
         else:
-            sections.append(
-                sx_panels.Section(
-                    "Votre position",
-                    [sx_panels.Ligne("Non classé", "`+daily` puis `+work` pour démarrer")],
-                )
-            )
+            current_total = classement[rang - 1][2]
+            position = f"**#{rang}** sur {len(classement)} · **{nombre(current_total)}** {emoji}"
 
         await sx_panels.envoyer(
             ctx,
             sx_panels.Panneau(
                 titre="Classement économique",
-                sous_titre=f"**{len(classement)}** membre(s) classé(s) sur {ctx.guild.name}.",
+                sous_titre=f"{len(classement)} membres · {ctx.guild.name}",
                 kind="economie",
-                sections=sections,
-                pied="SentriX • Économie",
+                sections=[
+                    sx_panels.Section("Top 10", texte="\n".join(top)),
+                    sx_panels.Section("Ton classement", texte=position),
+                ],
+                pied="",
             ),
         )
 
