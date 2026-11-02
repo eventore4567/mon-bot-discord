@@ -168,7 +168,7 @@ HELP_VISIBLE_EXTRA_COMMANDS = frozenset({
     # courte en préfixe. Les actions d'administration économie/boutique restent cachées :
     # elles sont accessibles via /setup, le dashboard ou leur nom historique.
     "rob", "buy", "sell", "gamble", "deposit", "withdraw",
-    "rep", "reputation", "repleaderboard", "rephistory",
+    "rep", "reputation", "repleaderboard",
     "voice-time", "level-roles",
     # Émojis : aucun chemin de découverte sans les connaître déjà par cœur.
     "addemoji", "deleteemoji", "emoji-list",
