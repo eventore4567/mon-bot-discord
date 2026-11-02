@@ -410,7 +410,7 @@ async def _massrole_all_members(
             handled_member_ids.update(member.id for member in batch)
             batch = []
             now_mono = time.monotonic()
-            if processed - last_reported >= 250 and now_mono - last_progress_edit >= 2.0:
+            if processed - last_reported >= 100 and now_mono - last_progress_edit >= 2.0:
                 try:
                     await panels.editer(
                         progress,
@@ -447,7 +447,7 @@ async def _massrole_all_members(
             processed += len(current)
             handled_member_ids.update(member.id for member in current)
             now_mono = time.monotonic()
-            if processed - last_reported >= 250 and now_mono - last_progress_edit >= 2.0:
+            if processed - last_reported >= 100 and now_mono - last_progress_edit >= 2.0:
                 try:
                     await panels.editer(
                         progress,
