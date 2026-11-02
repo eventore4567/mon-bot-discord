@@ -76,9 +76,9 @@ def _required_names() -> set[str]:
 
 def _preferred_names() -> set[str]:
     """Tier 2 : anciennes racines utiles, conservées seulement après le tier 1."""
-    from .command_catalog_cleanup import NORMAL_DIRECT_COMMANDS
+    from .command_catalog_cleanup import ADMIN_DIRECT_COMMANDS, NORMAL_DIRECT_COMMANDS
 
-    return _required_names() | set(NORMAL_DIRECT_COMMANDS)
+    return _required_names() | set(NORMAL_DIRECT_COMMANDS) | set(ADMIN_DIRECT_COMMANDS)
 
 
 def _excluded_names() -> set[str]:
