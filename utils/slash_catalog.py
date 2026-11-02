@@ -763,47 +763,50 @@ RETIRED: dict[str, str] = {
 # Conserver toute la sécurité, la modération, les tickets et les 40+ jeux.
 # /setup est le seul endroit public pour la configuration générale.
 _MENU_SIMPLIFIE_KEEP: dict[str, frozenset[str]] = {
-    # Les interrupteurs AutoMod sont dans /setup ; ne pas exposer dix copies.
-    # Garder les opérations d'urgence et le diagnostic direct.
-    "security": frozenset({
-        "antinuke", "quarantine", "lockdown", "panic", "panic-off",
-        "panic-status", "status", "history", "scan", "fix", "permissions",
-        "isolate", "release",
+    # 02/11/2026 — second tri, d'après l'usage réel en production (journal
+    # command-usage : 221 commandes sur 397 jamais lancées depuis août). On garde
+    # les gestes courants et les urgences ; le reste quitte le menu « / » mais
+    # reste utilisable en « + » et, pour la configuration, dans /setup.
+    # Une racine à frozenset(()) disparaît entièrement du menu.
+    "moderation": frozenset({
+        "tempban", "warnings", "warnings-clear", "unwarn", "sanctions", "center",
+        "lock", "unlock", "slowmode", "nick", "hide", "show", "snipe",
+        "disconnect", "dm-status",
     }),
-    # Le menu Sécurité gère les paramètres ; conserver surtout les opérations
-    # réelles, les sauvegardes et les commandes d'urgence.
-    "protection": frozenset({
-        "blacklist", "block", "unblock", "words", "backup", "restore",
-        "lockdown", "unlock", "raid status", "raid pause", "raid resume",
-        "trusted", "trust", "untrust", "exempt immunity", "bot-allow",
-    }),
-    "logs": frozenset({"search", "trace", "status"}),
-    "tickets": frozenset({"open", "reopen", "transcript", "stats"}),
+    "security": frozenset({"antinuke", "lockdown", "panic", "panic-off", "scan", "fix", "permissions"}),
+    "protection": frozenset({"words", "backup", "restore", "lockdown", "unlock", "raid pause", "raid resume"}),
+    "logs": frozenset({"search", "trace"}),
+    "tickets": frozenset({"open", "reopen", "transcript"}),
     "config": frozenset(()),
     "market": frozenset(()),
     "counter": frozenset(()),
     "starboard": frozenset(()),
-    "fun": frozenset({"hug", "pat", "highfive", "aura", "scan"}),
-    "economy": frozenset({"daily", "weekly", "work", "pay", "deposit", "withdraw", "inventory", "leaderboard", "give", "reset"}),
+    "fun": frozenset(()),
+    "race": frozenset(()),
+    "puzzle": frozenset(()),
+    "games": frozenset(()),
+    "events": frozenset(()),
+    "permissions": frozenset(()),
+    "snippet": frozenset(()),
+    "voice": frozenset(()),
+    "economy": frozenset({"daily", "weekly", "work", "pay", "deposit", "withdraw", "inventory", "leaderboard", "give"}),
     "level": frozenset({"rank", "leaderboard", "setxp", "addxp", "role-add", "role-remove", "check"}),
-    "shop": frozenset({"view", "buy", "sell", "panel", "roles"}),
-    "rep": frozenset({"give", "view", "leaderboard"}),
-    "profile": frozenset({"view", "card", "bio", "badges", "trust"}),
-    "info": frozenset({"user", "avatar", "invites", "server", "members", "channel", "emojis", "health", "audit", "metrics"}),
-    "role": frozenset({"give", "remove", "info", "mass", "menu", "buttons list"}),
-    "verification": frozenset({"captcha", "status", "guide", "restore", "review"}),
+    "shop": frozenset({"view", "buy", "panel", "roles"}),
+    "rep": frozenset({"give", "view"}),
+    "profile": frozenset({"view", "bio"}),
+    "info": frozenset({"user", "avatar", "invites", "server", "members", "channel"}),
+    "role": frozenset({"give", "remove", "info", "mass", "menu"}),
+    "verification": frozenset({"captcha", "status", "guide"}),
     "embeds": frozenset({"create", "list", "edit", "send", "delete"}),
-    "giveaway": frozenset({"create", "end", "reroll", "cancel", "list", "panel"}),
-    "events": frozenset({"list", "join", "leave", "create", "cancel", "announce", "tournaments"}),
+    "giveaway": frozenset({"create", "end", "reroll", "panel"}),
     "notifications": frozenset({"add", "list", "remove"}),
     "sticky": frozenset({"set", "off"}),
-    "voice": frozenset({"setup", "off", "rename", "lock", "unlock"}),
-    "ai": frozenset({"ask", "search", "image", "code", "explain", "summarize", "reset"}),
-    "bot": frozenset({"info", "feedback", "bug", "privacy"}),
-    "staff": frozenset({"dm", "note", "history", "proof", "incident", "watch", "center", "handover", "emergency", "audit", "report", "remind", "diagnosis"}),
-    "invites": frozenset({"members", "stats", "rank", "history", "sync", "bonus"}),
+    "suggestions": frozenset({"submit", "setup", "panel", "status"}),
+    "ai": frozenset({"ask", "search", "image", "reset"}),
+    "bot": frozenset({"info", "bug"}),
+    "staff": frozenset({"dm", "watch", "center", "report"}),
+    "invites": frozenset({"members", "bonus"}),
     "music": frozenset({"play", "pause", "resume", "skip", "stop", "queue", "playlist create", "playlist add", "playlist list", "playlist play", "shuffle", "loop", "seek", "volume", "autoplay", "now-playing", "join", "leave"}),
-    "games": frozenset({"today", "history", "leaderboard", "profile"}),
 }
 
 def _masquee_par_menu_simplifie(entree: SlashEntry) -> bool:

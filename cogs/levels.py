@@ -1502,26 +1502,26 @@ class Levels(commands.Cog, name="Levels"):
         # Diagnostic pur : AUCUNE écriture, même pas ensure_level() (on ne veut pas créer
         # une ligne juste en la consultant — ça fausserait "ligne trouvée").
         diag = await self._level_diagnosis(ctx.guild.id, membre.id)
-        e = embeds.neutral("🔍 Diagnostic niveau", "")
-        e.add_field(name="Membre", value=membre.mention, inline=True)
-        e.add_field(name="Serveur", value=ctx.guild.name, inline=True)
-        e.add_field(name="Ligne trouvée", value="● Oui" if diag["found"] else "○ Non (le membre n'a encore jamais gagné d'XP ici)", inline=False)
+        # Fiche courte (02/11/2026) : le niveau et l'XP ; les détails techniques
+        # n'apparaissent que s'il y a vraiment quelque chose à corriger.
+        e = embeds.neutral("🔍 Diagnostic niveau", f"{membre.mention}")
+        if not diag["found"]:
+            e.description += "\nAucune XP gagnée sur ce serveur pour l'instant."
         e.add_field(name="Niveau", value=str(diag["level"]), inline=True)
-        e.add_field(name="XP totale (cumulée)", value=stats_service.format_number(diag["total_xp"]), inline=True)
-        e.add_field(name="XP actuelle (niveau en cours)", value=stats_service.format_number(diag["xp"]), inline=True)
-        e.add_field(name="XP nécessaire (prochain niveau)", value=stats_service.format_number(diag["needed"]), inline=True)
-        e.add_field(name="Cache", value="● Cohérent" if diag["cache_coherent"] else "⚠️ Incohérent (sera corrigé automatiquement sous 20s)", inline=True)
-        if diag["db_coherent"]:
-            db_value = "● Cohérente"
-        elif not diag["found"]:
-            db_value = "➖ Aucune ligne à vérifier"
-        else:
-            db_value = "⚠️ " + " ; ".join(diag["db_issues"])
-        e.add_field(name="Base de données", value=db_value, inline=True)
-        if diag["found"] and diag["updated_at"]:
-            e.add_field(name="Dernière mise à jour", value=f"<t:{diag['updated_at']}:R>", inline=True)
-        else:
-            e.add_field(name="Dernière mise à jour", value="Inconnue (ligne créée avant l'ajout de ce suivi, ou jamais mise à jour)", inline=True)
+        e.add_field(name="XP", value=(
+            f"{stats_service.format_number(diag['xp'])} / {stats_service.format_number(diag['needed'])}"
+        ), inline=True)
+        e.add_field(name="XP totale", value=stats_service.format_number(diag["total_xp"]), inline=True)
+        problemes = []
+        if not diag["cache_coherent"]:
+            problemes.append("Cache incohérent (corrigé automatiquement sous 20 s)")
+        if diag["found"] and not diag["db_coherent"]:
+            problemes.extend(diag["db_issues"])
+        e.add_field(
+            name="État",
+            value=("⚠️ " + " ; ".join(problemes) + "\nRéparer : `+levelrepair @membre`.") if problemes else "● Cohérent",
+            inline=False,
+        )
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(name="levelrepair", description="[Admin] Réparer une incohérence certaine du niveau d'un membre (après confirmation).", with_app_command=False)

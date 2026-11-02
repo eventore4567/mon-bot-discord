@@ -83,10 +83,11 @@ def test_unified_dashboard_keeps_one_script_and_one_style_and_links_to_premium()
     html = (root / "index.html").read_text(encoding="utf-8")
     css = (root / "app.css").read_text(encoding="utf-8")
     assert html.count('id="navigation"') == 1
-    assert 'class="sx-premium-entry" href="/premium"' in html
+    # 02/11/2026 : plus de lien Premium dans la barre latérale (on reste dans le
+    # dashboard) ; la page d'accueil publique garde « Découvrir Premium ».
+    assert 'sx-premium-entry' not in html
     assert 'href="/premium">Découvrir Premium</a>' in html
     assert html.count('/*__CSS__*/') == 1
     assert html.count('/*__JS__*/') == 1
-    assert ".sx-premium-entry{" in css
     assert "var(--blue2)" in css
     assert "--accent:#77bcff" in premium.PAGE_HTML

@@ -769,11 +769,10 @@ class Ai(commands.Cog, name="Ai"):
         )
 
     def _build_ai_embed(self, question: str, answer: str, model_key: str, author) -> discord.Embed:
+        # Question et réponse seulement : plus de champ « Modèle » ni de pied de page.
         e = embeds.brand("🤖 SentriX AI")
         e.add_field(name="Question", value=question[:1024] or "…", inline=False)
         e.add_field(name="Réponse", value=(answer or "…")[:1024], inline=False)
-        e.add_field(name="Modèle", value=ai_service.MODEL_LABELS.get(model_key, model_key), inline=True)
-        e.set_footer(text=f"SentriX AI • Demandé par {author}")
         return e
 
     async def _build_system_instructions(
@@ -3064,12 +3063,9 @@ class Ai(commands.Cog, name="Ai"):
             return
 
         if len(answer) <= 1000:
-            view = AiResponseView(self, author_id=ctx.author.id, guild_id=ctx.guild.id if ctx.guild else None,
-                                   channel_id=ctx.channel.id, question=question, model_key=model_key)
             embed = self._build_ai_embed(question, answer, model_key, ctx.author)
             await _remplacer_attente(ctx, thinking_msg)
-            msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embed), view))
-            view.message = msg if not ctx.interaction else await ctx.interaction.original_response()
+            await panels.envoyer(ctx, panels.depuis_embed(embed))
             return
 
         chunks = ai_service.split_for_discord(answer, limit=1900)

@@ -110,10 +110,8 @@ async def main() -> int:
     check("Gérer le serveur" in in_prefix, "membre : +starboard-setup refusé (Gérer le serveur)", in_prefix[:120])
 
     # 5 — Vocaux : un membre sans salon temporaire reçoit l'explication, pas un refus de permission.
-    # /voice rename : masquée le 16/10, revenue le 28/10/2026 ; le « + » marche encore.
-    shown = await slash("voice", "rename", MEMBER, name="Mon salon")
-    check("propriétaire" in shown and "Permission" not in shown,
-          "membre : /voice rename explique qu'il faut posséder un vocal temporaire", shown[:140])
+    # /voice a quitté le menu « / » le 02/11/2026 (jamais utilisée) ; le « + » reste.
+    check(bot.tree.get_command("voice") is None, "/voice n'encombre plus le menu « / »")
     shown = await prefix("+voice-name Mon salon", MEMBER)
     check("propriétaire" in shown and "Permission" not in shown,
           "membre : +voice-name donne la même explication", shown[:140])

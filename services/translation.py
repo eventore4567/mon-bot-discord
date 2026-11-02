@@ -16,6 +16,7 @@ Ce qui a motivé ce module (constaté le 07/10/2026)
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -52,6 +53,8 @@ ALIASES: dict[str, str] = {
 
 MAX_LENGTH = 4500      # Google refuse au-delà de 5000 caractères.
 TIMEOUT_SECONDS = 12.0
+
+logger = logging.getLogger("bot.translation")
 
 
 class TranslationError(ValueError):
@@ -111,6 +114,30 @@ def _google(text: str, source: str, target: str) -> str:
     return GoogleTranslator(source=source, target=target).translate(text)
 
 
+async def _openai(text: str, source: str, target: str) -> str | None:
+    """Secours quand Google refuse : deep-translator lit la page web publique de
+    Google Translate, souvent bloquée depuis les IP d'hébergeurs (Railway). La clé
+    OpenAI du bot, elle, fonctionne en production (02/11/2026)."""
+    from utils import ai_service
+    import config
+
+    client = ai_service.get_client()
+    if client is None:
+        return None
+    langue = LANGUAGES.get(target, target)
+    depuis = "" if source == "auto" else f" depuis {LANGUAGES.get(source, source)}"
+    response = await client.responses.create(
+        model=getattr(config, "OPENAI_MODEL_FAST", "") or "gpt-5.6-luna",
+        instructions=(
+            f"Traduis le texte de l'utilisateur{depuis} vers {langue} (code {target}). "
+            "Réponds uniquement par la traduction, sans guillemets ni commentaire."
+        ),
+        input=text,
+    )
+    result = getattr(response, "output_text", None) or ai_service._extract_text(response)
+    return str(result or "").strip() or None
+
+
 async def translate(
     text: str,
     target: str,
@@ -133,15 +160,18 @@ async def translate(
         )
     except TranslationError:
         raise
-    except asyncio.TimeoutError as exc:
-        raise TranslationError("unavailable") from exc
-    except ImportError as exc:
-        raise TranslationError("unavailable") from exc
     except Exception as exc:  # noqa: BLE001 — le fournisseur lève des types variés
         name = type(exc).__name__.casefold()
         if "language" in name or "notsupported" in name or "invalid" in name:
             raise TranslationError("unsupported_language") from exc
-        raise TranslationError("unavailable") from exc
+        logger.warning("Traduction Google indisponible : %s: %s", type(exc).__name__, str(exc)[:200])
+        result = None
+    if not str(result or "").strip() and provider is None:
+        try:
+            result = await asyncio.wait_for(_openai(text, source_code, target_code), TIMEOUT_SECONDS * 2)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Traduction de secours OpenAI indisponible : %s: %s", type(exc).__name__, str(exc)[:200])
+            result = None
     if not str(result or "").strip():
         raise TranslationError("unavailable")
     return Translation(text=str(result), target=target_code, source=source_code)

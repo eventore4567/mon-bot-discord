@@ -17,7 +17,8 @@ PREFIXE = SimpleNamespace(interaction=None, clean_prefix="+")
 
 
 def test_en_slash_le_chemin_publie():
-    assert command_refs.reference(SLASH, "dailygames", nom_prefixe="jeuxjour") == "/games today"
+    # /games n'est plus dans le menu (02/11/2026) : le texte garde le « + » qui marche.
+    assert command_refs.reference(SLASH, "dailygames", nom_prefixe="jeuxjour") == "+jeuxjour"
     assert command_refs.reference(SLASH, "trivia") == "/play trivia"
     assert command_refs.reference(SLASH, "fight") == "/duel fight"
     # autodrop n'avait que le « + » jusqu'au 28/10/2026.

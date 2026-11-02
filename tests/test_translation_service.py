@@ -96,3 +96,41 @@ def test_autocompletion():
     assert ("English (en)", "en") in tr.suggestions("eng")
     assert all(code for _, code in tr.suggestions(""))
     assert len(tr.suggestions("")) <= 25
+
+
+def test_google_bloque_bascule_sur_openai(monkeypatch):
+    """Railway : Google bloque souvent les IP d'hébergeurs ; OpenAI prend le relais."""
+    import asyncio
+
+    from services import translation as tr
+
+    def google_bloque(text, source, target):
+        raise ConnectionError("429 Too Many Requests")
+
+    async def openai_ok(text, source, target):
+        return f"[{target}] {text}"
+
+    monkeypatch.setattr(tr, "_google", google_bloque)
+    monkeypatch.setattr(tr, "_openai", openai_ok)
+    result = asyncio.run(tr.translate("Bonjour", "en"))
+    assert result.text == "[en] Bonjour"
+
+
+def test_sans_secours_la_panne_reste_annoncee(monkeypatch):
+    import asyncio
+
+    import pytest
+
+    from services import translation as tr
+
+    def google_bloque(text, source, target):
+        raise ConnectionError("down")
+
+    async def openai_absent(text, source, target):
+        return None
+
+    monkeypatch.setattr(tr, "_google", google_bloque)
+    monkeypatch.setattr(tr, "_openai", openai_absent)
+    with pytest.raises(tr.TranslationError) as error:
+        asyncio.run(tr.translate("Bonjour", "en"))
+    assert error.value.code == "unavailable"

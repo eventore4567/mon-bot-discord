@@ -425,20 +425,9 @@ def _install_ai_recovery(bot: commands.Bot) -> None:
         if not chunks:
             chunks = ["Aucune réponse générée."]
 
-        try:
-            from . import ai as ai_module
-            view = ai_module.AiResponseView(
-                this,
-                author_id=ctx.author.id,
-                guild_id=guild_id,
-                channel_id=channel_id,
-                question=question,
-                model_key=model_key,
-            )
-            _clean_ai_view(view)
-        except Exception:
-            logger.exception("V3.2 : impossible de créer les actions rapides IA.")
-            view = None
+        # 02/11/2026 : la réponse seule, sans rangée de six boutons en dessous
+        # (Régénérer, Plus détaillé, Plus court…). Reformuler = reposer la question.
+        view = None
 
         # Bloc « réponse en texte libre » : ces messages-là n'ont pas de bannière.
         # Ce qui part APRÈS (carte de mission, montée de niveau) garde la sienne.

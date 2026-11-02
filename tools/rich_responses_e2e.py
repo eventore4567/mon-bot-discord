@@ -56,7 +56,8 @@ async def main() -> int:
     t = await say("+mbuy 999")
     check("n°999" in t and "+market" in t, "annonce indisponible : pourquoi et où regarder", t[:200])
     t = await say("+joinevent inconnu")
-    check("/events list" in t, "événement introuvable : la liste des noms exacts", t[:200])
+    # /events a quitté le menu « / » (02/11/2026) : le texte cite le « + » qui marche.
+    check("+event-list" in t, "événement introuvable : la liste des noms exacts", t[:200])
     t = await say("+afk pause café")
     check("pause café" in t and "prochain message" in t, "AFK : comment le statut se retire", t[:220])
 

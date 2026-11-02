@@ -25,7 +25,8 @@ def test_word_reactions_only_match_whole_words_and_ignore_accents():
 def test_30_oct_decision_only_operational_snippet_is_slash():
     """Configuration dans /setup ; seul l'envoi opérationnel reste en /."""
     paths = {e.path: e.source for e in slash_catalog.CATALOG}
-    assert paths["snippet send"] == "snippet send"
+    # 02/11/2026 : /snippet send quitte aussi le menu (jamais utilisée) ; +snippet reste.
+    assert "snippet send" not in paths
     assert not any(p.startswith("wordreact ") or p.startswith("recurring ") for p in paths)
     assert not any(p in paths for p in ("snippet create","snippet delete","snippet list"))
     from pathlib import Path
@@ -92,5 +93,5 @@ def test_recurring_new_rules_are_explicitly_paused():
 def test_setup_pages_dont_publish_configuration_slash():
     from utils.slash_catalog import CATALOG
     roots = {x.path for x in CATALOG}
-    assert "snippet send" in roots
+    assert "snippet send" not in roots
     assert not any(x.startswith(("recurring ", "wordreact ")) for x in roots)

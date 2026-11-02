@@ -162,8 +162,10 @@ def test_les_commandes_essentielles_restent_visibles_apres_simplification():
     for entry in sc._MASQUEES_DU_MENU:
         assert entry.source not in publiees
         assert entry.source in sc.RETIRED
-    for source in ("pay", "buy", "sell", "give-money", "reset-economy", "minesweeper",
-                   "tempban", "clearwarnings", "ticket-reopen"):
+    # Second tri du 02/11/2026 (usage réel) : sell, reset-economy, minesweeper
+    # quittent le menu « / » ; les gestes courants restent.
+    for source in ("pay", "buy", "give-money", "tempban", "clearwarnings", "ticket-reopen",
+                   "role mass", "balance", "warn", "music play"):
         assert source in publiees, source
 
 

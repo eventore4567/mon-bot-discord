@@ -1278,11 +1278,6 @@ html[data-theme="oled"] body.dashboard-locked::after{
 @media(max-width:760px){.guidance-hero-main,.guidance-diagnostic-head{align-items:flex-start;flex-direction:column}.guidance-score{width:100%;height:64px}.guidance-quick{grid-template-columns:1fr}.guidance-issue{grid-template-columns:1fr}.guidance-step{grid-template-columns:38px minmax(0,1fr)}.guidance-step .btn{grid-column:2;justify-self:start}}
 
 /* Lien Premium discret dans la navigation unifiée, mêmes couleurs que SentriX. */
-.sx-premium-entry{display:flex;align-items:center;justify-content:space-between;gap:8px;max-width:calc(100% - 20px);margin:12px 10px 6px;padding:11px 12px;border:1px solid var(--line2);border-radius:11px;background:var(--blue-bg);color:var(--blue2);font-size:12px;font-weight:750;line-height:1.35;text-decoration:none}
-.sx-premium-entry:hover{background:var(--hover-bg);color:var(--text);border-color:var(--blue)}
-.sx-premium-entry:focus-visible{outline:2px solid var(--blue2);outline-offset:2px}
-.sx-premium-entry span{font-size:14px;font-weight:650;opacity:.85}
-@media(max-width:700px){.sx-premium-entry{margin:10px 9px 15px}}
 
 
 /* SentriX Normal V1 — mise en page unifiée sans changement de runtime.
@@ -1341,7 +1336,6 @@ html:not([data-density="compact"]) .workspace{
 .field small{line-height:1.55}
 .notice{padding:12px 14px;line-height:1.65;overflow-wrap:anywhere}
 .empty{padding:29px 18px;line-height:1.6}
-.sx-premium-entry{max-width:100%;margin:9px 1px 6px;padding:12px 13px;border-radius:10px}
 @media(max-width:1000px){
   html:not([data-density="compact"]) .workspace{padding:22px 19px 40px}
   .module-grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr))}
@@ -1419,7 +1413,6 @@ html:not([data-density="compact"]) .workspace{
   background:linear-gradient(90deg,color-mix(in srgb,var(--blue-bg) 78%,var(--panel)),var(--panel2));
   box-shadow:inset 3px 0 0 var(--blue),0 5px 16px rgb(0 0 0 / .08);
 }
-.sx-premium-entry{background:linear-gradient(110deg,var(--blue-bg),var(--panel));border-color:color-mix(in srgb,var(--blue) 37%,var(--line));font-size:12px;font-weight:760}
 #content > .grid{gap:19px}
 #content .card{
   border:1px solid color-mix(in srgb,var(--line2) 78%,transparent);
