@@ -13,7 +13,7 @@ GLOBAL_CHAT_INPUT_BUDGET = 100
 # Cible produit : SentriX ne doit plus remplir les 100 emplacements juste parce
 # qu'ils existent. On garde quatre places au-dessus du tier obligatoire actuel
 # pour quelques racines utiles sans réintroduire tout l'historique.
-PUBLIC_CHAT_INPUT_TARGET = 85
+PUBLIC_CHAT_INPUT_TARGET = 80
 
 # Discord limite les commandes chat-input globales à 100 racines. Les quatre entrées
 # proof ci-dessous doivent rester disponibles même quand le catalogue historique remplit
@@ -22,6 +22,7 @@ PROOF_SLASH_PREFERRED = frozenset({"proof", "proofsetup", "proofstatus"})
 PROOF_SLASH_HIDDEN_HELPERS = frozenset({
     "proofexample", "proofexample-remove", "proofexamples", "proofreset",
 })
+LOW_VALUE_LEGACY_ROOTS = frozenset({"owner", "more"})
 
 
 def _v110_public_root_names() -> set[str]:
@@ -68,6 +69,7 @@ def _canonical_group_root_names() -> set[str]:
         if str(name).strip()
     )
     roots.update({"giveaway", "invites", "notifications"})
+    roots.difference_update(LOW_VALUE_LEGACY_ROOTS)
     return roots
 
 
@@ -99,6 +101,7 @@ def _excluded_names() -> set[str]:
         set(INTERNAL_MAINTENANCE_COMMANDS)
         | set(MERGED_COMMANDS)
         | set(PROOF_SLASH_HIDDEN_HELPERS)
+        | set(LOW_VALUE_LEGACY_ROOTS)
     )
     return legacy_excluded - _v110_public_root_names()
 
