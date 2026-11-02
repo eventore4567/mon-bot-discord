@@ -146,8 +146,14 @@ def _catalog(bot: commands.Bot) -> list[HelpEntry]:
             prefix_command=command,
         )
 
+    slash_mapping = {}
+    slash_mapping.update(getattr(bot, "_sentrix_v95_slash_mapping", {}) or {})
+    slash_mapping.update(getattr(bot, "_sentrix_v110_direct_mapping", {}) or {})
+
     for slash_name, slash_command in _walk_slash(bot):
-        key = _normalise(slash_name)
+        mapping = slash_mapping.get(f"/{slash_name}", {}) or {}
+        original_name = str(mapping.get("original") or "").strip()
+        key = _normalise(original_name or slash_name)
         if not key:
             continue
         entry = entries.get(key)
