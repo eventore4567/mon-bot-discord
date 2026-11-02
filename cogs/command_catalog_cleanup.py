@@ -51,8 +51,12 @@ NORMAL_DIRECT_COMMANDS = frozenset({
 # sync global et wipe serveur) restent chargées/permissionnées mais ne sont plus montrées
 # dans +help : elles ne doivent pas apparaître dans la surface administrative publique.
 # Outils internes/maintenance : ils restent chargés et permissionnés, mais ne
-# doivent plus encombrer +help. Les administrateurs qui les connaissent peuvent
-# toujours les utiliser en préfixe.
+# doivent plus encombrer +help ni le menu slash. Les administrateurs qui les
+# connaissent peuvent toujours les utiliser en préfixe.
+INTERNAL_MAINTENANCE_COMMANDS = frozenset({
+    "setstatus", "status-rotate", "footer", "theme", "set-bot",
+    "bot-servers", "bot-leave", "roleall", "massrole",
+})
 ADMIN_DIRECT_COMMANDS = frozenset()
 
 PRIVATE_OWNER_COMMANDS = frozenset({
