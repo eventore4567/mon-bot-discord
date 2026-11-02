@@ -98,6 +98,18 @@ def test_mute_accepte_une_duree_francaise_en_deux_mots():
 # ------------------------------------------------------------------ réponses courtes
 
 @pytest.mark.asyncio
+async def test_ack_slash_peut_etre_ephemere():
+    response = SimpleNamespace(is_done=lambda: False, defer=AsyncMock())
+    interaction = SimpleNamespace(response=response)
+    cog = _cog()
+    ctx = _ctx(interaction=interaction)
+
+    await cog._ack(ctx, ephemere=True)
+
+    response.defer.assert_awaited_once_with(ephemeral=True)
+
+
+@pytest.mark.asyncio
 async def test_ban_repond_par_une_ligne_et_journalise_la_fiche_complete():
     cog = _cog()
     cog._ack = AsyncMock()
@@ -114,6 +126,7 @@ async def test_ban_repond_par_une_ligne_et_journalise_la_fiche_complete():
          patch.object(panels, "envoyer", AsyncMock()) as envoyer:
         await Moderation.ban.callback(cog, ctx, membre, raison="spam")
 
+    cog._ack.assert_awaited_once_with(ctx, ephemere=True)
     cog.log_sanction.assert_awaited_once()
     court.assert_awaited_once()
     assert court.await_args.args[1] == "<@7> a été banni."
