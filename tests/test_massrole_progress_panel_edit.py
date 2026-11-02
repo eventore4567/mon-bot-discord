@@ -79,6 +79,7 @@ class MassroleProgressPanelEditTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("membres traités", source)
         self.assertIn("sur tous les membres du serveur", source)
         self.assertIn("Temps écoulé", source)
+        self.assertIn("Restants :", source)
         self.assertIn("Vitesse moyenne", source)
         self.assertIn('"▰" * filled + "▱" * (10 - filled)', source)
         self.assertIn("Fin estimée dans", source)
