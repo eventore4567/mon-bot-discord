@@ -15,9 +15,8 @@ GLOBAL_CHAT_INPUT_BUDGET = 100
 # avec une petite marge au-dessus des racines réellement obligatoires.
 PUBLIC_CHAT_INPUT_TARGET = 60
 
-# Discord limite les commandes chat-input globales à 100 racines. Les quatre entrées
-# proof ci-dessous doivent rester disponibles même quand le catalogue historique remplit
-# déjà le budget.
+# Discord limite les commandes chat-input globales à 100 racines. Les trois entrées
+# proof ci-dessous restent prioritaires dans la surface publique compacte.
 PROOF_SLASH_PREFERRED = frozenset({"proof", "proofsetup", "proofstatus"})
 PROOF_SLASH_HIDDEN_HELPERS = frozenset({
     "proofexample", "proofexample-remove", "proofexamples", "proofreset",
