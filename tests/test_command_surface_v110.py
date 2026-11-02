@@ -33,6 +33,15 @@ def test_info_level_and_music_use_common_names() -> None:
     assert surface.STANDARD_GROUPED_SLASH["music nowplaying"] == ("music", "nowplaying")
 
 
+def test_secondary_info_commands_use_info_group() -> None:
+    assert surface.STANDARD_DIRECT_SLASH["avatar"] == "avatar"
+    assert surface.STANDARD_DIRECT_SLASH["userinfo"] == "userinfo"
+    assert surface.STANDARD_DIRECT_SLASH["serverinfo"] == "serverinfo"
+    assert surface.STANDARD_GROUPED_SLASH["timestamp"] == ("info", "timestamp")
+    assert surface.STANDARD_GROUPED_SLASH["channelinfo"] == ("info", "channel")
+    assert surface.STANDARD_GROUPED_SLASH["membercount"] == ("info", "members")
+
+
 def test_economy_keeps_balance_direct_and_groups_other_actions() -> None:
     assert surface.STANDARD_DIRECT_SLASH["balance"] == "balance"
     for name in ("daily", "weekly", "work", "rob", "pay", "shop", "inventory", "gamble", "deposit", "withdraw"):
