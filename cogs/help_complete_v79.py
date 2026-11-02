@@ -115,17 +115,40 @@ def _walk_slash(bot: commands.Bot):
         yield from walk(node)
 
 
+def _cachee(command: commands.Command) -> bool:
+    """Cachée elle-même, sous un groupe caché, ou réservée au propriétaire du bot."""
+    if getattr(command, "hidden", False) or any(getattr(p, "hidden", False) for p in command.parents):
+        return True
+    return getattr(command, "cog_name", None) in OWNER_COGS
+
+
+def _commandes_retirees_de_l_aide() -> frozenset[str]:
+    try:
+        from . import command_catalog_cleanup as catalog
+
+        return frozenset(
+            str(name).casefold()
+            for name in (*catalog.MERGED_COMMANDS, *catalog.PURE_DUPLICATE_COMMANDS)
+        )
+    except Exception:  # noqa: BLE001
+        return frozenset()
+
+
 def _catalog(bot: commands.Bot, *, avec_masquees: bool = False) -> list[HelpEntry]:
     entries: dict[str, HelpEntry] = {}
 
-    # Ne pas filtrer command.hidden : l'utilisateur a demandé que toutes les commandes
-    # réellement enregistrées restent consultables, y compris les commandes admin/owner.
-    # Exception décidée le 16/10/2026 : les commandes jamais utilisées en production
-    # (utils/unused_commands.py) quittent les pages ; leur fiche reste accessible par
-    # leur nom exact (``avec_masquees``).
+    # 02/11/2026 : l'aide ne montre plus les commandes cachées, internes (propriétaire
+    # du bot) ni les anciens doublons fusionnés dans /setup et les centres. Comme les
+    # commandes jamais utilisées (utils/unused_commands.py, 16/10/2026), leur fiche
+    # reste accessible par leur nom exact (``avec_masquees``).
+    retirees = _commandes_retirees_de_l_aide()
     for command in bot.walk_commands():
         name = command.qualified_name.strip()
-        if not avec_masquees and unused_commands.masquee(name):
+        if not avec_masquees and (
+            unused_commands.masquee(name)
+            or _cachee(command)
+            or name.casefold() in retirees
+        ):
             continue
         key = _normalise(name)
         if not key:
@@ -475,9 +498,7 @@ class SentriXHelpV79(discord.ui.LayoutView):
     def _build_home(self) -> None:
         entries = _catalog(self.bot)
         grouped = _grouped(self.bot)
-        prefix_count = sum(entry.prefix_command is not None for entry in entries)
         slash_count = sum(entry.slash_name is not None for entry in entries)
-        slash_only = sum(entry.slash_name is not None and entry.prefix_command is None for entry in entries)
 
         keys = list(grouped.keys())
 
@@ -487,10 +508,10 @@ class SentriXHelpV79(discord.ui.LayoutView):
             discord.ui.Section(
                 discord.ui.TextDisplay(
                     "# Centre d'aide SentriX\n"
-                    "Choisis une catégorie ou recherche un nom simple. Chaque fiche montre la version `+` et la version `/`.\n"
-                    + (f"**{len(entries)} commandes** · **{prefix_count} en +** · **{slash_count} en /**"
-                       + (f" · **{slash_only} uniquement en /**" if slash_only else "")
-                       if _prefixe_actif() else f"**{slash_count} commandes** · tapez `/` pour les voir")
+                    "Choisissez une catégorie ou recherchez une commande. "
+                    "Chaque fiche réunit sa version `/` et sa version `+`.\n"
+                    + (f"**{len(entries)} commandes**" if _prefixe_actif()
+                       else f"**{slash_count} commandes** · tapez `/` pour les voir")
                 ),
                 accessory=setup_v73._thumbnail(self.bot),
             )
