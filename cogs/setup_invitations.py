@@ -31,18 +31,79 @@ _KNOWN_PRIVATE_SETUP_ACK = contextvars.ContextVar(
     "sentrix_known_private_setup_ack", default=False,
 )
 
+
+def _is_setup_slash(interaction) -> bool:
+    """Identify only the initial /setup slash, not its button interactions."""
+    if getattr(interaction, "type", None) != discord.InteractionType.application_command:
+        return False
+    data = getattr(interaction, "data", None)
+    if isinstance(data, dict) and str(data.get("name", "")).casefold() == "setup":
+        return True
+    command = getattr(interaction, "command", None)
+    return str(getattr(command, "qualified_name", "")).casefold() == "setup"
+
+
+def _mark_private_setup_ack(interaction) -> None:
+    extras = getattr(interaction, "extras", None)
+    if isinstance(extras, dict):
+        extras["_sentrix_setup_private_initial"] = True
+
+
+def _install_setup_initial_response_guard() -> None:
+    """Make the FIRST /setup acknowledgement ephemeral, even via old wrappers.
+
+    Deleting an original deferred response leaves the Discord client placeholder
+    « Le message n'a pas pu être chargé ». Instead, keep the original reply
+    ephemeral from its very first ACK. Only slash /setup is affected.
+    """
+    response_cls = discord.InteractionResponse
+
+    original_defer = response_cls.defer
+    if not getattr(original_defer, "_sentrix_setup_private_guard", False):
+        async def private_defer(self, *args, **kwargs):
+            interaction = getattr(self, "_parent", None)
+            if _is_setup_slash(interaction):
+                kwargs["ephemeral"] = True
+                kwargs["thinking"] = True
+                result = await original_defer(self, *args, **kwargs)
+                _mark_private_setup_ack(interaction)
+                return result
+            return await original_defer(self, *args, **kwargs)
+
+        private_defer._sentrix_setup_private_guard = True
+        response_cls.defer = private_defer
+
+    original_send = response_cls.send_message
+    if not getattr(original_send, "_sentrix_setup_private_guard", False):
+        async def private_initial_message(self, *args, **kwargs):
+            interaction = getattr(self, "_parent", None)
+            if _is_setup_slash(interaction):
+                kwargs["ephemeral"] = True
+                result = await original_send(self, *args, **kwargs)
+                _mark_private_setup_ack(interaction)
+                return result
+            return await original_send(self, *args, **kwargs)
+
+        private_initial_message._sentrix_setup_private_guard = True
+        response_cls.send_message = private_initial_message
+
+
 async def _prepare_private_setup_interaction(interaction: discord.Interaction) -> bool:
     """Ouverture privée sans supprimer le message originel de /setup.
 
-    Une réponse déjà différée par un vieux runtime peut être publique :
-    Discord ignore ephemeral=True sur le PREMIER followup d'un defer encore
-    « thinking ». On finalise donc cet original avec une notification NEUTRE,
-    puis le panneau part dans un followup éphémère entièrement distinct.
+    La garde initiale force /setup en privé dès son PREMIER ACK.
+    Si un plugin externe a malgré tout différé publiquement l'interaction
+    avant la garde, on finalise cet original sans le supprimer (sinon Discord
+    affiche « Le message n'a pas pu être chargé »), puis le panneau part dans
+    un followup éphémère distinct.
     """
     if not interaction.response.is_done():
         await interaction.response.defer(ephemeral=True, thinking=True)
         return False
     if _KNOWN_PRIVATE_SETUP_ACK.get():
+        return False
+    extras = getattr(interaction, "extras", None)
+    if isinstance(extras, dict) and extras.get("_sentrix_setup_private_initial"):
         return False
 
     if (
@@ -63,13 +124,10 @@ async def _prepare_private_setup_interaction(interaction: discord.Interaction) -
             await raw_edit(interaction, **kwargs)
         else:
             await interaction.edit_original_response(**kwargs)
-        # Le message d'acquittement public n'a aucune raison de rester dans le
-        # salon. Il faut d'abord finaliser le defer (sinon le premier followup
-        # perd son caractère éphémère), PUIS supprimer cet original.
-        try:
-            await interaction.delete_original_response()
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-            logger.warning("Impossible de retirer l'acquittement public de /setup.")
+        # Ne jamais supprimer cette réponse différée : Discord affiche alors
+        # « Le message n'a pas pu être chargé » dans le salon.
+        # Les nouveaux /setup passent par la garde initiale privée ci-dessus.
+        logger.warning("Un /setup a reçu un defer public avant la garde privée.")
     return True
 
 
@@ -745,6 +803,7 @@ def _patch_dashboard_final() -> None:
 
 
 def _install_final_runtime(bot: commands.Bot) -> None:
+    _install_setup_initial_response_guard()
     _patch_setup_v74(bot)
     _patch_unknown_command_final(bot)
     _patch_dashboard_final()
@@ -762,6 +821,8 @@ def _register_final_runtime(bot: commands.Bot) -> None:
 
 
 def install(_bot) -> None:
+    # Installer AVANT la première commande, pas seulement dans on_ready.
+    _install_setup_initial_response_guard()
     # Le listener doit être enregistré même si l'ancienne section a déjà été installée.
     _register_final_runtime(_bot)
 
