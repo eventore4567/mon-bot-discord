@@ -27,9 +27,10 @@ def test_info_level_and_music_use_common_names() -> None:
     assert surface.STANDARD_DIRECT_SLASH["serverinfo"] == "serverinfo"
     assert surface.STANDARD_DIRECT_SLASH["leaderboard-levels"] == "leaderboard"
     assert surface.STANDARD_DIRECT_SLASH["play"] == "play"
-    assert surface.STANDARD_DIRECT_SLASH["music pause"] == "pause"
-    assert surface.STANDARD_DIRECT_SLASH["music queue"] == "queue"
-    assert surface.STANDARD_DIRECT_SLASH["music nowplaying"] == "nowplaying"
+    assert "music pause" not in surface.STANDARD_DIRECT_SLASH
+    assert surface.STANDARD_GROUPED_SLASH["music pause"] == ("music", "pause")
+    assert surface.STANDARD_GROUPED_SLASH["music queue"] == ("music", "queue")
+    assert surface.STANDARD_GROUPED_SLASH["music nowplaying"] == ("music", "nowplaying")
 
 
 def test_role_management_uses_role_group() -> None:
