@@ -59,10 +59,7 @@ STANDARD_DIRECT_SLASH: dict[str, str] = {
     "avatar": "avatar",
     "userinfo": "userinfo",
     "translate": "translate",
-    "timestamp": "timestamp",
     "serverinfo": "serverinfo",
-    "channelinfo": "channelinfo",
-    "membercount": "membercount",
 
     # Niveaux — /level et /leaderboard sont des conventions répandues.
     "level": "level",
@@ -110,6 +107,11 @@ STANDARD_GROUPED_SLASH: dict[str, tuple[str, str]] = {
     "gamble": ("economy", "gamble"),
     "deposit": ("economy", "deposit"),
     "withdraw": ("economy", "withdraw"),
+
+    # Informations secondaires : regroupées sous /info pour garder le menu court.
+    "timestamp": ("info", "timestamp"),
+    "channelinfo": ("info", "channel"),
+    "membercount": ("info", "members"),
 }
 
 # /play est fourni par la commande top-level `play`, qui appelle déjà le même moteur que
@@ -284,6 +286,8 @@ def _install_standard_slash_surface(bot) -> tuple[int, list[str]]:
                         if root_name == "music"
                         else "Solde, récompenses, banque, boutique et économie."
                         if root_name == "economy"
+                        else "Informations serveur, salons, membres et horodatages."
+                        if root_name == "info"
                         else f"Commandes {root_name} de SentriX."
                     )[:100],
                 )
