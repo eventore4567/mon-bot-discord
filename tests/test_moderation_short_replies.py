@@ -98,6 +98,24 @@ def test_mute_accepte_une_duree_francaise_en_deux_mots():
 # ------------------------------------------------------------------ réponses courtes
 
 @pytest.mark.asyncio
+async def test_reply_slash_mutant_est_prive_mais_consultation_reste_normale():
+    cog = _cog()
+
+    interaction = SimpleNamespace()
+    ctx = _ctx(interaction=interaction)
+    ctx.command = SimpleNamespace(name="warn")
+    with patch.object(panels, "texte_court", AsyncMock()) as court:
+        await cog._reply(ctx, "ok")
+    assert court.await_args.kwargs["ephemere"] is True
+
+    ctx = _ctx(interaction=interaction)
+    ctx.command = SimpleNamespace(name="warnings")
+    with patch.object(panels, "texte_court", AsyncMock()) as court:
+        await cog._reply(ctx, "liste")
+    assert court.await_args.kwargs["ephemere"] is False
+
+
+@pytest.mark.asyncio
 async def test_ack_slash_peut_etre_ephemere():
     response = SimpleNamespace(is_done=lambda: False, defer=AsyncMock())
     interaction = SimpleNamespace(response=response)
