@@ -84,6 +84,9 @@ class MassroleProgressPanelEditTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("processed - last_reported >= 250", source)
         self.assertIn("now_mono - last_progress_edit >= 2.0", source)
         self.assertIn("await panels.editer(progress, panels.depuis_embed(result))", source)
+        self.assertIn("handled_member_ids", source)
+        self.assertIn("pending_ids", source)
+        self.assertIn("for member in [*batch, *guild.members]", source)
 
     async def test_la_progression_est_editee_via_panels_editer_pas_edit_embed(self):
         role = _FakeRole(position=1)
