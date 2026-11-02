@@ -104,6 +104,9 @@ STANDARD_DIRECT_SLASH: dict[str, str] = {
 STANDARD_GROUPED_SLASH: dict[str, tuple[str, str]] = {
     "giverole": ("role", "give"),
     "removerole": ("role", "remove"),
+    # Distribution globale : /role massrole action:add role:@Rôle
+    # conserve la logique de +massrole add/del sans consommer une nouvelle racine slash.
+    "massrole": ("role", "massrole"),
 }
 
 # /play est fourni par la commande top-level `play`, qui appelle déjà le même moteur que
