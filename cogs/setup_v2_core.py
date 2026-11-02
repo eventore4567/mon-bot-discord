@@ -605,6 +605,9 @@ async def set_currency(
         "currency_symbol=excluded.currency_symbol,updated_by=excluded.updated_by,updated_at=excluded.updated_at",
         (int(guild_id), singular, plural, symbol, actor_id, int(time.time())),
     )
+    # Le classement économique et les profils lisaient deux sources d'emojis
+    # différentes. Synchroniser l'affichage sans toucher aux soldes.
+    await bot.db.set_stats_settings(int(guild_id), {"economy_emoji": symbol})
 
 
 async def get_role_command_decision(
