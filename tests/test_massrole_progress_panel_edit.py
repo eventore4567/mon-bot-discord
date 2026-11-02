@@ -15,10 +15,9 @@ né en panneau. Ce test vérifie que c'est bien panels.editer qui est appelé �
 `progress` est un objet nu sans `.edit()` : l'ancien code lèverait donc une
 AttributeError ici si la régression revenait.
 
-Le seuil de mise à jour (tous les 2000 membres traités) n'est atteint que si
-``processed`` (qui n'augmente que par lots de 15, ``batch_size``) tombe
-exactement sur un multiple de 2000 — le plus petit tel nombre est
-PPCM(15, 2000) = 6000, d'où le nombre de membres simulés ci-dessous."""
+La progression est maintenant rafraîchie par seuil de membres + délai minimal,
+avec ETA, durée écoulée et vitesse moyenne. Le test conserve un gros serveur simulé
+pour vérifier que l'édition Components V2 reste utilisée pendant le traitement."""
 from __future__ import annotations
 
 import asyncio
@@ -71,6 +70,21 @@ class _ProgressMessage:
 
 
 class MassroleProgressPanelEditTests(unittest.IsolatedAsyncioTestCase):
+    def test_la_progression_affiche_compteur_temps_et_eta(self):
+        from pathlib import Path
+
+        source = (
+            Path(__file__).resolve().parents[1] / "cogs" / "server_choice_roles.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("membres traités", source)
+        self.assertIn("Temps écoulé", source)
+        self.assertIn("Vitesse moyenne", source)
+        self.assertIn("Fin estimée dans", source)
+        self.assertIn("Durée totale estimée", source)
+        self.assertIn("processed - last_reported >= 250", source)
+        self.assertIn("now_mono - last_progress_edit >= 2.0", source)
+        self.assertIn("await panels.editer(progress, panels.depuis_embed(result))", source)
+
     async def test_la_progression_est_editee_via_panels_editer_pas_edit_embed(self):
         role = _FakeRole(position=1)
         me = SimpleNamespace(
