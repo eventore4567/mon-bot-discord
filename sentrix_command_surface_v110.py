@@ -64,8 +64,6 @@ STANDARD_DIRECT_SLASH: dict[str, str] = {
     # Niveaux — /level et /leaderboard sont des conventions répandues.
     "level": "level",
     "leaderboard-levels": "leaderboard",
-    "set-xp": "setxp",
-    "add-xp": "addxp",
 
     # Économie — /balance reste direct ; le reste est regroupé sous /economy.
     "balance": "balance",
@@ -112,6 +110,10 @@ STANDARD_GROUPED_SLASH: dict[str, tuple[str, str]] = {
     "timestamp": ("info", "timestamp"),
     "channelinfo": ("info", "channel"),
     "membercount": ("info", "members"),
+
+    # Administration XP : regroupée sous /level, sans racines setxp/addxp séparées.
+    "set-xp": ("level", "setxp"),
+    "add-xp": ("level", "addxp"),
 }
 
 # /play est fourni par la commande top-level `play`, qui appelle déjà le même moteur que
@@ -288,6 +290,8 @@ def _install_standard_slash_surface(bot) -> tuple[int, list[str]]:
                         if root_name == "economy"
                         else "Informations serveur, salons, membres et horodatages."
                         if root_name == "info"
+                        else "Niveaux, XP, classements et administration XP."
+                        if root_name == "level"
                         else f"Commandes {root_name} de SentriX."
                     )[:100],
                 )
