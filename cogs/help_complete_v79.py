@@ -488,8 +488,8 @@ class SentriXHelpV79(discord.ui.LayoutView):
             discord.ui.Section(
                 discord.ui.TextDisplay(
                     "# Centre d'aide SentriX\n"
-                    "Le catalogue affiche maintenant **toutes les commandes enregistrées** : commandes `+`, commandes `/`, "
-                    "sous-commandes slash et commandes administratives.\n\n"
+                    "Le catalogue affiche uniquement la **surface utile et visible** de SentriX : commandes `+`, commandes `/` "
+                    "et commandes staff conservées. Les commandes internes ou masquées n'encombrent plus l'aide.\n\n"
                     f"**{len(entries)} commandes uniques** · **{prefix_count} en +** · **{slash_count} en /**"
                     + (f" · **{slash_only} uniquement en /**" if slash_only else "")
                     + f"\nCatégories : page **{self.home_index + 1}/{pages}**"
@@ -560,7 +560,7 @@ class SentriXHelpV79(discord.ui.LayoutView):
             subtitle = description
         elif self.mode == "all":
             title = "📚 Toutes les commandes"
-            subtitle = "Catalogue complet des commandes `+` et `/` enregistrées dans SentriX."
+            subtitle = "Catalogue des commandes `+` et `/` visibles dans SentriX."
         else:
             title = "🔎 Recherche"
             subtitle = f"Résultats pour **{self.query or ''}**"
