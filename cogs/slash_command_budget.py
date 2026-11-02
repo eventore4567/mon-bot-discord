@@ -45,6 +45,30 @@ def _v110_public_root_names() -> set[str]:
     return roots
 
 
+def _v110_source_names() -> set[str]:
+    """Noms historiques remplacés par la surface V110 finale.
+
+    Les sources regroupées (/daily -> /economy daily) et les alias renommés
+    (/nickname -> /setnick) ne doivent plus survivre comme racines slash séparées.
+    """
+    try:
+        import sentrix_command_surface_v110 as surface
+    except (ImportError, ModuleNotFoundError):
+        return set()
+
+    names = {
+        str(name).casefold().strip()
+        for name in getattr(surface, "STANDARD_GROUPED_SLASH", {})
+        if str(name).strip()
+    }
+    for source_name, public_name in getattr(surface, "STANDARD_DIRECT_SLASH", {}).items():
+        source = str(source_name).casefold().strip()
+        public = str(public_name).casefold().strip()
+        if source and source != public:
+            names.add(source)
+    return names
+
+
 def _canonical_group_root_names() -> set[str]:
     """Racines V95 qui donnent accès aux fonctions avancées sans multiplier les slash.
 
@@ -84,14 +108,17 @@ def _required_names() -> set[str]:
 
 
 def _preferred_names() -> set[str]:
-    """Tier 2 : anciennes racines utiles, conservées seulement après le tier 1."""
-    from .command_catalog_cleanup import NORMAL_DIRECT_COMMANDS
+    """Tier 2 : anciennes racines utiles, sans les doublons déjà groupés/renommés."""
+    from .command_catalog_cleanup import GAME_COMMANDS, NORMAL_DIRECT_COMMANDS
 
-    return _required_names() | set(NORMAL_DIRECT_COMMANDS)
+    legacy = set(NORMAL_DIRECT_COMMANDS)
+    legacy.difference_update(_v110_source_names())
+    legacy.difference_update(GAME_COMMANDS)
+    return _required_names() | legacy
 
 
 def _excluded_names() -> set[str]:
-    from .command_catalog_cleanup import INTERNAL_MAINTENANCE_COMMANDS, MERGED_COMMANDS
+    from .command_catalog_cleanup import GAME_COMMANDS, INTERNAL_MAINTENANCE_COMMANDS, MERGED_COMMANDS
 
     # MERGED_COMMANDS décrit la visibilité historique des commandes préfixées. V110 peut
     # réutiliser l'un de ces noms comme racine slash standard (ex. /queue, /resume,
@@ -102,6 +129,8 @@ def _excluded_names() -> set[str]:
         | set(MERGED_COMMANDS)
         | set(PROOF_SLASH_HIDDEN_HELPERS)
         | set(LOW_VALUE_LEGACY_ROOTS)
+        | set(GAME_COMMANDS)
+        | _v110_source_names()
     )
     return legacy_excluded - _v110_public_root_names()
 
