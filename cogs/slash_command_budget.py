@@ -10,6 +10,10 @@ from discord.ext import commands
 
 logger = logging.getLogger("bot.slash-budget")
 GLOBAL_CHAT_INPUT_BUDGET = 100
+# Cible produit : SentriX ne doit plus remplir les 100 emplacements juste parce
+# qu'ils existent. On garde quatre places au-dessus du tier obligatoire actuel
+# pour quelques racines utiles sans réintroduire tout l'historique.
+PUBLIC_CHAT_INPUT_TARGET = 85
 
 # Discord limite les commandes chat-input globales à 100 racines. Les quatre entrées
 # proof ci-dessous doivent rester disponibles même quand le catalogue historique remplit
@@ -123,10 +127,10 @@ def finalize(bot: commands.Bot) -> None:
     preferred = _preferred_names()
     excluded = _excluded_names()
 
-    if len(required) > GLOBAL_CHAT_INPUT_BUDGET:
+    if len(required) > PUBLIC_CHAT_INPUT_TARGET:
         raise RuntimeError(
-            f"Budget slash incohérent : {len(required)} racines obligatoires pour "
-            f"{GLOBAL_CHAT_INPUT_BUDGET} places."
+            f"Surface slash incohérente : {len(required)} racines obligatoires pour "
+            f"une cible publique de {PUBLIC_CHAT_INPUT_TARGET}."
         )
 
     for item in list(_global_roots(tree)):
@@ -135,7 +139,7 @@ def finalize(bot: commands.Bot) -> None:
             _remove_root(tree, name)
 
     roots = _global_roots(tree)
-    if len(roots) <= GLOBAL_CHAT_INPUT_BUDGET:
+    if len(roots) <= PUBLIC_CHAT_INPUT_TARGET:
         return
 
     # Ordre déterministe par priorité, tout en conservant l'ordre de construction du tree
@@ -144,11 +148,11 @@ def finalize(bot: commands.Bot) -> None:
     for tier in (required, preferred):
         for item in roots:
             name = str(getattr(item, "name", "") or "").casefold()
-            if name in tier and len(keep) < GLOBAL_CHAT_INPUT_BUDGET:
+            if name in tier and len(keep) < PUBLIC_CHAT_INPUT_TARGET:
                 keep.add(name)
     for item in roots:
         name = str(getattr(item, "name", "") or "").casefold()
-        if name not in keep and len(keep) < GLOBAL_CHAT_INPUT_BUDGET:
+        if name not in keep and len(keep) < PUBLIC_CHAT_INPUT_TARGET:
             keep.add(name)
 
     for item in list(roots):
@@ -208,7 +212,7 @@ def install(bot: commands.Bot) -> None:
                 (item for item in roots if str(getattr(item, "name", "")).casefold() == name),
                 None,
             )
-            if existing is None and len(roots) >= GLOBAL_CHAT_INPUT_BUDGET:
+            if existing is None and len(roots) >= PUBLIC_CHAT_INPUT_TARGET:
                 required = _required_names()
                 preferred = _preferred_names()
 
@@ -247,7 +251,8 @@ def install(bot: commands.Bot) -> None:
     tree.add_command = MethodType(budgeted_add, tree)
     finalize(bot)
     logger.info(
-        "Budget slash SentriX actif : maximum %s racines, tier1=%s, proof=%s, V110=%s.",
+        "Budget slash SentriX actif : cible publique=%s, limite Discord=%s, tier1=%s, proof=%s, V110=%s.",
+        PUBLIC_CHAT_INPUT_TARGET,
         GLOBAL_CHAT_INPUT_BUDGET,
         len(_required_names()),
         ",".join(sorted(PROOF_SLASH_PREFERRED)),
