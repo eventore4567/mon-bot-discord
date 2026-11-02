@@ -55,9 +55,9 @@ NORMAL_DIRECT_COMMANDS = frozenset({
 # connaissent peuvent toujours les utiliser en préfixe.
 INTERNAL_MAINTENANCE_COMMANDS = frozenset({
     "setstatus", "status-rotate", "footer", "theme", "set-bot",
-    "bot-servers", "bot-leave", "roleall", "massrole",
+    "bot-servers", "bot-leave", "roleall",
 })
-ADMIN_DIRECT_COMMANDS = frozenset()
+ADMIN_DIRECT_COMMANDS = frozenset({"massrole"})
 
 PRIVATE_OWNER_COMMANDS = frozenset({
     "bl", "blinfo", "unbl", "editbl", "sync", "syncguild", "wipe-server",
