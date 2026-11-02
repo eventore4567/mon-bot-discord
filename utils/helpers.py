@@ -317,7 +317,7 @@ async def double_confirm_destructive(
 
     Ce garde est volontairement centralisé afin que les commandes de remise à zéro,
     purge ou suppression en masse aient le même comportement. Aucun clic d'un tiers
-    n'est accepté grâce à :class:\`ConfirmView\`.
+    n'est accepté grâce à :class:`ConfirmView`.
     """
     from utils import sentrix_panels as panels
 

@@ -47,7 +47,7 @@ def test_v4_initial_install_hides_trap_and_skips_legacy_panels_in_mode_one():
     )[0]
     assert 'view_channel=honeypot_enabled' in section
     assert 'send_messages=honeypot_enabled' in section
-    assert 'if publish_panels and honeypot_enabled:' in section
+    assert 'if publish_panels and honeypot_enabled and isinstance(trap, discord.TextChannel):' in section
     assert 'if honeypot_enabled and sanction == "softban":' in section
 
 

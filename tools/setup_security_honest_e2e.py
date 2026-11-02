@@ -38,16 +38,12 @@ def check(ok: bool, label: str) -> None:
     print(("OK   " if ok else "FAIL ") + label)
 
 
-def switch_select(view) -> discord.ui.Select:
+def protection_select(view) -> discord.ui.Select:
     for top in view.children:
         for item in walk(top):
-            if isinstance(item, discord.ui.Select) and item.placeholder == "Activer / désactiver un module":
+            if isinstance(item, discord.ui.Select) and item.placeholder == "Choisir les protections anti à activer":
                 return item
-    raise AssertionError("menu des interrupteurs introuvable")
-
-
-def option_label(view, key: str) -> str:
-    return next(o.label for o in switch_select(view).options if o.value == key)
+    raise AssertionError("menu des protections introuvable")
 
 
 def texts(view) -> str:
@@ -55,10 +51,11 @@ def texts(view) -> str:
                      if isinstance(item, discord.ui.TextDisplay))
 
 
-async def press(bot, guild, key: str) -> None:
-    view = await build(bot, guild, None)
-    select = switch_select(view)
-    select._values = [key]
+async def choose(bot, guild, keys: set[str]) -> None:
+    """L'administrateur coche exactement ces protections sur la page Sécurité."""
+    view = await build(bot, guild, "security")
+    select = protection_select(view)
+    select._values = sorted(keys)
     await select.callback(interaction(bot))
     await h.settle(idle=0.3, maximum=3)
 
@@ -93,15 +90,18 @@ async def main() -> int:
     await bot.db.execute("DELETE FROM automod_settings WHERE guild_id=?", (h.GID,))
     core.invalidate_module_cache(h.GID)
     bot.get_cog("Automod").automod_cache.clear()
-    view = await build(bot, guild, None)
-    check("aucune protection" in option_label(view, "security"),
-          f"serveur neuf : « {option_label(view, 'security')} » (aucune activation implicite)")
+    view = await build(bot, guild, "security")
+    cochees = [o.value for o in protection_select(view).options if o.default]
+    check(not cochees, f"serveur neuf : aucune protection cochée ({cochees})")
     # Pas de ligne du tout (création paresseuse, cache V14) = aucune protection.
     row = dict(await bot.db.get_automod(h.GID) or {})
     check(not row.get("antispam") and not row.get("antiraid") and not row.get("antinuke"),
           "serveur neuf : anti-spam, anti-raid et anti-nuke à zéro en base")
     neuf = await spam_deleted(bot, guild, 5)
     check(neuf == 0, f"serveur neuf : aucun message supprimé sans choix admin ({neuf}/8)")
+    accueil = texts(await build(bot, guild, None))
+    actives = accueil.split("**Actives", 1)[1].split("**Désactivées", 1)[0] if "**Actives" in accueil else ""
+    check("Sécurité" not in actives, f"serveur neuf : l'accueil ne compte pas la Sécurité comme active ({' '.join(actives.split())})")
 
     zeros = ", ".join(
         f"{champ}=0"
@@ -113,32 +113,29 @@ async def main() -> int:
     # Un admin qui a tout coupé à la main : l'écran le dit et le spam passe.
     await bot.db.execute(f"UPDATE automod_settings SET {zeros} WHERE guild_id=?", (h.GID,))
     bot.get_cog("Automod").automod_cache.clear()
-    view = await build(bot, guild, None)
-    check("aucune protection" in option_label(view, "security"),
-          f"tout coupé : l'interrupteur dit « {option_label(view, 'security')} »")
-    check("Aucune protection ne tourne" in texts(view), "tout coupé : l'accueil prévient qu'aucune protection ne tourne")
+    view = await build(bot, guild, "security")
+    check(not [o for o in protection_select(view).options if o.default], "tout coupé : aucune protection cochée")
     avant = await spam_deleted(bot, guild, 0)
     check(avant == 0, f"tout coupé : le spam n'est effectivement pas traité ({avant}/8 supprimés) — l'écran dit vrai")
 
-    await press(bot, guild, "security")
+    await choose(bot, guild, {"antispam", "antiraid", "antinuke"})
+    bot.get_cog("Automod").automod_cache.clear()
+    row = await bot.db.fetchone("SELECT antispam, antiraid, antinuke, antilink FROM automod_settings WHERE guild_id=?", (h.GID,))
+    check(row is not None and row["antispam"] and row["antiraid"] and row["antinuke"] and not row["antilink"],
+          "cocher anti-spam, anti-raid et anti-nuke : exactement ces trois-là en base")
+    view = await build(bot, guild, "security")
+    cochees = {o.value for o in protection_select(view).options if o.default}
+    check({"antispam", "antiraid", "antinuke"} <= cochees and "antilink" not in cochees,
+          f"la page affiche l'état réel ({sorted(cochees)})")
+    apres = await spam_deleted(bot, guild, 1)
+    check(apres >= 6, f"anti-spam coché : le spam est supprimé ({apres}/8)")
+
+    # Tout décocher coupe réellement, et le spam repasse.
+    await choose(bot, guild, set())
     bot.get_cog("Automod").automod_cache.clear()
     row = await bot.db.fetchone("SELECT antispam, antiraid, antinuke FROM automod_settings WHERE guild_id=?", (h.GID,))
-    check(row is not None and row["antispam"] and row["antiraid"] and row["antinuke"],
-          "un clic sur « Sécurité » active anti-spam, anti-raid et anti-nuke")
-    view = await build(bot, guild, None)
-    check(option_label(view, "security") == "Sécurité — Actif", f"après le clic : « {option_label(view, 'security')} »")
-    check("Aucune protection ne tourne" not in texts(view), "après le clic : plus d'avertissement")
-    apres = await spam_deleted(bot, guild, 1)
-    check(apres >= 6, f"après le clic : le spam est supprimé ({apres}/8)")
-
-    # Un admin qui a retiré l'anti-liens puis coupe et rallume la sécurité.
-    await bot.db.set_automod(h.GID, "antilink", 0)
-    await press(bot, guild, "security")
-    check(not await core.module_enabled(bot, h.GID, "security"), "second clic : la sécurité est coupée")
-    await press(bot, guild, "security")
-    row = await bot.db.fetchone("SELECT antispam, antilink FROM automod_settings WHERE guild_id=?", (h.GID,))
-    check(await core.module_enabled(bot, h.GID, "security") and row["antispam"] and not row["antilink"],
-          "rallumer garde les choix de l'admin (anti-liens reste coupé)")
+    check(row is not None and not row["antispam"] and not row["antiraid"] and not row["antinuke"],
+          "tout décocher : les protections sont coupées en base")
 
     failed = [label for ok, label in RESULTS if not ok]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} vérifications passées.")

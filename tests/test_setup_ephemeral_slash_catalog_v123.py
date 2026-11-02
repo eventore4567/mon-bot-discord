@@ -34,7 +34,7 @@ async def test_slash_setup_ne_defer_jamais_publiquement():
 
 @pytest.mark.asyncio
 async def test_slash_setup_indisponible_est_ephemere():
-    response = SimpleNamespace(defer=AsyncMock(), send_message=AsyncMock())
+    response = SimpleNamespace(defer=AsyncMock(), send_message=AsyncMock(), is_done=lambda: False)
     followup = SimpleNamespace(send=AsyncMock())
     interaction = SimpleNamespace(response=response, followup=followup)
     bot = SimpleNamespace(get_cog=lambda _name: None)

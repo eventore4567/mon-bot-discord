@@ -376,7 +376,7 @@ class AutomaticVerification(commands.Cog, name=_COG_NAME):
         info = discord.Embed(
             title="SentriX • Vérification automatique",
             description=(
-                f"Vous n'avez **rien à faire**. SentriX vérifie automatiquement votre compte avec **20 facteurs** techniques et comportementaux. Il faut au minimum **{settings['threshold']}/20** pour être validé.\n\nSi les règles Discord du serveur doivent être acceptées, fais-le normalement : SentriX relancera le contrôle tout seul juste après. Un score insuffisant ne provoque aucun bannissement automatique."
+                f"Vous n'avez **rien à faire**. SentriX vérifie automatiquement votre compte avec **20 facteurs** techniques et comportementaux. Il faut au minimum **{settings['threshold']}/20** pour être validé.\n\nSi les règles Discord du serveur doivent être acceptées, faites-le normalement : SentriX relancera le contrôle tout seul juste après. Un score insuffisant ne provoque aucun bannissement automatique."
             ),
             colour=discord.Color.blurple(),
         )

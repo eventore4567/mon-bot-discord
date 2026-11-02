@@ -188,7 +188,7 @@ class ActionModal(discord.ui.Modal):
             await enregistrer_action(self.shell, self.name, self.kind, value, seconds)
         except ValueError as exc:
             return await notify(interaction, str(exc))
-        await notify(interaction, "Action ajoutée. Actualise le panneau pour la voir.")
+        await notify(interaction, "Action ajoutée. Actualisez le panneau pour la voir.")
 
 
 class DureeRoleModal(discord.ui.Modal, title="Durée du rôle temporaire"):
@@ -374,7 +374,7 @@ class CustomCommandAccessView(discord.ui.View):
             return await notify(interaction, "Commandes personnalisées indisponibles.")
         target = values[0] if values else None
         if kind != "everyone" and target is None:
-            return await notify(interaction, "Choisis un rôle ou un membre.")
+            return await notify(interaction, "Choisissez un rôle ou un membre.")
         try:
             await service.set_custom_command_access(
                 self.shell.guild, interaction.user.id, self.command_id,
@@ -528,7 +528,7 @@ async def build_page(shell) -> None:
                                         "Activez d'abord le système d'économie ou de niveaux dans /setup.")
             if kind in ROLE_KINDS:
                 return await interaction.response.send_message(
-                    "Choisis un rôle ci-dessous. SentriX vérifie les permissions avant l'enregistrement.",
+                    "Choisissez un rôle ci-dessous. SentriX vérifie les permissions avant l'enregistrement.",
                     view=ChoisirRoleAction(
                         shell, str(selected["name"]), kind, module_states,
                     ),
@@ -564,7 +564,7 @@ async def build_page(shell) -> None:
     async def toggle_format(interaction):
         row = await selected_row(shell)
         if row is None:
-            return await notify(interaction, "Choisis d'abord une commande.")
+            return await notify(interaction, "Choisissez d'abord une commande.")
         platform = shell.bot.get_cog("PlatformV4")
         if platform is None:
             return await notify(interaction, "Créateur de commandes indisponible.")

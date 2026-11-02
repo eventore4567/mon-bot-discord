@@ -39,11 +39,14 @@ def test_language_reachable_without_duplicate_guide():
 
 
 def test_setup_is_private_and_prefix_does_not_expose_controls():
-    text = SOURCE.read_text(encoding="utf-8")
-    start = text.index("async def _send_setup_v74(")
-    end = text.index("\ndef install(", start)
-    send = text[start:end]
-    assert "ephemeral=True" in send
-    assert "delete_after=15" in send
-    assert "Utilise" not in send or "/setup" in send
-    assert "return await target.send(" in send
+    # Le chemin réellement servi est la dernière couche (cogs/setup_invitations.py,
+    # final_send_setup) : /setup en éphémère, +setup en panneau public réservé à
+    # son auteur (décision du 01/11/2026, PR #607), après le contrôle d'accès.
+    text = (SOURCE.parent / "setup_invitations.py").read_text(encoding="utf-8")
+    start = text.index("    async def final_send_setup(")
+    send = text[start:text.index("    current = setup_ui.OfficialSetup.send_setup", start)]
+    prefix = send[:send.index("# Discord ne sait pas envoyer un panneau éphémère")]
+    assert prefix.index("_can_setup(") < prefix.index("panels.envoyer(target, view, ephemere=False)")
+    slash = send[send.index("# Discord ne sait pas envoyer un panneau éphémère"):]
+    assert "ephemere=True" in slash and "ephemere=False" not in slash
+    assert "Tu n'as pas" not in send

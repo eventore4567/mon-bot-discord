@@ -82,7 +82,9 @@ def test_custom_role_select_numeric_modal_and_embed_option():
     platform = source("cogs/platform_v4.py")
     assert "ADD COLUMN ping_role_id" in platform
     assert "roles=[ping_role] if ping_role else False" in platform
-    assert "message.channel.send(content=ping, embed=embed" in platform
+    # Embed natif, avec la bande fine au-dessus quand elle est disponible.
+    assert "content=ping, embed=embed, allowed_mentions=mentions" in platform
+    assert "content=ping, embeds=[banner, embed]" in platform
     for name in ("main.py", "cogs/ai.py", "cogs/setup_custom_commands.py",
                  "cogs/platform_v4.py", "sentrix_v95_runtime.py"):
         ast.parse(source(name), filename=name)

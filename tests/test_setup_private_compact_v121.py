@@ -10,11 +10,11 @@ def source(path):
 
 
 def test_setup_private_interactions_and_short_prefix_notice():
-    s = source("cogs/setup_experience_v74.py")
-    area = s[s.index("async def _send_setup_v74("):s.index("\ndef install(", s.index("async def _send_setup_v74("))]
-    assert "ephemeral=True" in area
-    assert "delete_after=15" in area
-    assert "/setup" in area
+    # /setup : réponse éphémère dans la couche finale (cogs/setup_invitations.py).
+    s = source("cogs/setup_invitations.py")
+    area = s[s.index("    async def final_send_setup("):]
+    assert "ephemere=True" in area
+    assert "_prepare_private_setup_interaction(slash)" in area
 
 
 def test_one_select_setup_home_does_not_toggle_modules():
@@ -25,7 +25,8 @@ def test_one_select_setup_home_does_not_toggle_modules():
     assert home.count("discord.ui.Select(") == 1
     assert "ModuleSwitchSelect" not in home
     assert "toggle_module_switch" not in home
-    assert 'label="Fermer"' in home
+    # Bouton bilingue : « Fermer » en français, « Close » en anglais.
+    assert 'label="Close" if english else "Fermer"' in home
     assert "Installer" not in home
 
 

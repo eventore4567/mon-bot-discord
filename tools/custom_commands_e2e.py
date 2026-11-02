@@ -49,6 +49,9 @@ async def main() -> int:
         "name": "bonus", "response": "Bonus_pour_{user}",
     })
     check(created["name"] == "bonus", "/setup enregistre le message via PlatformV4")
+    # Une nouvelle commande est réservée aux administrateurs tant qu'aucun droit
+    # n'est donné : on l'ouvre à tous, comme le ferait /setup.
+    await platform.set_custom_command_access(guild, h.ADMIN_ID, int(created["id"]), "everyone", 0, enabled=True)
     await bot.db.execute(
         "INSERT INTO custom_command_actions(guild_id,name,kind,value,duration_s) VALUES(?,?,?,?,?)",
         (h.GID, "bonus", "role_add", h.PING_ROLE_ID, 0),

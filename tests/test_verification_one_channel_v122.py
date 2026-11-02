@@ -44,7 +44,10 @@ def test_v5_can_refresh_without_honeypot_channel_and_create_it_when_opted_in():
 
 
 def test_restart_restores_portal_without_requiring_disabled_trap():
-    assert 'mode["honeypot_enabled"] and not isinstance(trap_channel, discord.TextChannel)' in RECOVERY
+    # 31/10/2026 : au redémarrage, seul le portail est requis ; V5 contrôle le
+    # salon piège lui-même, et une option avancée illisible ne bloque plus tout.
+    assert "if not isinstance(verify_channel, discord.TextChannel):" in RECOVERY
+    assert 'mode["honeypot_enabled"] and not isinstance(trap_channel' not in RECOVERY
     assert 'honeypot_enabled=(mode == "both")' in SETUP
 
 

@@ -66,3 +66,13 @@ reports/
 # pas une source. Elle est recréée si elle manque, donc Discord ne peut pas
 # refuser la carte faute d'image.
 assets/premium_log_banners/
+
+# Variantes d'émojis fabriquées au démarrage par utils/sentrix_emojis.py
+# (tools/generer_emojis_application_v2.py) : régénérées, jamais versionnées.
+assets/sentrix_emojis/sentrix_*_alert.png
+assets/sentrix_emojis/sentrix_*_clock.png
+assets/sentrix_emojis/sentrix_*_eye.png
+assets/sentrix_emojis/sentrix_*_lock.png
+assets/sentrix_emojis/sentrix_*_success.png
+assets/sentrix_emojis/sentrix_*_trophy.png
+assets/sentrix_emojis/sentrix_live_*.gif

@@ -55,11 +55,15 @@ async def main() -> int:
         return h.visible_text(h.CALLS[since:]).replace("\n", " ")
 
     # 1 — Sticky : posé, fréquence, republication, retiré.
-    await slash("sticky", "set", ADMIN, channel=h.CID, message="Lisez le règlement")
+    # Sans format, /sticky set ouvre le choix du format (texte, embed, bannière) ;
+    # « text: » le fixe directement.
+    await slash("sticky", "set", ADMIN, channel=h.CID, message="text:Lisez le règlement")
     row = await db.fetchone("SELECT content, every_messages FROM sentrix_sticky WHERE channel_id=?", (h.CID,))
-    check(row is not None and row["content"] == "Lisez le règlement", "/sticky set enregistre le message")
-    # /sticky frequency : masquée du « / » le 16/10, revenue le 28/10/2026.
-    await slash("sticky", "frequency", ADMIN, channel=h.CID, every=3)
+    plus = bot.get_cog("SentriXPlus")
+    check(row is not None and plus._sticky_decode(row["content"]) == ("text", "Lisez le règlement"),
+          "/sticky set enregistre le message")
+    # La fréquence reste réglable en préfixe ; le menu « / » garde set et off.
+    await prefix(f"+sticky-every <#{h.CID}> 3", ADMIN)
     row = await db.fetchone("SELECT every_messages FROM sentrix_sticky WHERE channel_id=?", (h.CID,))
     check(row is not None and int(row["every_messages"]) == 3, "/sticky frequency enregistre la fréquence")
     bot.get_cog("SentriXPlus")._no_sticky.clear()
@@ -87,22 +91,23 @@ async def main() -> int:
     left = await db.fetchone("SELECT status FROM sentrix_scheduled_messages WHERE id=?", (row["id"] if row else 0,))
     check(left is None or left["status"] != "pending", "/schedule cancel l'annule", str(dict(left) if left else None))
 
-    # 3 — Starboard : activé puis coupé.
-    await slash("starboard", "setup", ADMIN, channel=h.LOGCID, threshold=4)
+    # 3 — Starboard : hors du menu « / » simplifié (31/10/2026), toujours en « + ».
+    check(bot.tree.get_command("starboard") is None, "/starboard n'encombre plus le menu « / »")
+    await prefix(f"+starboard-setup <#{h.LOGCID}> 4", ADMIN)
     row = await db.fetchone("SELECT channel_id, threshold FROM sentrix_starboard_config WHERE guild_id=?", (h.GID,))
     check(row is not None and int(row["channel_id"]) == h.LOGCID and int(row["threshold"]) == 4,
-          "/starboard setup enregistre salon et seuil")
-    await slash("starboard", "off", ADMIN)
+          "+starboard-setup enregistre salon et seuil")
+    await prefix("+starboard-off", ADMIN)
     check(await db.fetchone("SELECT 1 FROM sentrix_starboard_config WHERE guild_id=?", (h.GID,)) is None,
-          "/starboard off le coupe")
+          "+starboard-off le coupe")
 
     # 4 — Même décision qu'en préfixe : un membre est refusé, avec le même motif.
     in_slash = await slash("schedule", "send", MEMBER, delay="10m", channel=h.CID, message="spam")
     in_prefix = await prefix(f"+schedule-send 10m <#{h.CID}> spam", MEMBER)
     check("Gérer les messages" in in_slash and "Gérer les messages" in in_prefix,
           "membre : /schedule send et +schedule-send refusés pour le même motif", f"{in_slash[:90]} | {in_prefix[:90]}")
-    in_slash = await slash("starboard", "setup", MEMBER, channel=h.CID, threshold=2)
-    check("Gérer le serveur" in in_slash, "membre : /starboard setup refusé (Gérer le serveur)", in_slash[:120])
+    in_prefix = await prefix(f"+starboard-setup <#{h.CID}> 2", MEMBER)
+    check("Gérer le serveur" in in_prefix, "membre : +starboard-setup refusé (Gérer le serveur)", in_prefix[:120])
 
     # 5 — Vocaux : un membre sans salon temporaire reçoit l'explication, pas un refus de permission.
     # /voice rename : masquée le 16/10, revenue le 28/10/2026 ; le « + » marche encore.

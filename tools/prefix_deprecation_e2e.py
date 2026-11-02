@@ -47,44 +47,16 @@ async def main() -> int:
     from cogs import prefix_deprecation as avis
     await bot.db.execute("DELETE FROM sentrix_prefix_notices")
 
-    # 1 — +help : l'avis est un message À PART, l'aide ne le contient plus.
+    # 31/10/2026 : le « + » est de nouveau actif à côté du « / ». Tant qu'il l'est,
+    # aucun avis de retrait ne part : il annoncerait une suppression qui n'aura pas lieu.
+    for texte, uid in (("+help", h.ADMIN_ID), ("+setup", h.ADMIN_ID), ("+ping", h.ADMIN_ID), ("+market", h.TARGET_ID)):
+        envois = await lancer(bot, guild, texte, uid=uid)
+        check(not avis_dans(envois), f"{texte} : aucun avis de retrait tant que le « + » est actif",
+              str([str(j.get("content"))[:80] for j in envois]))
     envois = await lancer(bot, guild, "+help")
-    trouves = avis_dans(envois)
-    check(len(trouves) == 1, "+help : un avis de retrait, une seule fois", str([str(j.get("content"))[:80] for j in envois]))
-    aide = [js for js in envois if js not in trouves]
-    check(aide and not any(PHRASE in h.visible_text([("POST", "", js)]) for js in aide),
-          "le panneau d'aide ne contient plus l'avertissement")
-    if trouves:
-        js = trouves[0]
-        check(js["content"] == f"**<@{h.ADMIN_ID}> {PHRASE}. Nous te conseillons de passer aux commandes `/` dès maintenant.**",
-              "texte demandé, en gras, avec la mention de la personne", js["content"])
-        check(not js.get("components") and not js.get("embeds") and not js.get("flags"),
-              "texte simple : ni embed ni Components V2", str(js)[:200])
-        am = js.get("allowed_mentions") or {}
-        check([str(u) for u in am.get("users") or []] == [str(h.ADMIN_ID)] and not am.get("parse") and not am.get("roles"),
-              "seule la personne concernée est mentionnée", str(am))
-        check("novembre" not in js["content"] and "<t:" not in js["content"], "aucune date de retrait fixée")
-
-    # 2 — +setup juste après : pas de second rappel (écart minimum, pas de doublon).
-    envois = await lancer(bot, guild, "+setup")
-    check(not avis_dans(envois), "+setup juste après : pas de rappel en double")
-
-    # 3 — Une heure plus tard : second rappel du jour, puis plus rien.
-    jour = avis.jour(__import__("time").time())
-    await bot.db.execute("UPDATE sentrix_prefix_notices SET last_at=last_at-? WHERE user_id=? AND day=?",
-                         (avis.ECART_MIN_S, h.ADMIN_ID, jour))
-    envois = await lancer(bot, guild, "+ping")
-    check(len(avis_dans(envois)) == 1, "une heure plus tard : second rappel du jour")
-    await bot.db.execute("UPDATE sentrix_prefix_notices SET last_at=last_at-? WHERE user_id=? AND day=?",
-                         (avis.ECART_MIN_S, h.ADMIN_ID, jour))
-    envois = await lancer(bot, guild, "+help")
-    check(not avis_dans(envois), "troisième commande du jour : plus de rappel (2 par jour au plus)")
-    row = await bot.db.fetchone("SELECT count FROM sentrix_prefix_notices WHERE user_id=? AND day=?", (h.ADMIN_ID, jour))
-    check(row is not None and int(row["count"]) == 2, "le compteur est en base (gardé après redémarrage)", str(dict(row) if row else None))
-
-    # 4 — Une ancienne commande supprimée tapée en « + » déclenche aussi l'avis.
-    envois = await lancer(bot, guild, "+market", uid=h.TARGET_ID)
-    check(len(avis_dans(envois)) == 1, "ancienne commande +market : l'avis part aussi")
+    check(bool(envois), "+help répond toujours (le « + » reste utilisable)")
+    row = await bot.db.fetchone("SELECT COUNT(*) AS n FROM sentrix_prefix_notices")
+    check(row is not None and int(row["n"]) == 0, "aucun rappel compté en base", str(dict(row) if row else None))
 
     # 4b — « + » retiré (production) : rien n'est exécuté, seul le rappel part.
     os.environ["SENTRIX_PREFIXE_ACTIF"] = "0"

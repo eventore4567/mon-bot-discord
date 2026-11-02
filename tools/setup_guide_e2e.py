@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Configuration guidée de /setup (brief V6, point 20), sur le bot booté.
+"""Navigation de /setup sur le bot booté : l'accueil à menu unique.
 
-Sécurité → Logs → Tickets → Bienvenue → Rôles. On vérifie : avancer, quitter
-puis reprendre à la même étape, terminer, et qu'ouvrir les étapes n'active
-AUCUN module (« ne jamais activer un système parce que son écran a été ouvert »).
+31/10/2026 : l'assistant guidé (Sécurité → Logs → Tickets → Bienvenue → Rôles)
+doublonnait les pages ; il est remplacé par UN menu sur l'accueil. On vérifie :
+chaque page principale s'ouvre depuis ce menu, « Retour » ramène à l'accueil, et
+parcourir les pages n'active AUCUN module (« ne jamais activer un système parce
+que son écran a été ouvert »).
 
     python3 tools/setup_guide_e2e.py
 """
@@ -51,34 +53,27 @@ async def cliquer(view, debut: str) -> None:
 async def main() -> int:
     bot = await h.boot(quiet=True)
     guild = await h.setup_world(bot)
-    from cogs import setup_experience_v74 as v74
     from cogs import setup_v2_core as core
 
-    avant = {m: await core.module_state(bot, h.GID, m) for m in ("security", "logs", "tickets", "welcome", "roles")}
+    pages = ("security", "logs", "tickets", "welcome", "roles")
+    avant = {m: await core.module_state(bot, h.GID, m) for m in pages}
     view = await build(bot, guild, None)
-    check(bouton(view, "Configuration guidée") is not None, "l'accueil propose la configuration guidée")
+    menu = next((it for top in view.children for it in walk(top) if isinstance(it, discord.ui.Select)), None)
+    valeurs = {o.value for o in getattr(menu, "options", [])}
+    check(menu is not None and set(pages) <= valeurs, "l'accueil propose un menu avec les pages principales",
+          str(sorted(valeurs)))
 
-    await cliquer(view, "Configuration guidée")
-    check(view.page == "security" and "étape 1/5 : Sécurité" in textes(view), "étape 1 : Sécurité", textes(view)[-200:])
-    await cliquer(view, "Étape suivante")
-    check(view.page == "logs" and "étape 2/5 : Logs" in textes(view), "étape 2 : Logs")
-    check(await v74.guide_step_saved(bot, h.GID) == 1, "l'étape est enregistrée")
-
-    await cliquer(view, "Quitter le guide")
-    check(view.page is None, "quitter ramène à l'accueil")
-    view = await build(bot, guild, None)  # nouvelle ouverture de /setup
-    check(bouton(view, "Reprendre la configuration guidée (2/5)") is not None, "l'accueil propose de reprendre à l'étape 2")
-    await cliquer(view, "Reprendre")
-    check(view.page == "logs", "reprendre rouvre l'étape 2 (Logs)")
-
-    for _ in range(3):
-        await cliquer(view, "Étape suivante")
-    check(view.page == "roles" and bouton(view, "Terminer") is not None, "dernière étape : Rôles, bouton Terminer")
-    await cliquer(view, "Terminer")
-    check(view.page is None and await v74.guide_step_saved(bot, h.GID) is None, "terminer efface la progression")
+    for page in pages:
+        menu = next(it for top in view.children for it in walk(top) if isinstance(it, discord.ui.Select))
+        menu._values = [page]
+        await menu.callback(interaction(bot))
+        await h.settle(idle=0.2, maximum=2)
+        check(view.page == page and bouton(view, "Retour") is not None, f"le menu ouvre la page {page}")
+        await cliquer(view, "Retour")
+        check(view.page is None, f"« Retour » ramène à l'accueil depuis {page}")
 
     apres = {m: await core.module_state(bot, h.GID, m) for m in avant}
-    check(apres == avant, "parcourir le guide n'a activé ni coupé aucun module", f"{avant} → {apres}")
+    check(apres == avant, "parcourir les pages n'a activé ni coupé aucun module", f"{avant} → {apres}")
 
     failed = [r for r in RESULTS if not r[0]]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} étapes réussies.")

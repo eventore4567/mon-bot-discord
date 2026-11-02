@@ -544,6 +544,8 @@ class BotAllInOne(commands.Bot):
             allowed_mentions=discord.AllowedMentions(everyone=False, roles=True, users=True, replied_user=True),
         )
         self.db = Database(config.DATABASE_PATH)
+        # Symbole de monnaie affiché : un emoji personnalisé supprimé redevient 🪙.
+        self.db.display_symbol = self._displayable_currency_symbol
         # Le VRAI bot comme porteur des appels modules déclenchés depuis la base.
         #
         # `Database.set_guild_config` active implicitement le module d'une
@@ -1084,6 +1086,11 @@ class BotAllInOne(commands.Bot):
         if retry_after:
             raise commands.CommandOnCooldown(bucket, retry_after, commands.BucketType.user)
         return True
+
+    def _displayable_currency_symbol(self, symbol: str) -> str:
+        from cogs.setup_v2_core import displayable_currency_symbol
+
+        return displayable_currency_symbol(self, symbol)
 
     async def get_context(self, message, *, cls=SentriXContext):
         ctx = await super().get_context(message, cls=cls)

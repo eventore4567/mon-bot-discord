@@ -122,7 +122,10 @@ def test_ticket_hub_does_not_send_users_to_pruned_manual_commands():
     assert 'label="Ajouter un type de ticket"' in source
     assert "PanelAddTypeModal(self.cog, self.panel_id, interaction.guild.id)" in source
     assert "Ajoutez-en depuis l’éditeur du panel dans `+ticketsetup`" not in source
-    assert '"ticket_setup_dashboard_only": True' in update
+    # Les anciennes commandes de config ticket restent retirées ; la page Tickets
+    # de /setup les remplace (02/11/2026).
+    assert '"ticket_setup_in_setup_page": True' in update
+    assert 'v74.CATEGORY_META.pop("tickets"' not in update
     assert "Ajouter une question" in source
     assert "FormQuestionModal(self.cog, self.type_id)" in source
 

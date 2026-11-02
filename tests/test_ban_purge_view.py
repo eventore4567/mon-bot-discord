@@ -29,6 +29,8 @@ class BanPurgeUiTests(unittest.IsolatedAsyncioTestCase):
         ctx, target = _context()
         cog = Moderation.__new__(Moderation)
         cog.bot = SimpleNamespace()
+        # La hiérarchie est contrôlée avant le panneau (test suivant).
+        cog.check_targetable = AsyncMock(return_value=True)
 
         await Moderation.ban.callback(cog, ctx, target, raison="spam", envoyer_mp=False)
 
@@ -38,6 +40,17 @@ class BanPurgeUiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(view, _BanPurgeView)
         self.assertIs(view.envoyer_mp, False)
         self.assertEqual({b.label for b in view.children}, {"Oui", "Non", "Annuler"})
+
+    async def test_cible_protegee_refusee_avant_le_panneau(self):
+        ctx, target = _context()
+        cog = Moderation.__new__(Moderation)
+        cog.bot = SimpleNamespace()
+        cog.check_targetable = AsyncMock(return_value=False)
+
+        await Moderation.ban.callback(cog, ctx, target, raison="spam", envoyer_mp=False)
+
+        cog.check_targetable.assert_awaited_once_with(ctx, target)
+        ctx.send.assert_not_awaited()
 
     async def test_oui_montre_les_durees_sans_bannir(self):
         ctx, target = _context()

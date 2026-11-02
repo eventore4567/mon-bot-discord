@@ -984,7 +984,7 @@ class EmbedBuilderView(discord.ui.View):
         # supplémentaire : une intro courte, puis des champs aérés.
         status = discord.Embed(
             title="Créateur d'embed SentriX",
-            description="Choisis un réglage ci-dessous, puis prévisualise avant d'envoyer.",
+            description="Choisissez un réglage ci-dessous, puis prévisualisez avant d'envoyer.",
             colour=discord.Colour(0x6C57CC),
         )
         status.add_field(

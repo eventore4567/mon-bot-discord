@@ -190,6 +190,36 @@ async def _ensure_schema(bot: commands.Bot) -> None:
             newer = await bot.db.fetchall("PRAGMA table_info(platform_custom_commands)")
             if "ping_role_id" not in {str(row["name"]) for row in newer}:
                 raise
+    await _keep_legacy_custom_commands_open(bot)
+
+
+#: Mise en service des droits par commande (01/11/2026 03:04 heure de Paris).
+CUSTOM_ACCESS_INTRODUCED_AT = 1793498641
+
+
+async def _keep_legacy_custom_commands_open(bot: commands.Bot) -> None:
+    """Une seule fois : les commandes créées AVANT les droits par commande restent
+    ouvertes à tous, comme avant. Sans cela, « aucune règle = admin seulement »
+    rendait muettes, du jour au lendemain, des commandes que les membres utilisaient.
+    Les commandes créées depuis gardent le défaut sûr (administrateurs)."""
+    await bot.db.execute(
+        "CREATE TABLE IF NOT EXISTS platform_migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)"
+    )
+    marker = "custom_command_access_legacy_everyone"
+    if await bot.db.fetchone("SELECT 1 FROM platform_migrations WHERE name=?", (marker,)):
+        return
+    await bot.db.execute(
+        "INSERT OR IGNORE INTO platform_custom_command_access "
+        "(guild_id, command_id, subject_type, subject_id, updated_by, updated_at) "
+        "SELECT c.guild_id, c.id, 'everyone', 0, 0, ? FROM platform_custom_commands c "
+        "WHERE c.created_at < ? AND NOT EXISTS ("
+        "SELECT 1 FROM platform_custom_command_access a "
+        "WHERE a.guild_id = c.guild_id AND a.command_id = c.id)",
+        (now(), CUSTOM_ACCESS_INTRODUCED_AT),
+    )
+    await bot.db.execute(
+        "INSERT OR IGNORE INTO platform_migrations (name, applied_at) VALUES (?, ?)", (marker, now()),
+    )
 
 
 class RoleToggleButton(discord.ui.Button):

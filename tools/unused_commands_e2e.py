@@ -75,8 +75,8 @@ async def main() -> int:
     masked_paths = {e.path for e in slash_catalog._MASQUEES_DU_MENU}
     check(not (paths & masked_paths) and "market view" not in paths and "ban" in paths,
           f"le menu « / » ne publie plus les {len(masked_paths)} chemins masqués", str(sorted(paths & masked_paths)[:5]))
-    check({"economy pay", "shop buy", "shop role-add", "puzzle minesweeper"} <= paths,
-          "les masquées gardées sont publiées en « / »", str(sorted({"economy pay", "shop buy", "shop role-add", "puzzle minesweeper"} - paths)))
+    check({"economy pay", "shop buy", "shop roles", "puzzle minesweeper"} <= paths,
+          "les masquées gardées sont publiées en « / »", str(sorted({"economy pay", "shop buy", "shop roles", "puzzle minesweeper"} - paths)))
 
     # Les SUPPRIMEES (28/10/2026) ont quitté le bot ; les autres masquées restent en +.
     from cogs import commandes_retirees

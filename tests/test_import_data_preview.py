@@ -18,8 +18,14 @@ def test_import_accepts_supported_fields_without_implicit_changes():
     ]
 
 
+def test_import_keeps_negative_balances_as_debts():
+    # UnbelievaBoat exporte des dettes : un solde négatif est une donnée valide.
+    records = parse_export(json.dumps({"users": [{"id": "123", "cash": -4, "bank": 10}]}).encode())
+    assert records == [{"id": 123, "cash": -4, "bank": 10}]
+
+
 @pytest.mark.parametrize("value", [
-    {"users": [{"id": "123", "cash": -4}]},
+    {"users": [{"id": "123", "xp": -4}]},
     {"users": [{"id": "123", "xp": 1.5}]},
     {"users": [{"id": "123", "xp": 2}, {"id": "123", "xp": 3}]},
     {"users": [{"id": "123"}]},

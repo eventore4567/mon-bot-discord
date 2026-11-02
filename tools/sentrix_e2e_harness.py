@@ -82,6 +82,8 @@ MOD_PERMISSIONS = discord.Permissions(
 )
 
 CALLS: list[tuple[str, str, Any]] = []
+#: Webhooks de salon créés pendant le parcours : id -> salon.
+WEBHOOK_CHANNELS: dict[str, int] = {}
 STATE: dict[str, Any] = {
     "target_timeout": None, "target_nick": None, "target_roles": [MEMBER_ROLE_ID],
     "msg_seq": 5000, "cmd_seq": 800000000000000000, "last_cmd_id": None, "last_cmd_content": "",
@@ -221,6 +223,15 @@ async def fake_request(self, route, *, files=None, form=None, **kwargs):
         return {"code": None, "uses": 0}
     if re.match(r"/guilds/\d+/webhooks$", path) or re.match(r"/channels/\d+/webhooks$", path):
         if method == "POST":
+            if path.startswith("/channels/"):
+                # Un webhook de salon (mini-profils des logs) : son exécution est
+                # journalisée comme un message de CE salon, pas comme une réponse
+                # d'interaction (voir fake_webhook_request).
+                hook_id = f"9{channel_id}"
+                WEBHOOK_CHANNELS[hook_id] = channel_id
+                return {"id": hook_id, "type": 1, "guild_id": str(GID), "channel_id": str(channel_id),
+                        "name": (js or {}).get("name") or "SentriX", "token": "whtok", "application_id": None,
+                        "user": user(BOT_ID, "SentriX")}
             return {"id": "100000000000000999", "type": 1, "guild_id": str(GID), "channel_id": str(channel_id),
                     "name": "SentriX", "token": "whtok", "application_id": None, "user": user(BOT_ID, "SentriX")}
         return []
@@ -322,11 +333,17 @@ async def fake_webhook_request(self, route, session=None, *, payload=None, multi
                                reason=None, auth_token=None, params=None, **_kw):
     js = payload if payload is not None else _payload_from_form(multipart)
     path = route.url.replace(Route.BASE, "") if hasattr(route, "url") else route.path
+    target = CID
+    hook = re.match(r"/webhooks/(\d+)/whtok$", path)
+    if hook and route.method == "POST" and hook.group(1) in WEBHOOK_CHANNELS:
+        # Webhook de salon : pour les parcours, c'est un message posté dans le salon.
+        target = WEBHOOK_CHANNELS[hook.group(1)]
+        path = f"/channels/{target}/messages"
     CALLS.append((route.method, path, js))
     if "/callback" in path:
         return callback_payload(path, js)
     STATE["msg_seq"] += 1
-    return message_payload(STATE["msg_seq"], CID, (js or {}).get("content") if isinstance(js, dict) else None)
+    return message_payload(STATE["msg_seq"], target, (js or {}).get("content") if isinstance(js, dict) else None)
 
 
 def _cut_outbound_http() -> None:

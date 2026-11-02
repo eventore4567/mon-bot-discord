@@ -932,7 +932,7 @@ class Ai(commands.Cog, name="Ai"):
             images = await _images_from_discord_attachments(explicit_attachments)
         if not images and explicit_attachments:
             return await _send(
-                content="Je n'ai pas pu lire cette image. Utilise un fichier PNG, JPG, WebP ou GIF de 12 Mo maximum."
+                content="Je n'ai pas pu lire cette image. Utilisez un fichier PNG, JPG, WebP ou GIF de 12 Mo maximum."
             )
         if images:
             logger.info(
@@ -2364,7 +2364,7 @@ class Ai(commands.Cog, name="Ai"):
             if since < 300:
                 await reply(
                     f"Une création d'image est déjà en cours ou récente. "
-                    f"Réessaie dans {int(300 - since) + 1} secondes."
+                    f"Réessayez dans {int(300 - since) + 1} secondes."
                 )
                 return True
             if guild_id is not None:
@@ -2382,7 +2382,7 @@ class Ai(commands.Cog, name="Ai"):
                     )
             except Exception:
                 logger.exception("Création image naturelle en erreur guild=%s", guild_id)
-                await reply("Je n'ai pas pu générer l'image. Réessaie plus tard.")
+                await reply("Je n'ai pas pu générer l'image. Réessayez plus tard.")
                 return True
 
             if not image_result.ok:

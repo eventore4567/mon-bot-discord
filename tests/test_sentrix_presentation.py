@@ -10,7 +10,8 @@ from cogs.sentrix_name_style import style_payload
 def test_presentation_is_native_slash_with_channel_option():
     slash = _native_presentation(SimpleNamespace())
     assert slash.name == "presentation"
-    assert {p.name for p in slash.parameters} == {"channel"}
+    # Option facultative « banniere » ajoutée le 30/10/2026 (bannière ultra-fine).
+    assert {p.name for p in slash.parameters} == {"channel", "banniere"}
 
 
 def test_invite_uses_the_real_bot_id():

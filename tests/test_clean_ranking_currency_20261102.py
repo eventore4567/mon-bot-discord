@@ -1,6 +1,7 @@
 """Regression checks for compact ranking and consistent currency customization."""
 import inspect
-from unittest.mock import AsyncMock, SimpleNamespace
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 import pytest
 
 from cogs import economy, levels, setup_v2_core, setup_v2_ui

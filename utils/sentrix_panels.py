@@ -734,11 +734,34 @@ def _route_slash(commande: str) -> tuple[str, str] | None:
     if not commande.startswith("+") or COMMANDES_LITTERALES.get():
         return None
     mots = commande[1:].split(" ")
+    retirees = _sources_retirees()
     for n in range(min(3, len(mots)), 0, -1):
-        chemin = _sources_slash().get(" ".join(mots[:n]).casefold())
+        source = " ".join(mots[:n]).casefold()
+        chemin = _sources_slash().get(source)
         if chemin:
             return chemin, " ".join(mots[n:])
+        if n > 1 and source in retirees:
+            # Sous-commande réelle mais absente du menu « / » : se rabattre sur
+            # le groupe parent citerait un chemin qui n'existe pas
+            # (« /shop roles add »). Le « + » cité reste valable.
+            return None
     return None
+
+
+_SOURCES_RETIREES: "frozenset[str] | None" = None
+
+
+def _sources_retirees() -> frozenset[str]:
+    """Commandes connues mais non publiées en « / » (utils/slash_catalog.RETIRED)."""
+    global _SOURCES_RETIREES
+    if _SOURCES_RETIREES is None:
+        try:
+            from utils import slash_catalog
+
+            _SOURCES_RETIREES = frozenset(str(k).casefold() for k in slash_catalog.RETIRED)
+        except Exception:  # noqa: BLE001
+            _SOURCES_RETIREES = frozenset()
+    return _SOURCES_RETIREES
 
 
 def en_slash(commande: str) -> str:
