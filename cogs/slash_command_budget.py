@@ -14,7 +14,7 @@ GLOBAL_CHAT_INPUT_BUDGET = 100
 # Discord limite les commandes chat-input globales à 100 racines. Les quatre entrées
 # proof ci-dessous doivent rester disponibles même quand le catalogue historique remplit
 # déjà le budget.
-PROOF_SLASH_PREFERRED = frozenset({"proof", "proofsetup", "proofexample", "proofstatus"})
+PROOF_SLASH_PREFERRED = frozenset({"proof", "proofsetup", "proofstatus"})
 
 
 def _v110_public_root_names() -> set[str]:
@@ -82,13 +82,13 @@ def _preferred_names() -> set[str]:
 
 
 def _excluded_names() -> set[str]:
-    from .command_catalog_cleanup import ADMIN_DIRECT_COMMANDS, MERGED_COMMANDS
+    from .command_catalog_cleanup import INTERNAL_MAINTENANCE_COMMANDS, MERGED_COMMANDS
 
     # MERGED_COMMANDS décrit la visibilité historique des commandes préfixées. V110 peut
     # réutiliser l'un de ces noms comme racine slash standard (ex. /queue, /resume,
     # /profile, /shop, /weekly). Ces racines sont intentionnelles et ne doivent donc pas
     # être bloquées par le filtre legacy du budget.
-    legacy_excluded = set(ADMIN_DIRECT_COMMANDS) | set(MERGED_COMMANDS)
+    legacy_excluded = set(INTERNAL_MAINTENANCE_COMMANDS) | set(MERGED_COMMANDS)
     return legacy_excluded - _v110_public_root_names()
 
 
