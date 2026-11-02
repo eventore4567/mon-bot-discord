@@ -259,8 +259,8 @@ def install(bot: commands.Bot) -> None:
 
     apply_surface(bot)
     logger.info(
-        "Surface SentriX : %s commandes directes normales, %s admin visibles, %s owner privées, %s proof, %s jeux; "
+        "Surface SentriX : %s commandes directes normales, %s admin visibles, %s owner privées, %s proof, %s jeux publics/%s chargés; "
         "anciennes commandes fusionnées conservées en + mais masquées.",
         len(NORMAL_DIRECT_COMMANDS), len(ADMIN_DIRECT_COMMANDS), len(PRIVATE_OWNER_COMMANDS),
-        len(PROOF_VISIBLE_COMMANDS), len(GAME_COMMANDS),
+        len(PROOF_VISIBLE_COMMANDS), len(PUBLIC_GAME_COMMANDS), len(GAME_COMMANDS),
     )
