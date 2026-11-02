@@ -367,7 +367,7 @@ class SentriXHelpV79(discord.ui.LayoutView):
         return [fichier] if fichier is not None else []
 
     def _container(self) -> discord.ui.Container:
-        container = self._container()
+        container = discord.ui.Container(accent_colour=setup_v73.ACCENT)
         galerie = discord.ui.MediaGallery()
         galerie.add_item(media=f"attachment://{nom_fichier(HELP_BANNER_FAMILY)}")
         container.add_item(galerie)
