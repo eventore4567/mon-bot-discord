@@ -10,13 +10,23 @@ def _source(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_v79_catalog_includes_all_prefix_commands_without_hidden_filter():
+def test_v79_catalog_respects_hidden_prefix_commands():
     source = _source(V79)
 
     assert "for command in bot.walk_commands():" in source
-    assert "command.hidden" in source  # documented intentionally, not used as a filter
-    assert "if command.hidden" not in source
+    assert "if _prefix_hidden(command):" in source
+    assert "hidden" in source
     assert "legacy._visible" not in source
+
+
+def test_v79_uses_transparent_banner_transport():
+    source = _source(V79)
+
+    assert 'HELP_BANNER_FAMILY = "config"' in source
+    assert "discord.ui.MediaGallery()" in source
+    assert "panels.fichier_de_famille(HELP_BANNER_FAMILY)" in source
+    assert "await panels.editer(interaction, self)" in source
+    assert "await panels.envoyer(target, view)" in source
 
 
 def test_v79_catalog_includes_leaf_slash_commands_and_subcommands():
