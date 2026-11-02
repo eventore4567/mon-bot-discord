@@ -45,10 +45,11 @@ def test_embed_editor_banner_is_first_not_last():
     assert other[0].title == "Créateur d'embed SentriX"
 
 
-def test_setup_public_ack_is_deleted_after_defer():
+def test_setup_public_ack_never_leaves_dead_reply():
     source = inspect.getsource(setup_invitations._prepare_private_setup_interaction)
-    assert "delete_original_response()" in source
-    assert source.index("edit_original_response") < source.index("delete_original_response()")
+    assert "await interaction.delete_original_response()" not in source
+    guard = inspect.getsource(setup_invitations._install_setup_initial_response_guard)
+    assert 'kwargs["ephemeral"] = True' in guard
 
 
 def test_mass_role_uses_thin_components_panel():

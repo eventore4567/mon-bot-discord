@@ -49,8 +49,37 @@ def test_overflow_never_silently_clamps_or_changes_money():
     assert adapted[1]["bank"] == 300
 
 
+def test_negative_unbelievaboat_debt_is_preserved():
+    data = export([
+        {"id": "1524528157158539505", "cash": -153_000_000_000, "bank": 500},
+        {"id": "1524528157158539506", "cash": -1, "bank": -42},
+    ])
+    rows = import_data.parse_export(data)
+    assert rows[0]["cash"] == -153_000_000_000
+    assert rows[1]["cash"] == -1
+    assert rows[1]["bank"] == -42
+
+
+def test_negative_overflow_requires_opt_in_and_divides_toward_zero():
+    big = -(import_data.MAX_CURRENCY_VALUE + 1)
+    data = export([{"id": "1524528157158539505", "cash": big, "bank": -9}])
+    with pytest.raises(import_data.BalanceOverflowError):
+        import_data.parse_export(data)
+    converted = import_data.parse_export(data, scale_currency=True)
+    assert converted[0]["cash"] == -(abs(big) // 10)
+    assert converted[0]["bank"] == 0
+
+
+def test_import_accepts_more_than_previous_5000_member_limit():
+    raw = export([
+        {"id": str(1524528157158539505 + n), "cash": n}
+        for n in range(5001)
+    ])
+    assert len(import_data.parse_export(raw)) == 5001
+
+
 def test_import_rejects_invalid_numbers_before_writes():
-    for bad in [-1, True, "200"]:
+    for bad in [True, "200"]:
         with pytest.raises(ValueError):
             import_data.parse_export(export([{"id": "1524528157158539505", "cash": bad}]))
     with pytest.raises(ValueError):
