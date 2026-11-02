@@ -20,10 +20,10 @@ logger = logging.getLogger("bot.hybrid-slash-restore-v3")
 
 
 def install(bot: commands.Bot) -> None:
-    from .command_catalog_cleanup import NORMAL_DIRECT_COMMANDS
+    from .command_catalog_cleanup import ADMIN_DIRECT_COMMANDS, NORMAL_DIRECT_COMMANDS
 
     restored = 0
-    for direct_name in sorted(NORMAL_DIRECT_COMMANDS):
+    for direct_name in sorted(NORMAL_DIRECT_COMMANDS | ADMIN_DIRECT_COMMANDS):
         if direct_name == "nickname":
             # /nick possède son alias slash court dédié avec ses contrôles de hiérarchie.
             continue
