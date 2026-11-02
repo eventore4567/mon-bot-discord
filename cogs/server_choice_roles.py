@@ -319,7 +319,7 @@ async def _massrole_all_members(
     last_reported = 0
     handled_member_ids: set[int] = set()
 
-    total_members = int(guild.member_count or 0)
+    total_members = int(guild.member_count or len(getattr(guild, "members", ())) or 0)
     started_at = time.monotonic()
 
     def _duration(seconds: float) -> str:
