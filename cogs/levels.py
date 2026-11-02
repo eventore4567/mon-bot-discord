@@ -1323,57 +1323,34 @@ class Levels(commands.Cog, name="Levels"):
             )
 
         nombre = stats_service.format_number
-        medailles = ("1er", "2e", "3e")
-        podium = [
-            panels.Ligne(
-                medailles[i],
-                f"**{nom}** · niveau **{niveau}**",
-                indice=f"{nombre(xp)} XP",
-            )
-            for i, (_uid, nom, niveau, xp) in enumerate(classement[:3])
-        ]
-        suite = [
-            panels.Ligne(f"{i}", f"{nom} · niveau {niveau}")
-            for i, (_uid, nom, niveau, _xp) in enumerate(classement[3:10], start=4)
-        ]
+        # Conserver les niveaux et XP visibles, y compris au niveau zéro.
+        # Les tableaux code rendaient les mentions/emojis en texte brut.
+        top = []
+        for rank, (_uid, name, niveau, xp) in enumerate(classement[:10], start=1):
+            display = discord.utils.escape_markdown(str(name)[:35])
+            top.append(f"**{rank}.** {display} · **Niv. {niveau}** · {nombre(xp)} XP")
 
-        sections = [panels.Section("Podium", podium)]
-        if suite:
-            sections.append(panels.Section("Suivants", suite, aligne=True))
-
-        # La position du demandeur : la premiere chose qu'on cherche.
-        rang = next(
-            (i for i, (uid, *_r) in enumerate(classement, start=1) if uid == ctx.author.id), None
+        rank = next(
+            (i for i, (uid, *_r) in enumerate(classement, start=1)
+             if uid == ctx.author.id), None,
         )
-        if rang is not None:
-            _uid, _nom, niveau, xp = classement[rang - 1]
-            sections.append(
-                panels.Section(
-                    "Votre position",
-                    [
-                        panels.Ligne("Rang", f"**#{rang}** sur {len(classement)}"),
-                        panels.Ligne("Niveau", str(niveau)),
-                        panels.Ligne("XP", nombre(xp)),
-                    ],
-                    aligne=True,
-                )
-            )
+        if rank is None:
+            position = "Tu n'es pas encore classé."
         else:
-            sections.append(
-                panels.Section(
-                    "Votre position",
-                    [panels.Ligne("Non classé", "Écrivez quelques messages pour apparaître ici")],
-                )
-            )
+            _uid, _name, level, xp = classement[rank - 1]
+            position = f"**#{rank}** sur {len(classement)} · **Niveau {level}** · {nombre(xp)} XP"
 
         await panels.envoyer(
             ctx,
             panels.Panneau(
-                titre="SentriX — Classement des niveaux",
-                sous_titre=f"**{len(classement)}** membre(s) classé(s) sur {ctx.guild.name}.",
+                titre="Classement des niveaux",
+                sous_titre=f"{len(classement)} membres · {ctx.guild.name}",
                 kind="brand",
-                sections=sections,
-                pied="SentriX • Niveaux",
+                sections=[
+                    panels.Section("Top 10", texte="\n".join(top)),
+                    panels.Section("Ton classement", texte=position),
+                ],
+                pied="",
             ),
         )
 
