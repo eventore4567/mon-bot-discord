@@ -16,8 +16,8 @@ né en panneau. Ce test vérifie que c'est bien panels.editer qui est appelé �
 AttributeError ici si la régression revenait.
 
 La progression est maintenant rafraîchie par seuil de membres + délai minimal,
-avec ETA, durée écoulée et vitesse moyenne. Le test conserve un gros serveur simulé
-pour vérifier que l'édition Components V2 reste utilisée pendant le traitement."""
+avec ETA, durée écoulée et vitesse moyenne. Le test simule quelques centaines de membres, suffisant pour déclencher plusieurs
+mises à jour sans alourdir inutilement la CI."""
 from __future__ import annotations
 
 import asyncio
@@ -102,8 +102,8 @@ class MassroleProgressPanelEditTests(unittest.IsolatedAsyncioTestCase):
         )
         guild = SimpleNamespace(
             me=me,
-            member_count=6000,
-            fetch_members=lambda limit=None: _members(6000),
+            member_count=300,
+            fetch_members=lambda limit=None: _members(300),
         )
         progress = _ProgressMessage()
         ctx = SimpleNamespace(guild=guild, author=SimpleNamespace())
