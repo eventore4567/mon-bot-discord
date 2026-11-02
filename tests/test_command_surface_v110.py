@@ -61,7 +61,7 @@ def test_economy_keeps_balance_direct_and_groups_other_actions() -> None:
 def test_role_management_uses_role_group() -> None:
     assert surface.STANDARD_GROUPED_SLASH["giverole"] == ("role", "give")
     assert surface.STANDARD_GROUPED_SLASH["removerole"] == ("role", "remove")
-    assert surface.STANDARD_GROUPED_SLASH["massrole"] == ("role", "massrole")
+    assert surface.STANDARD_GROUPED_SLASH["massrole"] == ("role", "mass")
 
 
 def test_roots_are_not_arbitrarily_abbreviated() -> None:
