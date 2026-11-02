@@ -97,15 +97,15 @@ async def run() -> int:
         if len(roots) > 100:
             errors.append(f"budget slash dépassé: {len(roots)}/100")
 
-        # V110 : les commandes les plus familières doivent être directes, comme sur les
-        # principaux bots Discord. On garde les groupes pour les fonctions avancées.
+        # V110 : les actions quotidiennes restent directes, tandis que les familles
+        # secondaires sont regroupées pour garder le menu slash compact.
         required_roots = (
             "help", "setup", "ping", "sentrix",
             "moderation", "security", "ticket", "giveaway", "invites", "games", "roles",
             "ban", "unban", "kick", "mute", "unmute", "warn", "warnings",
             "clearwarnings", "clear", "lock", "unlock", "slowmode",
             "userinfo", "serverinfo", "avatar", "level", "leaderboard",
-            "balance", "play", "pause", "queue", "role",
+            "balance", "play", "role", "music", "economy", "info",
         )
         for required in required_roots:
             if required not in root_names:
