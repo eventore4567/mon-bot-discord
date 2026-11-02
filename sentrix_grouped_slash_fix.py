@@ -415,7 +415,10 @@ async def _defer_if_slow(interaction: discord.Interaction) -> None:
     if interaction.response.is_done():
         return
     try:
-        await interaction.response.defer(thinking=True)
+        # Une action de modération reste privée même quand elle tarde à répondre.
+        from utils.slash_privacy import interaction_privee
+
+        await interaction.response.defer(thinking=True, ephemeral=interaction_privee(interaction))
         interaction.extras["sentrix_slow_defer"] = True
     except (discord.InteractionResponded, discord.NotFound):
         return
