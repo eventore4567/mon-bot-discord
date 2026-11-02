@@ -473,7 +473,7 @@ async def economy_context(bot: Any, guild: Any, target_id: int, actor_id: int | 
 
 
 #: Les commandes par lesquelles le staff crée de l'XP (nom legacy et slash du catalogue).
-XP_COMMANDS = ("add-xp", "set-xp", "levels xp-add", "levels xp-set")
+XP_COMMANDS = ("add-xp", "set-xp", "level addxp", "level setxp")
 
 
 async def levels_context(bot: Any, guild: Any, target_id: int, actor_id: int | None = None,

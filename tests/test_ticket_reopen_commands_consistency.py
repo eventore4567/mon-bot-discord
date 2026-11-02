@@ -28,6 +28,16 @@ class _FakeBot:
     def __init__(self, db: Database):
         self.db = db
 
+    def get_cog(self, name):
+        # +reopenticket délègue à l'implémentation unique de cogs/tickets.py.
+        if name != "Tickets":
+            return None
+        from cogs.tickets import Tickets
+
+        cog = Tickets.__new__(Tickets)
+        cog.bot = self
+        return cog
+
 
 class ReopenTicketConsistencyTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -126,3 +136,12 @@ async def _noop():
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_reopenticket_delegue_a_l_implementation_unique():
+    """Une seule implémentation, avec son compare-and-set contre la double réouverture."""
+    import inspect
+
+    source = inspect.getsource(V17TicketsLogs.reopenticket.callback)
+    assert "tickets.ticket_reopen.callback(tickets, ctx)" in source
+    assert "UPDATE tickets SET status" not in source

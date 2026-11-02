@@ -35,7 +35,7 @@ REQUIRED_TABLES = {
 REQUIRED_ROUTES = {
     "/operations",
     "/api/guilds/{guild_id}/ops/summary",
-    "/api/guilds/{guild_id}/ops/access",
+    # /ops/access : servi par web/dashboard_ops_suite_plus.py (dashboard unifié), plus ici.
     "/api/guilds/{guild_id}/ops/member/{user_id}",
     "/api/guilds/{guild_id}/ops/cases/{case_number}",
     "/api/guilds/{guild_id}/ops/automod-scopes",

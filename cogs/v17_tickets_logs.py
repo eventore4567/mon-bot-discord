@@ -461,32 +461,14 @@ class V17TicketsLogs(commands.Cog, name="V17TicketsLogs"):
     @commands.hybrid_command(name="reopenticket", description="Rouvrir le ticket fermé de ce salon.", with_app_command=False)
     @checks.has_permission_or_modrole("manage_channels")
     async def reopenticket(self, ctx: commands.Context):
-        ticket = await self.bot.db.fetchone("SELECT * FROM tickets WHERE channel_id=?", (ctx.channel.id,))
-        if not ticket:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Ce salon n'est pas un ticket.")))
-        if ticket["status"] != "ferme":
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning("Ce ticket n'est pas fermé.")))
-        # ticketreopenwindow/reopen_minutes contrôle uniquement combien de temps le salon
-        # SURVIT avant suppression définitive (auto_delete_v17) — ce n'est pas une
-        # permission de réouverture séparée. Avant ce correctif, `+reopenticket`
-        # refusait par défaut ("réouverture non activée") un ticket que
-        # `+ticket-reopen` (cogs/tickets.py) aurait pourtant rouvert sans problème,
-        # tant que le salon existe encore (status='ferme') : deux commandes, deux
-        # règles incompatibles pour la même action. Voir l'audit tickets livré.
-        await self.bot.db.execute("UPDATE tickets SET status='ouvert',closed_at=NULL,locked=0,last_activity_at=? WHERE id=? AND status='ferme'", (now(), ticket["id"]))
-        owner = ctx.guild.get_member(ticket["user_id"])
-        if owner:
-            overwrite = ctx.channel.overwrites_for(owner)
-            overwrite.view_channel = True
-            overwrite.send_messages = True
-            overwrite.read_message_history = True
-            try:
-                await ctx.channel.set_permissions(owner, overwrite=overwrite, reason=f"Ticket rouvert par {ctx.author}")
-            except discord.HTTPException:
-                pass
-        from .tickets import TicketControlView, get_button_settings
-        settings = await get_button_settings(self.bot, ctx.guild.id)
-        await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embeds.success(f"Ticket **#{ticket['id']}** rouvert par {ctx.author.mention}.")), TicketControlView(settings)))
+        """Ancien nom de +ticket-reopen : UNE implémentation (cogs/tickets.py).
+
+        Cette copie rouvrait sans compare-and-set : deux clics simultanés
+        rouvraient deux fois et journalisaient deux réouvertures (02/11/2026)."""
+        tickets = self.bot.get_cog("Tickets")
+        if tickets is None:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Le module Tickets est indisponible.")))
+        await tickets.ticket_reopen.callback(tickets, ctx)
 
     @commands.hybrid_command(name="ticketstaffstats", description="Statistiques de traitement des tickets par membre du staff.", with_app_command=False)
     @checks.has_permission_or_modrole("manage_channels")

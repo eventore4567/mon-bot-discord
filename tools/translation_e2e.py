@@ -46,24 +46,24 @@ async def main() -> int:
     # 1 — Chargement : une seule commande, un menu contextuel.
     check(bot.get_cog("Translation") is not None, "le cog Translation est chargé")
     check(bot.get_cog("Utility") is not None, "Utility est toujours chargé (aucune collision de nom)")
-    group = bot.tree.get_command("translate")
-    leaf = group.get_command("text") if group is not None else None
-    check(leaf is not None and leaf.callback.__module__ == "cogs.translation", "/translate text est la commande native")
+    # 02/11/2026 : /translate est direct (plus de « /translate text »).
+    leaf = bot.tree.get_command("translate")
+    check(leaf is not None and leaf.callback.__module__ == "cogs.translation", "/translate est la commande native")
     names = [p.display_name for p in leaf.parameters] if leaf else []
     check(names == ["language", "text", "source"], "options anglaises : language, text, source", str(names))
     menu = bot.tree.get_command("Translate Message", type=discord.AppCommandType.message)
     check(menu is not None, "le menu contextuel « Translate Message » est enregistré")
 
-    # 2 — /translate text.
+    # 2 — /translate.
     since = len(h.CALLS)
-    inter = h.build_interaction(bot, "translate", [{"name": "text", "type": 1, "options": [
+    inter = h.build_interaction(bot, "translate", [
         {"name": "language", "type": 3, "value": "es"},
         {"name": "text", "type": 3, "value": "Bonjour à tous"},
-    ]}], **persona("membre"))
+    ], **persona("membre"))
     await asyncio.wait_for(bot.tree._call(inter), 15)
     await h.settle(idle=0.3, maximum=2)
     shown = h.visible_text(h.CALLS[since:])
-    check("<es> Bonjour à tous" in shown, "/translate text traduit vers la langue choisie", shown[:200])
+    check("<es> Bonjour à tous" in shown, "/translate traduit vers la langue choisie", shown[:200])
 
     # 3 — Menu contextuel : dans la langue DE L'UTILISATEUR, en privé.
     mid = h.next_id()
@@ -104,9 +104,9 @@ async def main() -> int:
     # 6 — Autocomplétion des langues.
     p = persona("membre")
     data = _base(p["author_id"], p["author_roles"], kind=4, data={
-        "id": "1", "name": "translate", "type": 1, "options": [{"name": "text", "type": 1, "options": [
+        "id": "1", "name": "translate", "type": 1, "options": [
             {"name": "language", "type": 3, "value": "esp", "focused": True},
-        ]}],
+        ],
     })
     since = len(h.CALLS)
     await asyncio.wait_for(bot.tree._call(discord.Interaction(data=data, state=bot._connection)), 15)
