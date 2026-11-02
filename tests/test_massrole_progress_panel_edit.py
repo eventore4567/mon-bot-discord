@@ -77,6 +77,7 @@ class MassroleProgressPanelEditTests(unittest.IsolatedAsyncioTestCase):
             Path(__file__).resolve().parents[1] / "cogs" / "server_choice_roles.py"
         ).read_text(encoding="utf-8")
         self.assertIn("membres traités", source)
+        self.assertIn("sur tous les membres du serveur", source)
         self.assertIn("Temps écoulé", source)
         self.assertIn("Vitesse moyenne", source)
         self.assertIn('"▰" * filled + "▱" * (10 - filled)', source)
