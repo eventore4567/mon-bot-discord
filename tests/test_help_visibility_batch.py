@@ -14,6 +14,7 @@ from cogs.command_catalog_cleanup import (
     HELP_VISIBLE_EXTRA_COMMANDS,
     LOW_VALUE_HIDDEN_COMMANDS,
     NORMAL_DIRECT_COMMANDS,
+    PURE_DUPLICATE_COMMANDS,
 )
 
 
@@ -46,6 +47,10 @@ class HelpVisibilityBatchTests(unittest.TestCase):
         commande directe, donc elle est testée avec NORMAL_DIRECT_COMMANDS ailleurs."""
         overlap = HELP_VISIBLE_EXTRA_COMMANDS & NORMAL_DIRECT_COMMANDS
         self.assertEqual(overlap, set())
+
+    def test_les_doublons_confirmes_ne_sont_jamais_visibles(self):
+        visible = NORMAL_DIRECT_COMMANDS | HELP_VISIBLE_EXTRA_COMMANDS | ADMIN_DIRECT_COMMANDS
+        self.assertEqual(PURE_DUPLICATE_COMMANDS & visible, set())
 
     def test_aucun_chevauchement_avec_admin_direct_commands(self):
         """Un nom ne doit apparaître que dans un seul ensemble de visibilité (même
