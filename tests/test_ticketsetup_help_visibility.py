@@ -52,7 +52,7 @@ class TicketSetupHelpVisibilityTests(unittest.IsolatedAsyncioTestCase):
 
     def test_ticketsetup_reste_exclue_du_budget_slash(self):
         """Non-régression : rendre +ticketsetup visible dans +help ne doit pas la
-        faire entrer en compétition pour une des 100 racines slash déjà saturées."""
+        faire entrer en compétition avec la surface slash publique volontairement limitée."""
         self.assertIn("ticketsetup", command_catalog_cleanup.MERGED_COMMANDS)
 
 
