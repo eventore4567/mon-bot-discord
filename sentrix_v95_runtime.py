@@ -122,6 +122,15 @@ def _should_expose(command: commands.Command) -> bool:
     name = str(command.qualified_name).casefold().strip()
     if not name or name in EXCLUDED_COMMANDS:
         return False
+
+    # La politique canonique de catalogue décide quelles commandes sont réellement
+    # publiques. Une commande hidden (ou enfant d'un groupe hidden) ne doit jamais
+    # être recréée automatiquement dans le menu slash par V95.
+    current = command
+    while current is not None:
+        if bool(getattr(current, "hidden", False)):
+            return False
+        current = getattr(current, "parent", None)
     if command.root_parent is None and command.name.casefold() in DIRECT_ROOTS:
         return False
     if _is_group_with_children(command) and not bool(getattr(command, "invoke_without_command", False)):
