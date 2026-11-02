@@ -26,6 +26,16 @@ def _target(original: str, root: str, leaf: str | None = None) -> v95.SlashTarge
     )
 
 
+def test_v95_does_not_expose_hidden_commands():
+    async def callback(ctx):
+        return None
+
+    command = commands.Command(callback, name="legacy-hidden")
+    command.hidden = True
+
+    assert v95._should_expose(command) is False
+
+
 def test_ticket_panel_uses_semantic_path():
     target = _target("ticketpanel", "ticket", "panel")
     assert v98.semantic_bucket("ticket", target) == "panel"
