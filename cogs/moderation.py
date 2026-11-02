@@ -290,9 +290,32 @@ class Moderation(commands.Cog):
             return raw_duration, raw_reason or "Aucune raison"
         return candidate, rest[0] if rest else "Aucune raison"
 
-    async def _reply(self, ctx: commands.Context, message: str, *, ephemere: bool = False):
-        """Confirmation courte dans le salon de la commande (texte brut, sans ping)."""
-        return await panels.texte_court(ctx, message, ephemere=ephemere)
+    PRIVATE_SLASH_FEEDBACK_COMMANDS = frozenset({
+        "ban", "tempban", "unban", "kick", "mute", "unmute", "warn", "unwarn",
+        "clear", "clearwarnings", "slowmode", "lock", "unlock", "hide", "show",
+        "nickname", "resetnick", "move", "disconnect",
+    })
+
+    async def _reply(
+        self,
+        ctx: commands.Context,
+        message: str,
+        *,
+        ephemere: bool | None = None,
+    ):
+        """Confirmation courte, privée automatiquement pour les actions mutantes slash."""
+        if ephemere is None:
+            command = getattr(ctx, "command", None)
+            name = str(
+                getattr(command, "name", "")
+                or getattr(ctx, "invoked_with", "")
+                or ""
+            ).casefold().strip()
+            ephemere = bool(
+                getattr(ctx, "interaction", None)
+                and name in self.PRIVATE_SLASH_FEEDBACK_COMMANDS
+            )
+        return await panels.texte_court(ctx, message, ephemere=bool(ephemere))
 
     async def _ack(self, ctx: commands.Context, *, ephemere: bool = False):
         """Accuse réception immédiatement avant les appels API/DB.
