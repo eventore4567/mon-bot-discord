@@ -885,7 +885,7 @@ class Moderation(commands.Cog):
     @app_commands.describe(membre="Le membre concerné")
     @checks.has_permission_or_modrole("moderate_members")
     async def clearwarnings(self, ctx: commands.Context, membre: discord.Member):
-        await self._ack(ctx)
+        await self._ack(ctx, ephemere=True)
         if not await self.check_targetable(ctx, membre):
             return
         await self.bot.db.execute(
@@ -1109,7 +1109,7 @@ class Moderation(commands.Cog):
     @app_commands.describe(duree="Ex: 5s, 30s, 1m, 10m, 1h — ou 0 / off pour désactiver (maximum 6 heures)")
     @checks.has_permission_or_modrole("manage_channels")
     async def slowmode(self, ctx: commands.Context, duree: str):
-        await self._ack(ctx)
+        await self._ack(ctx, ephemere=True)
         raw = duree.strip().lower()
         if raw in ("0", "off", "desactive", "désactive", "désactivé", "aucun", "none", "stop"):
             secondes = 0
@@ -1133,7 +1133,7 @@ class Moderation(commands.Cog):
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("manage_channels",), target="channel_target")
     async def lock(self, ctx: commands.Context, raison: str = "Aucune raison fournie"):
-        await self._ack(ctx)
+        await self._ack(ctx, ephemere=True)
         error = checks.check_channel_target(ctx.author, ctx.channel)
         if error:
             return await self._reply(ctx, error, ephemere=True)
@@ -1147,7 +1147,7 @@ class Moderation(commands.Cog):
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("manage_channels",), target="channel_target")
     async def unlock(self, ctx: commands.Context):
-        await self._ack(ctx)
+        await self._ack(ctx, ephemere=True)
         error = checks.check_channel_target(ctx.author, ctx.channel)
         if error:
             return await self._reply(ctx, error, ephemere=True)
@@ -1159,14 +1159,14 @@ class Moderation(commands.Cog):
     @commands.hybrid_command(name="hide", description="Cacher le salon aux membres (@everyone).", with_app_command=False)
     @checks.has_permission_or_modrole("manage_channels")
     async def hide(self, ctx: commands.Context):
-        await self._ack(ctx)
+        await self._ack(ctx, ephemere=True)
         if await self._set_everyone_visibility(ctx, visible=False):
             await self._reply(ctx, f"{ctx.channel.mention} est maintenant caché aux membres.")
 
     @commands.hybrid_command(name="show", description="Rendre le salon à nouveau visible.", with_app_command=False)
     @checks.has_permission_or_modrole("manage_channels")
     async def show(self, ctx: commands.Context):
-        await self._ack(ctx)
+        await self._ack(ctx, ephemere=True)
         if await self._set_everyone_visibility(ctx, visible=True):
             await self._reply(ctx, f"{ctx.channel.mention} est à nouveau visible.")
 
@@ -1208,7 +1208,7 @@ class Moderation(commands.Cog):
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("manage_nicknames",), target="member_moderation")
     async def nickname(self, ctx: commands.Context, membre: discord.Member, *, pseudo: str):
-        await self._ack(ctx)
+        await self._ack(ctx, ephemere=True)
         if not await self.check_targetable(ctx, membre):
             return
         await membre.edit(nick=pseudo[:32])
@@ -1220,7 +1220,7 @@ class Moderation(commands.Cog):
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("manage_nicknames",), target="member_moderation")
     async def resetnick(self, ctx: commands.Context, membre: discord.Member):
-        await self._ack(ctx)
+        await self._ack(ctx, ephemere=True)
         if not await self.check_targetable(ctx, membre):
             return
         await membre.edit(nick=None)
@@ -1230,7 +1230,7 @@ class Moderation(commands.Cog):
     @app_commands.describe(membre="Le membre à déplacer", salon="Le salon vocal de destination")
     @checks.has_permission_or_modrole("move_members")
     async def move(self, ctx: commands.Context, membre: discord.Member, salon: discord.VoiceChannel):
-        await self._ack(ctx)
+        await self._ack(ctx, ephemere=True)
         if not await self.check_targetable(ctx, membre):
             return
         if not membre.voice:
@@ -1242,7 +1242,7 @@ class Moderation(commands.Cog):
     @app_commands.describe(membre="Le membre à déconnecter")
     @checks.has_permission_or_modrole("move_members")
     async def disconnect(self, ctx: commands.Context, membre: discord.Member):
-        await self._ack(ctx)
+        await self._ack(ctx, ephemere=True)
         if not await self.check_targetable(ctx, membre):
             return
         if not membre.voice:
