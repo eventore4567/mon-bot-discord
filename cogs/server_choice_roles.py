@@ -352,12 +352,16 @@ async def _massrole_all_members(
             f"**{action_label}** de {role.mention} sur tous les membres du serveur.",
             progress_line.replace(",", " "),
             f"`{progress_bar}`",
+        ]
+        if total_members:
+            details.append(f"Restants : **{remaining:,}**".replace(",", " "))
+        details.extend([
             (
                 f"**{added_or_removed:,}** modifié(s) • **{skipped:,}** ignoré(s) • "
                 f"**{failed:,}** échec(s)"
             ).replace(",", " "),
             f"Temps écoulé : **{_duration(elapsed)}**",
-        ]
+        ])
         if rate > 0:
             details.append(f"Vitesse moyenne : **{rate:.1f} membre(s)/s**")
         if not done:
