@@ -15,10 +15,9 @@ né en panneau. Ce test vérifie que c'est bien panels.editer qui est appelé �
 `progress` est un objet nu sans `.edit()` : l'ancien code lèverait donc une
 AttributeError ici si la régression revenait.
 
-Le seuil de mise à jour (tous les 2000 membres traités) n'est atteint que si
-``processed`` (qui n'augmente que par lots de 15, ``batch_size``) tombe
-exactement sur un multiple de 2000 — le plus petit tel nombre est
-PPCM(15, 2000) = 6000, d'où le nombre de membres simulés ci-dessous."""
+Depuis le 02/11/2026, la progression passe par utils/mass_role.py : le
+panneau est réédité au plus toutes les 3 s et toujours à la fin, donc au
+moins une fois quel que soit le nombre de membres."""
 from __future__ import annotations
 
 import asyncio

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Literal
 
 import discord
@@ -10,10 +11,12 @@ from discord import app_commands
 from discord.ext import commands
 
 from . import language_runtime
-from utils import sentrix_panels as panels
+from utils import mass_role, sentrix_panels as panels
 
 logger = logging.getLogger("bot.role-mass")
 _RUNNING: set[tuple[int, int]] = set()
+#: Marge sous les 15 minutes de validité d'un jeton d'interaction.
+EPHEMERAL_EDIT_WINDOW = 14 * 60
 
 
 class TargetSelect(discord.ui.Select):
@@ -50,7 +53,7 @@ class TargetSelect(discord.ui.Select):
         if parent is not None:
             await interaction.response.edit_message(view=parent)
         else:
-            await interaction.response.edit_message(content=desc, view=self.owner)
+            await interaction.response.send_message(desc, ephemeral=True)
 
 
 class MassRoleView(discord.ui.View):
@@ -97,77 +100,62 @@ class MassRoleView(discord.ui.View):
     @discord.ui.button(label="Confirm", style=discord.ButtonStyle.danger, disabled=True)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.target not in {"members", "bots", "all"}:
-            return await interaction.response.send_message("Select a target first.", ephemeral=True)
+            return await interaction.response.send_message(
+                "Select a target first." if self.english else "Choisissez d'abord une cible.",
+                ephemeral=True,
+            )
         key = (self.guild_id, self.role_id)
         if key in _RUNNING:
             return await interaction.response.send_message(
-                "A bulk operation for this role is already running.", ephemeral=True
+                "A bulk operation for this role is already running." if self.english
+                else "Une opération en masse est déjà en cours pour ce rôle.",
+                ephemeral=True,
             )
         _RUNNING.add(key)
         self.stop()
-        parent = getattr(self, "_sentrix_panel_view", None)
-        pending = list(parent.children) if parent is not None else list(self.children)
-        while pending:
-            item = pending.pop()
-            pending.extend(getattr(item, "children", ()))
-            if isinstance(item, (discord.ui.Button, discord.ui.Select)):
-                item.disabled = True
-        if parent is not None:
-            await interaction.response.edit_message(view=parent)
-            await interaction.followup.send(
-                "Opération démarrée. Le résultat sera envoyé en MP.",
-                ephemeral=True,
-            )
-        else:
-            await interaction.response.edit_message(
-                content="Opération démarrée. Le résultat sera envoyé en MP.", view=self
-            )
+        role = interaction.guild.get_role(self.role_id)
+        suivi = mass_role.Progression(
+            action=self.action, role_mention=role.mention if role else f"<@&{self.role_id}>",
+            cible=self.target, english=self.english,
+        )
+        # Le panneau privé devient le suivi de l'opération (même message).
+        await panels.editer(interaction.response, suivi.panneau())
         # The job can outlast an interaction token on large servers.
-        # Keep it independent and report through the original channel.
-        asyncio.create_task(self._apply(interaction.guild, interaction.channel, self.author_id, key))
+        asyncio.create_task(self._apply(interaction, suivi, key))
 
-    async def _apply(self, guild: discord.Guild, channel, actor_id: int, key: tuple[int, int]):
-        processed = changed = skipped = failed = 0
+    async def _apply(self, interaction: discord.Interaction, suivi: "mass_role.Progression",
+                     key: tuple[int, int]):
+        guild = interaction.guild
+        actor_id = self.author_id
+        # Un message éphémère ne se modifie que pendant 15 min (jeton d'interaction).
+        limite = time.monotonic() + EPHEMERAL_EDIT_WINDOW
+
+        async def rafraichir(etat: "mass_role.Progression") -> None:
+            if time.monotonic() < limite:
+                await panels.editer(interaction, etat.panneau())
+
         try:
             role = guild.get_role(self.role_id)
             me = guild.me
             if role is None or me is None or role >= me.top_role:
+                suivi.interrompu = ("This role can no longer be managed." if self.english
+                                    else "Ce rôle ne peut plus être géré.")
+                await rafraichir(suivi)
                 return
-            try:
-                members = [member async for member in guild.fetch_members(limit=None)]
-            except (discord.Forbidden, discord.HTTPException):
-                # Do not silently apply to a partial member cache.
-                await self._notify_actor(guild, actor_id, "Liste complète des membres indisponible ; aucun rôle modifié.")
-                return
-            for member in members:
-                if self.target == "members" and member.bot:
-                    continue
-                if self.target == "bots" and not member.bot:
-                    continue
-                processed += 1
-                # Managed and hierarchy checks are enforced by Discord as well.
-                if self.action == "add" and role in member.roles:
-                    skipped += 1
-                    continue
-                if self.action == "remove" and role not in member.roles:
-                    skipped += 1
-                    continue
-                try:
-                    if self.action == "add":
-                        await member.add_roles(role, reason=f"Bulk role requested by {actor_id}")
-                    else:
-                        await member.remove_roles(role, reason=f"Bulk role requested by {actor_id}")
-                    changed += 1
-                except (discord.Forbidden, discord.HTTPException):
-                    failed += 1
-                await asyncio.sleep(0)
+            await mass_role.executer(
+                guild, role, action=self.action, cible=self.target,
+                raison=f"Bulk role requested by {actor_id}",
+                progression=suivi, rafraichir=rafraichir,
+            )
             await self._notify_actor(
                 guild, actor_id,
-                f"Opération terminée : {changed} modifiés, {skipped} ignorés et {failed} échecs.",
+                f"Rôles en masse terminés ({role.name}) : {suivi.modifies} modifiés, "
+                f"{suivi.ignores} ignorés et {suivi.echecs} échecs sur {suivi.total} "
+                f"en {mass_role._duree(suivi.ecoule)}.",
             )
         except Exception:
             logger.exception("Mass role failed: guild=%s, role=%s, processed=%s",
-                             guild.id, self.role_id, processed)
+                             guild.id, self.role_id, suivi.traites)
             await self._notify_actor(guild, actor_id, "L'opération sur les rôles a été interrompue.")
         finally:
             _RUNNING.discard(key)
