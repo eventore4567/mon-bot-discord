@@ -519,10 +519,11 @@ async def _send_setup_v73(self, target):
     await view.prepare()
 
     if isinstance(target, commands.Context):
+        # Une commande préfixée ne peut pas être éphémère sur Discord.
         return await panels.envoyer(target, view)
     if target.response.is_done():
-        return await panels.envoyer(target.followup, view)
-    return await panels.envoyer(target.response, view)
+        return await panels.envoyer(target.followup, view, ephemere=True)
+    return await panels.envoyer(target.response, view, ephemere=True)
 
 
 def install(bot: commands.Bot) -> None:
