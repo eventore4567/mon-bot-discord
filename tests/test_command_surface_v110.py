@@ -33,6 +33,13 @@ def test_info_level_and_music_use_common_names() -> None:
     assert surface.STANDARD_GROUPED_SLASH["music nowplaying"] == ("music", "nowplaying")
 
 
+def test_economy_keeps_balance_direct_and_groups_other_actions() -> None:
+    assert surface.STANDARD_DIRECT_SLASH["balance"] == "balance"
+    for name in ("daily", "weekly", "work", "rob", "pay", "shop", "inventory", "gamble", "deposit", "withdraw"):
+        assert name not in surface.STANDARD_DIRECT_SLASH
+        assert surface.STANDARD_GROUPED_SLASH[name] == ("economy", name)
+
+
 def test_role_management_uses_role_group() -> None:
     assert surface.STANDARD_GROUPED_SLASH["giverole"] == ("role", "give")
     assert surface.STANDARD_GROUPED_SLASH["removerole"] == ("role", "remove")
