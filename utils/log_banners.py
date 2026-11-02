@@ -50,10 +50,10 @@ WIDTH = 1024
 # Bandeau fin : juste la place du logo et de son halo. Un bandeau plus haut
 # ajouterait du vide au-dessus et au-dessous du trait ; plus bas, Discord réduit
 # l'image et le trait devient invisible sur mobile.
-HEIGHT = 72
+HEIGHT = 48
 
 # Côté du logo centré : il reste petit, le trait occupe la largeur.
-LOGO_BOX = 56
+LOGO_BOX = 34
 # Le trait part à MARGE du bord et s'arrête à ÉCART du logo.
 MARGE = 14
 ECART = 12
@@ -101,7 +101,7 @@ _QUALITE_WEBP = 88
 # embed par URL, pendant des heures : changer le contenu d'un fichier sans changer
 # son nom laisse l'ancienne bannière s'afficher. À incrémenter à chaque refonte du
 # dessin, c'est la seule façon de forcer Discord à retélécharger.
-BANNER_VERSION = "v4"
+BANNER_VERSION = "v5"
 
 
 def nom_source(style: str) -> str:
