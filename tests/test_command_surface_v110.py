@@ -33,6 +33,15 @@ def test_info_level_and_music_use_common_names() -> None:
     assert surface.STANDARD_GROUPED_SLASH["music nowplaying"] == ("music", "nowplaying")
 
 
+def test_xp_admin_actions_use_level_group() -> None:
+    assert surface.STANDARD_DIRECT_SLASH["level"] == "level"
+    assert surface.STANDARD_DIRECT_SLASH["leaderboard-levels"] == "leaderboard"
+    assert "set-xp" not in surface.STANDARD_DIRECT_SLASH
+    assert "add-xp" not in surface.STANDARD_DIRECT_SLASH
+    assert surface.STANDARD_GROUPED_SLASH["set-xp"] == ("level", "setxp")
+    assert surface.STANDARD_GROUPED_SLASH["add-xp"] == ("level", "addxp")
+
+
 def test_secondary_info_commands_use_info_group() -> None:
     assert surface.STANDARD_DIRECT_SLASH["avatar"] == "avatar"
     assert surface.STANDARD_DIRECT_SLASH["userinfo"] == "userinfo"
