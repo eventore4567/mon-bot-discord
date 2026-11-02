@@ -31,7 +31,7 @@ PUBLIC_GAME_COMMANDS = frozenset({
 })
 
 NORMAL_DIRECT_COMMANDS = frozenset({
-    "help", "setup", "ping", "avatar", "userinfo", "translate", "timestamp", "afk", "setprefix", "setmodrole",
+    "help", "setup", "ping", "avatar", "userinfo", "translate", "timestamp", "afk", "setprefix",
     "ban", "unban", "kick", "mute", "unmute", "warn", "warnings", "clear",
     "lock", "unlock", "clearwarnings", "slowmode", "nickname", "resetnick",
     "giverole", "removerole",
@@ -125,6 +125,10 @@ SECURITY_MERGED_COMMANDS = frozenset({
 })
 
 LOW_VALUE_HIDDEN_COMMANDS = frozenset({
+    # Compatibilité legacy : la valeur mod_role existante continue d'être lue pour
+    # les anciens serveurs/logs, mais les nouveaux setups utilisent les permissions
+    # Discord natives et ne doivent plus proposer cette commande dans la surface courte.
+    "setmodrole",
     "aidiag", "ai-translate", "diagnostic", "bot-status", "command-stats", "levelcheck",
     "levelrepair", "weekly", "rewrite", "shop", "resume", "queue", "profile",
 })
