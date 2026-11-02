@@ -245,8 +245,11 @@ async def run() -> int:
         if missing_v110_roots:
             errors.append("slash V110 standards absents: " + ", ".join(missing_v110_roots))
 
-        if len(app_roots) > slash_command_budget.GLOBAL_CHAT_INPUT_BUDGET:
-            errors.append(f"trop de racines slash: {len(app_roots)}/100")
+        if len(app_roots) > slash_command_budget.PUBLIC_CHAT_INPUT_TARGET:
+            errors.append(
+                f"surface slash trop large: {len(app_roots)}/"
+                f"{slash_command_budget.PUBLIC_CHAT_INPUT_TARGET}"
+            )
 
         missing_proof_slash = sorted(set(slash_command_budget.PROOF_SLASH_PREFERRED) - app_root_names)
         if missing_proof_slash:
@@ -316,8 +319,11 @@ async def run() -> int:
                 print(f"  {category.key}: {count}")
         if explicit_removed:
             print("Retraits produit confirmés: " + ", ".join(sorted(explicit_removed)))
-        if len(app_roots) < 100:
-            warnings.append(f"catalogue slash sous le plafond: {len(app_roots)}/100")
+        if len(app_roots) < slash_command_budget.PUBLIC_CHAT_INPUT_TARGET:
+            warnings.append(
+                f"catalogue slash sous la cible: {len(app_roots)}/"
+                f"{slash_command_budget.PUBLIC_CHAT_INPUT_TARGET}"
+            )
         for warning in warnings:
             print(f"[WARN] {warning}")
         for error in errors:
