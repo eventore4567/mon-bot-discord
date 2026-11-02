@@ -356,6 +356,7 @@ async def _massrole_all_members(
         if not done:
             if eta is not None:
                 details.append(f"Fin estimée dans : **~{_duration(eta)}**")
+                details.append(f"Durée totale estimée : **~{_duration(elapsed + eta)}**")
             else:
                 details.append("Fin estimée : **calcul en cours…**")
 
@@ -429,6 +430,17 @@ async def _massrole_all_members(
             current = remaining[offset:offset + batch_size]
             await __import__("asyncio").gather(*(apply(member) for member in current))
             processed += len(current)
+            now_mono = time.monotonic()
+            if processed - last_reported >= 250 and now_mono - last_progress_edit >= 2.0:
+                try:
+                    await panels.editer(
+                        progress,
+                        panels.depuis_embed(_progress_embed(processed_now=processed)),
+                    )
+                    last_progress_edit = now_mono
+                    last_reported = processed
+                except discord.HTTPException:
+                    pass
 
     verb = "ajouté" if mode == "add" else "retiré"
     result = _progress_embed(processed_now=processed, done=True)
