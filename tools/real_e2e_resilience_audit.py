@@ -347,8 +347,9 @@ async def full_runtime_journey(folder: pathlib.Path) -> int:
     metrics = await runtime_journey(str(folder / "real-e2e-runtime.db"))
     assert int(metrics["extensions"]) > 0
     assert int(metrics["commands"]) > 0
-    # La surface V3 utilise volontairement le plafond Discord complet : 100 racines slash.
-    assert int(metrics["slash_roots"]) <= 100
+    # La limite Discord reste 100, mais SentriX impose une surface produit plus courte.
+    from cogs import slash_command_budget
+    assert int(metrics["slash_roots"]) <= slash_command_budget.PUBLIC_CHAT_INPUT_TARGET
     return 1
 
 
