@@ -341,11 +341,15 @@ async def _massrole_all_members(
 
         if total_members:
             progress_line = f"**{processed_now:,}/{total_members:,}** membres traités (**{percent:.0f} %**)"
+            filled = max(0, min(10, int(round(percent / 10))))
+            progress_bar = "▰" * filled + "▱" * (10 - filled)
         else:
             progress_line = f"**{processed_now:,}** membres traités"
+            progress_bar = "▱" * 10
 
         details = [
             progress_line.replace(",", " "),
+            f"`{progress_bar}`",
             (
                 f"**{added_or_removed:,}** modifié(s) • **{skipped:,}** ignoré(s) • "
                 f"**{failed:,}** échec(s)"
