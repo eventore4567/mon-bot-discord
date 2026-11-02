@@ -21,7 +21,7 @@ import time
 import traceback
 
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 import config
 from database.db import Database, PRIMARY_CREATOR_ID
@@ -56,7 +56,7 @@ from core.module_gate import (
 )
 from core.module_runtime import ModuleRuntimeController
 from core.module_supervisor import ModuleSupervisor
-from services.usage_presence import usage_presence_text
+from services.usage_presence import rotating_presence_text
 from web.dashboard import start_dashboard
 import web.dashboard as dashboard_module
 from web.dashboard_api_forbidden_words import register as register_forbidden_words_routes
@@ -587,6 +587,7 @@ class BotAllInOne(commands.Bot):
         self.prefix_cache: dict[int, str] = {}
         self.prefix_cache_refreshed: dict[int, float] = {}
         self.blacklist_cache: dict[int, str] = {}
+        self._usage_presence_index = 0
 
     def _refresh_module_health(self) -> dict:
         return self.module_runtime.refresh()
@@ -601,10 +602,25 @@ class BotAllInOne(commands.Bot):
         return await self.module_runtime.stop(name)
 
     async def refresh_usage_presence(self) -> None:
-        """Publie le compteur d'utilisation dans le statut natif du bot."""
-        text = usage_presence_text(self.guilds)
+        """Publie le statut FR/EN courant avec des compteurs réels."""
+        text = rotating_presence_text(self.guilds, self._usage_presence_index)
         await self.change_presence(activity=discord.CustomActivity(name=text))
         logger.info("Statut Discord actualisé : %s", text)
+
+    @tasks.loop(minutes=2)
+    async def rotate_usage_presence(self) -> None:
+        """Change automatiquement de langue et de compteur toutes les deux minutes."""
+        self._usage_presence_index = (self._usage_presence_index + 1) % 4
+        try:
+            await self.refresh_usage_presence()
+        except Exception:
+            logger.exception("Rotation du statut Discord impossible")
+
+    @rotate_usage_presence.before_loop
+    async def _before_rotate_usage_presence(self) -> None:
+        await self.wait_until_ready()
+        # Le premier statut est déjà publié par on_ready.
+        await asyncio.sleep(120)
 
     def _prune_redundant_commands(self) -> list[str]:
         removed_names: list[str] = []
@@ -632,6 +648,8 @@ class BotAllInOne(commands.Bot):
         return removed_names
 
     async def close(self):
+        if self.rotate_usage_presence.is_running():
+            self.rotate_usage_presence.cancel()
         task = self._module_supervisor_task
         if task is not None and not task.done():
             task.cancel()
@@ -1164,6 +1182,8 @@ class BotAllInOne(commands.Bot):
                 logger.warning("Vérification de persistance (on_ready) impossible :\n" + traceback.format_exc())
 
         await self.refresh_usage_presence()
+        if not self.rotate_usage_presence.is_running():
+            self.rotate_usage_presence.start()
         embeds.set_footer_icon(self.user.display_avatar.url)
 
         saved_footer = await self.db.get_setting("footer_text")
