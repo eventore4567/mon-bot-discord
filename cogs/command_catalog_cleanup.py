@@ -23,6 +23,13 @@ GAME_COMMANDS = frozenset({
     "dailygames",
 })
 
+# Catalogue public court : les autres mini-jeux restent disponibles par leur
+# commande historique, mais ne saturent plus le menu d'aide.
+PUBLIC_GAME_COMMANDS = frozenset({
+    "blackjack", "coinflip", "dice", "trivia", "minesweeper",
+    "duel", "tictactoe", "hangman", "emoji-race", "adventure",
+})
+
 NORMAL_DIRECT_COMMANDS = frozenset({
     "help", "setup", "ping", "avatar", "userinfo", "translate", "timestamp", "afk", "setprefix", "setmodrole",
     "ban", "unban", "kick", "mute", "unmute", "warn", "warnings", "clear",
@@ -38,7 +45,7 @@ NORMAL_DIRECT_COMMANDS = frozenset({
     # Le nouveau moteur expose pause/skip/stop sous le groupe /music. Seul +play
     # reste volontairement une commande directe pour compatibilité rapide.
     "play",
-}) | GAME_COMMANDS
+}) | PUBLIC_GAME_COMMANDS
 
 # Commandes admin encore découvrables. Les commandes owner privées (blacklist globale,
 # sync global et wipe serveur) restent chargées/permissionnées mais ne sont plus montrées
