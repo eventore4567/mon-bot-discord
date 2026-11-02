@@ -113,7 +113,7 @@ MODULES: tuple[ModuleSpec, ...] = (
         _s("import", "Importer des données", "Importer XP, niveaux et argent depuis un export JSON.", "import-data"),
     )),
     ModuleSpec("economy", "Économie", "Banque, monnaie, boutique, inventaire et réputation.", (
-        _s("currency", "Monnaie", "Emoji, affichage et paramètres économiques liés aux profils.", "levels-config"),
+        _s("currency", "Monnaie", "Changer le nom et l'emoji, ou importer un emoji personnalisé.", "currency-config"),
         _s("bank", "Banque", "Portefeuille et banque des membres.", "hint:+banque"),
         _s("shop", "Boutique", "Objets, rôles et achats disponibles.", "hint:+shop"),
         _s("inventory", "Inventaire", "Objets possédés et gestion des récompenses.", "hint:+inventory"),
@@ -432,6 +432,35 @@ async def _open_levels_config(view, interaction: discord.Interaction) -> None:
         await interaction.response.send_message("Impossible d'ouvrir la configuration des niveaux pour le moment.", ephemeral=True)
 
 
+async def _open_currency_config(view, interaction: discord.Interaction) -> None:
+    """Use the existing economy currency engine, not the profile emoji page."""
+    from types import SimpleNamespace
+    from cogs import setup_v2_ui as setup_ui
+    from cogs import setup_v2_core as core
+    guild = view._guild()
+    if guild is None:
+        return await interaction.response.send_message("Serveur introuvable.", ephemeral=True)
+    values = await core.economy_settings(view.bot, guild.id)
+    adapter = SimpleNamespace(bot=view.bot, guild=guild)
+    overview = discord.Embed(
+        title="Personnaliser la monnaie",
+        description=(
+            f"Nom : **{values['currency_singular']}** / **{values['currency_plural']}**\n"
+            f"Emoji : {values['currency_symbol']}\n\n"
+            "Choisissez le nom et l'emoji, ou importez une image depuis votre appareil. "
+            "Aucun solde ne sera modifié."
+        ),
+    )
+    await panels.envoyer(
+        interaction.response,
+        panels.avec_composants(
+            panels.depuis_embed(overview),
+            setup_ui.EconomyManageView(adapter, interaction.user.id),
+        ),
+        ephemere=True,
+    )
+
+
 def _route_to_config(view, field: str) -> None:
     view.page = v4.PAGE_CONFIGURATION
     view._v4_expert = field in {item[0] for item in v4._EXPERT_SETTINGS}
@@ -734,6 +763,8 @@ async def _run_action(view, interaction: discord.Interaction) -> None:
         view.page = v4.PAGE_SUMMARY
     elif action == "levels-config":
         return await _open_levels_config(view, interaction)
+    elif action == "currency-config":
+        return await _open_currency_config(view, interaction)
     elif action == "import-data":
         from cogs.import_data import ImportSetupView
         return await interaction.response.send_message(

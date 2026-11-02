@@ -291,7 +291,7 @@ class StatsEconomyModal(discord.ui.Modal, title="Économie et réputation"):
     def __init__(self, view: "StatsConfigView"):
         super().__init__()
         self.view_ref = view
-        self.emoji = discord.ui.TextInput(label="Emoji de l'économie (ex: 🪙, 💵, 🥇)", default=view.pending.get("economy_emoji", "🪙"), max_length=10)
+        self.emoji = discord.ui.TextInput(label="Emoji de l'économie (ex: 🪙, 💵, 🥇)", default=view.pending.get("economy_emoji", "🪙"), max_length=64)
         self.rep_cooldown = discord.ui.TextInput(
             label="Cooldown de réputation (en heures)",
             default=str(view.pending.get("reputation_cooldown", 86400) // 3600),
@@ -568,6 +568,16 @@ class StatsConfigView(discord.ui.View):
         for field in ("xp_min", "xp_max", "xp_cooldown"):
             to_save.pop(field, None)
         await self.cog.bot.db.set_stats_settings(self.guild.id, to_save)
+        if self.category == "economy" and "economy_emoji" in to_save:
+            # L'écran Niveaux/Profils pouvait modifier un autre emoji que la
+            # boutique et le classement. Re-synchroniser leur source unique.
+            from cogs import setup_v2_core as currency
+            current = await currency.economy_settings(self.cog.bot, self.guild.id)
+            await currency.set_currency(
+                self.cog.bot, self.guild.id,
+                current["currency_singular"], current["currency_plural"],
+                str(to_save["economy_emoji"]), actor_id=interaction.user.id,
+            )
         embed = self.build_summary_embed()
         embed.set_footer(text="● Enregistré — ces réglages sont actifs immédiatement et resteront après un redémarrage.")
         await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(embed), self))
@@ -1299,7 +1309,7 @@ class Levels(commands.Cog, name="Levels"):
             membre = ctx.guild.get_member(row["user_id"])
             if membre is not None and membre.bot:
                 continue
-            nom = membre.display_name if membre else f"Utilisateur {row['user_id']}"
+            nom = membre.display_name if membre else f"Membre #{str(row['user_id'])[-5:]}"
             classement.append((row["user_id"], nom, int(row["level"]), int(row["xp"])))
 
         if not classement:
@@ -1323,57 +1333,34 @@ class Levels(commands.Cog, name="Levels"):
             )
 
         nombre = stats_service.format_number
-        medailles = ("1er", "2e", "3e")
-        podium = [
-            panels.Ligne(
-                medailles[i],
-                f"**{nom}** · niveau **{niveau}**",
-                indice=f"{nombre(xp)} XP",
-            )
-            for i, (_uid, nom, niveau, xp) in enumerate(classement[:3])
-        ]
-        suite = [
-            panels.Ligne(f"{i}", f"{nom} · niveau {niveau}")
-            for i, (_uid, nom, niveau, _xp) in enumerate(classement[3:10], start=4)
-        ]
+        # Conserver les niveaux et XP visibles, y compris au niveau zéro.
+        # Les tableaux code rendaient les mentions/emojis en texte brut.
+        top = []
+        for rank, (_uid, name, niveau, xp) in enumerate(classement[:10], start=1):
+            display = discord.utils.escape_markdown(str(name)[:35])
+            top.append(f"**{rank}.** {display} · **Niv. {niveau}** · {nombre(xp)} XP")
 
-        sections = [panels.Section("Podium", podium)]
-        if suite:
-            sections.append(panels.Section("Suivants", suite, aligne=True))
-
-        # La position du demandeur : la premiere chose qu'on cherche.
-        rang = next(
-            (i for i, (uid, *_r) in enumerate(classement, start=1) if uid == ctx.author.id), None
+        rank = next(
+            (i for i, (uid, *_r) in enumerate(classement, start=1)
+             if uid == ctx.author.id), None,
         )
-        if rang is not None:
-            _uid, _nom, niveau, xp = classement[rang - 1]
-            sections.append(
-                panels.Section(
-                    "Votre position",
-                    [
-                        panels.Ligne("Rang", f"**#{rang}** sur {len(classement)}"),
-                        panels.Ligne("Niveau", str(niveau)),
-                        panels.Ligne("XP", nombre(xp)),
-                    ],
-                    aligne=True,
-                )
-            )
+        if rank is None:
+            position = "Tu n'es pas encore classé."
         else:
-            sections.append(
-                panels.Section(
-                    "Votre position",
-                    [panels.Ligne("Non classé", "Écrivez quelques messages pour apparaître ici")],
-                )
-            )
+            _uid, _name, level, xp = classement[rank - 1]
+            position = f"**#{rank}** sur {len(classement)} · **Niveau {level}** · {nombre(xp)} XP"
 
         await panels.envoyer(
             ctx,
             panels.Panneau(
-                titre="SentriX — Classement des niveaux",
-                sous_titre=f"**{len(classement)}** membre(s) classé(s) sur {ctx.guild.name}.",
+                titre="Classement des niveaux",
+                sous_titre=f"{len(classement)} membres · {ctx.guild.name}",
                 kind="brand",
-                sections=sections,
-                pied="SentriX • Niveaux",
+                sections=[
+                    panels.Section("Top 10", texte="\n".join(top)),
+                    panels.Section("Ton classement", texte=position),
+                ],
+                pied="",
             ),
         )
 

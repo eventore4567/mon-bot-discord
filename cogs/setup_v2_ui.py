@@ -784,9 +784,13 @@ class CurrencyModal(discord.ui.Modal, title="Nom de la monnaie"):
     plural = discord.ui.TextInput(label="Pluriel", placeholder="Coins", max_length=32)
     symbol = discord.ui.TextInput(label="Symbole / emoji", placeholder="🪙 ou <:piece:123…>", max_length=64)
 
-    def __init__(self, owner):
+    def __init__(self, owner, settings=None):
         super().__init__()
         self.owner = owner
+        settings = settings or {}
+        self.singular.default = settings.get("currency_singular", "Pièce")
+        self.plural.default = settings.get("currency_plural", "Pièces")
+        self.symbol.default = settings.get("currency_symbol", "🪙")
 
     async def on_submit(self, interaction):
         await core.set_currency(
@@ -798,6 +802,83 @@ class CurrencyModal(discord.ui.Modal, title="Nom de la monnaie"):
             actor_id=interaction.user.id,
         )
         await panels.envoyer(interaction.response, panels.depuis_embed(embeds.success('Nom de la monnaie mis à jour.')), ephemere=True)
+
+
+class CurrencyEmojiUploadModal(discord.ui.Modal):
+    """Upload an image as a server emoji and configure it as currency."""
+
+    def __init__(self, owner):
+        super().__init__(title="Importer un emoji de monnaie", timeout=300)
+        self.owner = owner
+        self.emoji_name = discord.ui.TextInput(
+            label="Nom de l'emoji", placeholder="piece_sentrix",
+            min_length=2, max_length=32, required=True,
+        )
+        self.upload = discord.ui.FileUpload(required=True, min_values=1, max_values=1)
+        self.add_item(discord.ui.Label(text="Nom de l'emoji", component=self.emoji_name))
+        self.add_item(discord.ui.Label(
+            text="Image PNG/JPG/GIF (256 Ko maximum)", component=self.upload,
+        ))
+
+    async def on_submit(self, interaction):
+        guild = interaction.guild
+        user = interaction.user
+        if guild is None or user.id != self.owner.author_id:
+            return await interaction.response.send_message(
+                "Ce panneau ne vous appartient pas.", ephemeral=True,
+            )
+        def can_manage(member):
+            if member is None:
+                return False
+            permissions = member.guild_permissions
+            return (permissions.administrator
+                    or getattr(permissions, "manage_emojis_and_stickers", False)
+                    or getattr(permissions, "manage_expressions", False))
+        if not can_manage(user) or not can_manage(guild.me):
+            return await interaction.response.send_message(
+                "Permission Gérer les expressions requise pour vous et SentriX.",
+                ephemeral=True,
+            )
+        name = str(self.emoji_name.value).strip()
+        if not re.fullmatch(r"[A-Za-z0-9_]{2,32}", name):
+            return await interaction.response.send_message(
+                "Nom d'emoji invalide (2 à 32 lettres, chiffres ou underscores).",
+                ephemeral=True,
+            )
+        if not self.upload.values:
+            return await interaction.response.send_message("Ajoutez une image.", ephemeral=True)
+        file = self.upload.values[0]
+        mime = str(getattr(file, "content_type", "") or "").lower()
+        extension = str(getattr(file, "filename", "")).lower()
+        valid_image = mime in {"image/png", "image/jpeg", "image/gif"}
+        if not valid_image or not extension.endswith((".png", ".jpg", ".jpeg", ".gif")) or file.size > 256 * 1024:
+            return await interaction.response.send_message(
+                "Image PNG/JPG/GIF requise, 256 Ko maximum.", ephemeral=True,
+            )
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            data = await file.read()
+            if not data or len(data) > 256 * 1024:
+                raise ValueError("Fichier vide ou trop volumineux.")
+            created = await guild.create_custom_emoji(
+                name=name, image=data,
+                reason=f"Monnaie SentriX par administrateur {user.id}",
+            )
+            existing = await core.economy_settings(self.owner.bot, guild.id)
+            await core.set_currency(
+                self.owner.bot, guild.id,
+                existing["currency_singular"], existing["currency_plural"],
+                str(created), actor_id=user.id,
+            )
+        except (discord.HTTPException, ValueError) as error:
+            logger.warning("Import d'emoji monnaie refusé guild=%s: %s", guild.id, error)
+            return await interaction.followup.send(
+                "L'importation de l'emoji a échoué. Vérifiez les permissions, "
+                "la taille et les emplacements disponibles.", ephemeral=True,
+            )
+        await interaction.followup.send(
+            f"Emoji de monnaie importé et activé : {created}.", ephemeral=True,
+        )
 
 
 class EconomyManageView(discord.ui.View):
@@ -820,9 +901,14 @@ class EconomyManageView(discord.ui.View):
         await core.set_module_enabled(self.bot, self.guild.id, "economy", not current, actor_id=interaction.user.id)
         await panels.envoyer(interaction.response, panels.depuis_embed(embeds.success(f"Économie {('activée' if not current else 'désactivée')}. Les soldes sont conservés.")), ephemere=True)
 
-    @discord.ui.button(label="Changer le nom de l’argent", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(label="Nom et emoji de la monnaie", style=discord.ButtonStyle.secondary, row=0)
     async def currency(self, interaction, _button):
-        await interaction.response.send_modal(CurrencyModal(self.setup_view))
+        settings = await core.economy_settings(self.bot, self.guild.id)
+        await interaction.response.send_modal(CurrencyModal(self.setup_view, settings))
+
+    @discord.ui.button(label="Importer un emoji", style=discord.ButtonStyle.secondary, row=1)
+    async def upload_currency(self, interaction, _button):
+        await interaction.response.send_modal(CurrencyEmojiUploadModal(self))
 
 
 class LevelRewardModal(discord.ui.Modal, title="Récompense de niveau"):
