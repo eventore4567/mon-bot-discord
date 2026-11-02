@@ -607,10 +607,10 @@ class BotAllInOne(commands.Bot):
         await self.change_presence(activity=discord.CustomActivity(name=text))
         logger.info("Statut Discord actualisé : %s", text)
 
-    @tasks.loop(minutes=2)
+    @tasks.loop(seconds=30)
     async def rotate_usage_presence(self) -> None:
-        """Change automatiquement de langue et de compteur toutes les deux minutes."""
-        self._usage_presence_index = (self._usage_presence_index + 1) % 4
+        """Alterne le même statut détaillé entre français et anglais toutes les 30 secondes."""
+        self._usage_presence_index = (self._usage_presence_index + 1) % 2
         try:
             await self.refresh_usage_presence()
         except Exception:
@@ -620,7 +620,7 @@ class BotAllInOne(commands.Bot):
     async def _before_rotate_usage_presence(self) -> None:
         await self.wait_until_ready()
         # Le premier statut est déjà publié par on_ready.
-        await asyncio.sleep(120)
+        await asyncio.sleep(30)
 
     def _prune_redundant_commands(self) -> list[str]:
         removed_names: list[str] = []
