@@ -47,6 +47,8 @@ def _private_slash_response(command: commands.Command) -> bool:
     root = qualified.split(" ", 1)[0]
     name = str(getattr(command, "name", "") or "").casefold().strip()
     return qualified in PRIVATE_SLASH_ACTIONS or root in PRIVATE_SLASH_ACTIONS or name in PRIVATE_SLASH_ACTIONS
+
+
 MAX_ROOT_COMMANDS = 100
 MAX_CHILDREN = 25
 MAX_OPTIONS = 25
