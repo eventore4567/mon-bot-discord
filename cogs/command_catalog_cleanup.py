@@ -36,7 +36,7 @@ NORMAL_DIRECT_COMMANDS = frozenset({
     "lock", "unlock", "clearwarnings", "slowmode", "nickname", "resetnick",
     "giverole", "removerole",
     "security", "antiraid", "antinuke", "panic", "syncbl",
-    "sentrix", "image", "ai-translate", "chat-reset",
+    "sentrix", "image", "chat-reset",
     "balance", "daily", "work", "pay", "inventory", "banque",
     "economyleaderboard",
     "level", "stats", "set-xp", "add-xp", "set-level-role", "remove-level-role",
@@ -125,7 +125,7 @@ SECURITY_MERGED_COMMANDS = frozenset({
 })
 
 LOW_VALUE_HIDDEN_COMMANDS = frozenset({
-    "aidiag", "diagnostic", "bot-status", "command-stats", "levelcheck",
+    "aidiag", "ai-translate", "diagnostic", "bot-status", "command-stats", "levelcheck",
     "levelrepair", "weekly", "rewrite", "shop", "resume", "queue", "profile",
 })
 
