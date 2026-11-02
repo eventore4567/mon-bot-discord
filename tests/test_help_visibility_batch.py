@@ -25,7 +25,7 @@ class HelpVisibilityBatchTests(unittest.TestCase):
             "notifs-ping", "notifs-list", "notifs-remove",
             "logevent", "logsearch",
             "rob", "buy", "sell", "gamble", "deposit", "withdraw",
-            "rep", "reputation", "repleaderboard", "rephistory",
+            "rep", "reputation", "repleaderboard",
             "voice-time", "level-roles",
             "addemoji", "deleteemoji", "emoji-list",
         }
@@ -34,6 +34,7 @@ class HelpVisibilityBatchTests(unittest.TestCase):
         self.assertNotIn("shop", HELP_VISIBLE_EXTRA_COMMANDS)
         self.assertNotIn("weekly", HELP_VISIBLE_EXTRA_COMMANDS)
         self.assertNotIn("set-bio", HELP_VISIBLE_EXTRA_COMMANDS)
+        self.assertNotIn("rephistory", HELP_VISIBLE_EXTRA_COMMANDS)
         self.assertNotIn("economy", HELP_VISIBLE_EXTRA_COMMANDS)
         self.assertNotIn("logs", HELP_VISIBLE_EXTRA_COMMANDS)
         for name in (
