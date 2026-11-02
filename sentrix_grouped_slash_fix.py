@@ -28,6 +28,20 @@ import sentrix_v95_runtime as v95
 
 logger = logging.getLogger("bot.grouped-slash-fix")
 
+PRIVATE_SLASH_ACTIONS = frozenset({
+    "ban", "tempban", "unban", "kick", "mute", "unmute", "warn", "unwarn",
+    "clear", "clearwarnings", "slowmode", "lock", "unlock", "hide", "show",
+    "nickname", "resetnick", "move", "disconnect",
+    "giverole", "removerole", "massrole",
+})
+
+
+def _private_slash_response(command: commands.Command) -> bool:
+    qualified = str(getattr(command, "qualified_name", "") or "").casefold().strip()
+    root = qualified.split(" ", 1)[0]
+    name = str(getattr(command, "name", "") or "").casefold().strip()
+    return qualified in PRIVATE_SLASH_ACTIONS or root in PRIVATE_SLASH_ACTIONS or name in PRIVATE_SLASH_ACTIONS
+
 _INSTALLED = False
 
 
@@ -389,7 +403,10 @@ async def _invoke_original_fixed(
     kwargs: dict,
 ) -> None:
     if not interaction.response.is_done():
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(
+            thinking=True,
+            ephemeral=_private_slash_response(command),
+        )
 
     ctx = await _make_context(bot, interaction)
     try:
