@@ -13,8 +13,11 @@ def test_economy_leaderboard_is_simple_not_monospaced():
     assert 'texte="\\n".join(top)' in source
     assert 'aligne=True' not in source
     assert 'sx_panels.Section("Top 10"' in source
-    assert "Ton classement" in source
-    assert 'discord.utils.escape_markdown' in source
+    # 03/11/2026 : membres mentionnés sans notification, rang aligné, vouvoiement.
+    assert "Votre rang" in source and "Ton classement" not in source
+    assert "<@{uid}>" in source
+    assert "allowed_mentions=discord.AllowedMentions.none()" in source
+    assert economy._rang(1) == "🥇" and economy._rang(4) == "` 4.`" and economy._rang(10) == "`10.`"
 
 
 def test_levels_leaderboard_always_shows_xp_and_level():
@@ -22,7 +25,7 @@ def test_levels_leaderboard_always_shows_xp_and_level():
     assert 'texte="\\n".join(top)' in source
     assert 'aligne=True' not in source
     assert 'Niv. {niveau}' in source
-    assert 'Niveau {level}' in source
+    assert "<@{uid}>" in source and "AllowedMentions.none()" in source
     assert 'nombre(xp)' in source
 
 

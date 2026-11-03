@@ -126,7 +126,8 @@ def test_navigation_is_short_and_grouped():
     tools = re.search(r"const TOOL_GROUPS = \[(.*?)\n\];", program, re.S).group(1)
     assert len(re.findall(r"\['([a-z]+)', '", tools)) <= 10
     assert "(ancien)" not in program
-    assert "MIGRATION_LINKS" in program and "state.developer" in program
+    # Plus de liens « Migration » hors du dashboard (02/11/2026).
+    assert "MIGRATION_LINKS" not in program and "state.developer" in program
 
 
 def test_legacy_tab_links_are_redirected():

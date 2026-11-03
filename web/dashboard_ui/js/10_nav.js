@@ -25,7 +25,6 @@ const TOOL_GROUPS = [
   ['Développeur', [['advanced', 'Centre avancé']]],
 ];
 const TOOLS = TOOL_GROUPS.flatMap(([, items]) => items);
-const MIGRATION_LINKS = [['/setup-center', 'Centre Setup'], ['/operations', 'Opérations'], ['/feature-suite', 'Fonctions avancées'], ['/enterprise', 'Enterprise']];
 
 const META = {
   profile: ['Mon profil', 'Votre espace SentriX personnel. Choisissez ensuite un serveur à configurer.'],
@@ -93,9 +92,9 @@ function renderNav() {
   if (!globalMode) {
     html += TOOL_GROUPS.map(([g, items]) => {
       if (g === 'Développeur' && !state.developer) return '';
-      const visible = items;
-      const links = g === 'Développeur' ? `<div class="nav-group">Migration</div>${MIGRATION_LINKS.map(([href, l]) => `<a class="nav-link ext" href="${href}" target="_blank" rel="noopener">${esc(l)}</a>`).join('')}` : '';
-      return visible.length || links ? `<div class="nav-group">${esc(g)}</div>${visible.map(([p, l]) => navButton(p, l)).join('')}${links}` : '';
+      // 02/11/2026 : plus de liens « Migration » vers d'anciennes pages hors du
+      // dashboard : tout se fait ici, sans ouvrir d'onglet.
+      return items.length ? `<div class="nav-group">${esc(g)}</div>${items.map(([p, l]) => navButton(p, l)).join('')}` : '';
     }).join('');
   }
   nav.innerHTML = html;

@@ -171,6 +171,11 @@ class ShopCatalogueView(discord.ui.View):
                 pass
 
 
+def _rang(position: int) -> str:
+    """🥇 🥈 🥉 puis `4.` … `10.` à largeur fixe : les noms restent alignés."""
+    return {1: "🥇", 2: "🥈", 3: "🥉"}.get(position, f"`{position:>2}.`")
+
+
 class Economy(commands.Cog, name="Economy"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -597,35 +602,33 @@ class Economy(commands.Cog, name="Economy"):
             )
 
         nombre = stats_service.format_number
-        # Une seule liste courte. Pas de tableau monospace : il affichait les
-        # emojis personnalisés littéralement (<:piece:id>) et même **#10**.
-        top = []
-        for rang_top, (_uid, nom, total) in enumerate(classement[:10], start=1):
-            name = discord.utils.escape_markdown(str(nom)[:35])
-            top.append(f"**{rang_top}.** {name} · **{nombre(total)}** {emoji}")
-
+        # Une ligne par membre : rang aligné, membre MENTIONNÉ (cliquable, sans
+        # notification : allowed_mentions fermé) et total. Plus de « Member #12345 »
+        # pour un membre hors du cache : Discord affiche la mention lui-même.
+        top = [
+            f"{_rang(i)} <@{uid}> · **{nombre(total)}** {emoji}"
+            for i, (uid, _nom, total) in enumerate(classement[:10], start=1)
+        ]
         rang = next(
-            (i for i, (uid, *_r) in enumerate(classement, start=1)
-             if uid == ctx.author.id), None,
+            (i for i, (uid, *_r) in enumerate(classement, start=1) if uid == ctx.author.id), None,
         )
-        if rang is None:
-            position = "Tu n'es pas encore classé."
-        else:
-            current_total = classement[rang - 1][2]
-            position = f"**#{rang}** sur {len(classement)} · **{nombre(current_total)}** {emoji}"
-
+        position = (
+            "Vous n'êtes pas encore classé." if rang is None
+            else f"**#{rang}** sur {len(classement)} · **{nombre(classement[rang - 1][2])}** {emoji}"
+        )
         await sx_panels.envoyer(
             ctx,
             sx_panels.Panneau(
                 titre="Classement économique",
-                sous_titre=f"{len(classement)} membres · {ctx.guild.name}",
+                sous_titre=f"{len(classement)} membre{'s' if len(classement) > 1 else ''}",
                 kind="economie",
                 sections=[
                     sx_panels.Section("Top 10", texte="\n".join(top)),
-                    sx_panels.Section("Ton classement", texte=position),
+                    sx_panels.Section("Votre rang", texte=position),
                 ],
                 pied="",
             ),
+            allowed_mentions=discord.AllowedMentions.none(),
         )
 
     @commands.hybrid_command(name="leaderboard-money", description="Afficher le classement des plus riches.", with_app_command=False)

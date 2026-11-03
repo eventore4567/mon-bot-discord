@@ -302,17 +302,11 @@ class Invites(commands.Cog, name="Invites"):
             thumbnail=membre.display_avatar.url if design.get("show_avatars", True) else None,
             footer=design.get("footer"),
         )
-        embed.add_field(name="● Réelles", value=design_system.format_number(b["real"]), inline=True)
-        embed.add_field(name="🕵️ Fake (compte suspect)", value=design_system.format_number(b["fake"]), inline=True)
-        embed.add_field(name="🚪 Reparties", value=design_system.format_number(b["left"]), inline=True)
-        embed.add_field(name="🎁 Bonus (staff)", value=design_system.format_number(b["bonus"]), inline=True)
-        embed.add_field(name="📊 Total brut", value=design_system.format_number(b["total"]), inline=True)
-        embed.add_field(name="🏆 Total crédité", value=f"**{design_system.format_number(b['credited'])}**", inline=True)
-        embed.set_footer(text=(
-            (design.get("footer") or "SentriX")
-            + " • Fake = compte de moins de "
-            + f"{FAKE_INVITE_ACCOUNT_AGE_DAYS} jours à l'arrivée. Ce n'est qu'une estimation, pas une preuve."
-        ))
+        # 02/11/2026 : fiche courte. Les invitations de comptes suspects restent
+        # exclues du total crédité, sans ligne ni note supplémentaire à lire.
+        embed.add_field(name="Réelles", value=design_system.format_number(b["real"]), inline=True)
+        embed.add_field(name="Reparties", value=design_system.format_number(b["left"]), inline=True)
+        embed.add_field(name="Bonus", value=design_system.format_number(b["bonus"]), inline=True)
         await panels.envoyer(ctx, panels.depuis_embed(embed))
 
     @commands.hybrid_command(name="invite-leaderboard", description="Classement des membres ayant le plus invité (invitations créditées).")

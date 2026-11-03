@@ -819,8 +819,10 @@ async def generate(
         resp = await client.responses.create(**kwargs)
         elapsed_ms = int((time.monotonic() - started) * 1000)
         text = getattr(resp, "output_text", None) or _extract_text(resp)
-        if web_search:
-            text = _append_web_citations(text, resp, max_sources=6 if video_search else 5)
+        # 02/11/2026 : plus de bloc « Sources » sous chaque recherche web ; pour une
+        # recherche de vidéos, les liens SONT la réponse et restent affichés.
+        if web_search and video_search:
+            text = _append_web_citations(text, resp, max_sources=6)
         if contains_sensitive_content(text):
             logger.warning(
                 "Réponse bloquée par le filtre de contenu — commande=%s guild=%s salon=%s utilisateur=%s",

@@ -338,6 +338,29 @@ ACTIONS: dict[str, ActionSpec] = {
         "member.move_voice", None, ("target", "channel"), (), "member", "medium",
         description="déplacer un membre vers un salon vocal",
     ),
+    # 03/11/2026 — gestes courants passés par les VRAIES commandes (mêmes
+    # permissions, mêmes logs) : « verrouille le salon », « mode lent 10s »…
+    "channel.lock": ActionSpec(
+        "channel.lock", "lock", (), ("reason",), None, "medium",
+        description="verrouiller le salon actuel",
+    ),
+    "channel.unlock": ActionSpec(
+        "channel.unlock", "unlock", (), (), None, "medium",
+        description="déverrouiller le salon actuel",
+    ),
+    "channel.slowmode": ActionSpec(
+        "channel.slowmode", "slowmode", ("duration",), (), None, "medium",
+        description="régler le mode lent du salon actuel (0 pour le couper)",
+    ),
+    "config.prefix": ActionSpec(
+        "config.prefix", "setprefix", ("prefix",), (), None, "medium",
+        description="changer le préfixe des commandes du serveur",
+    ),
+    # Touche tout le serveur : confirmation obligatoire.
+    "role.mass": ActionSpec(
+        "role.mass", "massrole", ("mode", "role"), (), None, "high", True,
+        description="donner ou retirer un rôle à tous les membres humains",
+    ),
 }
 
 # Synonymes déterministes : le modèle reste le repli, pas le seul moyen de comprendre.
@@ -774,7 +797,7 @@ def looks_action_request(text: str) -> bool:
         r"crée|créer|ajoute|retire|enleve|renomme|configure|active|desactive|bloque|"
         r"censure|interdit|autorise|rejoint|quitte|connecte|deconnecte|joue|play|"
         r"pause|skip|stop|mets|met|envoie|publie|donne|deplace|change|ouvre|lance|"
-        r"ferme|lock|unlock|cache|affiche|montre)\b",
+        r"ferme|lock|unlock|cache|affiche|montre|verrouille|deverrouille|rouvre|slowmode)\b",
         normalized,
     )
     if not action_verb:
@@ -783,11 +806,45 @@ def looks_action_request(text: str) -> bool:
     direct = bool(re.match(
         r"^(?:fais|fait|execute|exécute|utilise|cree|creer|crée|créer|ajoute|"
         r"retire|enleve|configure|mets|met|envoie|publie|donne|change|ouvre|"
-        r"lance|ferme|active|desactive|bloque|censure|autorise)\b",
+        r"lance|ferme|active|desactive|bloque|censure|autorise|verrouille|deverrouille|rouvre)\b",
         normalized,
     ))
     # Une instruction directe ou une formulation polie explicite passe au routeur.
     return direct or (polite and action_verb.start() <= 80)
+
+
+def _gestes_courants(question: str, normalized: str) -> ParsedAction | None:
+    """Salon (verrouiller, mode lent), préfixe et rôle pour tous (03/11/2026)."""
+    if re.search(r"\b(?:deverrouille|unlock|rouvre)\b(?:\s+(?:le|ce|du))?\s+(?:salon|channel)\b", normalized):
+        return ParsedAction("channel.unlock", {}, 98, "local")
+    if re.search(r"\b(?:verrouille|lock|ferme)\b(?:\s+(?:le|ce|du))?\s+(?:salon|channel)\b", normalized):
+        slots: dict[str, Any] = {}
+        reason = _extract_reason(question)
+        if reason:
+            slots["reason"] = reason
+        return ParsedAction("channel.lock", slots, 98, "local")
+    if re.search(r"\b(?:slowmode|slow mode|mode lent)\b", normalized):
+        if re.search(r"\b(?:enleve|retire|coupe|desactive|off|stop)\b", normalized):
+            return ParsedAction("channel.slowmode", {"duration": "0"}, 98, "local")
+        duree = normalize_duration(question)
+        return ParsedAction("channel.slowmode", {"duration": duree} if duree else {}, 97, "local")
+    prefixe = re.search(
+        r"\b(?:change|mets?|modifie|passe|definis?|set)\b.*?\bpr[eé]fix(?:e)?\b\s*(?:en|a|à|par|sur|to|:|=)?\s*([^\s\w]{1,2}|\S{1,5})\s*$",
+        question, re.IGNORECASE,
+    )
+    if prefixe and not prefixe.group(1).casefold() in {"le", "la", "du", "de"}:
+        return ParsedAction("config.prefix", {"prefix": prefixe.group(1).strip("«»\"'")}, 97, "local")
+    masse = re.search(
+        r"\b(donne|ajoute|mets?|retire|enleve|enlève)\s+(?:le\s+)?r[oô]le\s+(.+?)\s+(?:a|à)\s+(?:tout le monde|tous les membres|tout le serveur)\b",
+        question, re.IGNORECASE,
+    )
+    if masse:
+        mode = "add" if normalize_text(masse.group(1)) in {"donne", "ajoute", "mets", "met"} else "del"
+        role = masse.group(2).strip(" .,:;!")
+        if not role.startswith("<@&"):
+            role = role.lstrip("@")  # « @Membre » tapé sans mention réelle
+        return ParsedAction("role.mass", {"mode": mode, "role": role}, 97, "local")
+    return None
 
 
 def local_parse(question: str) -> ParsedAction | None:
@@ -1012,6 +1069,10 @@ def local_parse(question: str) -> ParsedAction | None:
                 99,
                 "local",
             )
+
+    gestes = _gestes_courants(question, normalized)
+    if gestes is not None:
+        return gestes
 
     intent = None
     for candidate, words in _INTENT_PATTERNS:
@@ -1521,6 +1582,23 @@ def build_command_line(
         elif action.intent in {"moderation.warnings", "moderation.history"}:
             return None
         return command
+
+    if action.intent == "channel.lock":
+        reason = str(slots.get("reason") or "").strip()
+        return f"{command} {reason}".rstrip()
+
+    if action.intent == "channel.slowmode":
+        duree = str(slots.get("duration") or "").strip()
+        return f"{command} {duree}" if duree else None
+
+    if action.intent == "config.prefix":
+        prefixe = str(slots.get("prefix") or "").strip()
+        return f"{command} {prefixe}" if 1 <= len(prefixe) <= 5 and " " not in prefixe else None
+
+    if action.intent == "role.mass":
+        role = str(slots.get("role") or "").strip()
+        mode = "add" if slots.get("mode") == "add" else "del"
+        return f"{command} {mode} {role}" if role else None
 
     # +help est volontairement root-only dans le runtime actuel : la recherche
     # se fait depuis le menu interactif. Ne jamais lui ajouter un argument historique.

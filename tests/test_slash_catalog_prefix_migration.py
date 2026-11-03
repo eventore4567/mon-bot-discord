@@ -74,7 +74,7 @@ def test_new_menu_is_compact_and_within_discord_limits():
     assert len(catalog.entries_by_root()) <= 100, "Discord plafonne à 100 racines"
     assert len({path.split()[0] for path in paths}) <= 100
     assert all(len(path.split()) <= 3 for path in paths)
-    for name in ("moderation", "security", "staff", "invites", "events"):
+    for name in ("moderation", "security", "staff", "invites", "music"):
         assert any(path.startswith(name + " ") for path in paths)
     roots = catalog.entries_by_root()
     assert len(roots["moderation"]) <= 25
@@ -92,7 +92,8 @@ def test_member_staff_details_have_one_slash_entry():
     Keep +member for legacy users but avoid a second public slash route.
     """
     sources = {entry.source: entry.path for entry in catalog.CATALOG}
-    assert sources["modview"] == "moderation view"
+    # Hors du menu depuis le 02/11/2026 (jamais utilisée) : toujours une seule route au plus.
+    assert sources.get("modview") in (None, "moderation view")
     assert "member" not in sources
     assert "staff member" not in {entry.path for entry in catalog.CATALOG}
 

@@ -768,9 +768,7 @@ class Moderation(commands.Cog):
             lines.append(f"**{label.capitalize()}** — {state}")
         e = embeds.neutral(
             "Messages privés de sanction",
-            "\n".join(lines)
-            + "\n\nConfiguration simple : +sanctiondm ban Votre texte\n"
-              "Variables : {membre} {serveur} {raison} {duree} {moderateur} {action}",
+            "\n".join(lines),
         )
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
