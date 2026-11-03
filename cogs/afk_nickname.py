@@ -105,12 +105,7 @@ async def _afk_callback(self, ctx: commands.Context, *, raison: str = "Absent"):
         except Exception:
             logger.exception("Impossible d'enregistrer le statut AFK de %s.", ctx.author.id)
 
-    description = (
-        f"{ctx.author.mention} est maintenant absent.\n\n"
-        f"**Raison :** {raison}"
-        + (f"\n**Pseudo temporaire :** `{afk_nick}`" if renamed else "")
-        + rename_note
-    )
+    description = f"{ctx.author.mention} est maintenant AFK : {raison}"
     await panels.envoyer(ctx, panels.depuis_embed(embeds.info(description, title='Mode AFK activé')))
 
 
