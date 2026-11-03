@@ -26,9 +26,12 @@ def _owner_session(request: web.Request, dashboard):
     return session
 
 
-def _guild_payload(guild: discord.Guild) -> dict:
+def _guild_payload(guild: discord.Guild, viewer_id: int | None = None) -> dict:
     owner = guild.owner
     return {
+        # Le propriétaire du bot est-il déjà membre ? (bouton « Ouvrir » au lieu de « Rejoindre »)
+        "joined": bool(viewer_id and guild.get_member(int(viewer_id)) is not None),
+        "joined_at": guild.me.joined_at.isoformat() if getattr(guild.me, "joined_at", None) else None,
         "id": str(guild.id),
         "name": guild.name,
         "icon_url": str(guild.icon.url) if guild.icon else None,
@@ -38,6 +41,35 @@ def _guild_payload(guild: discord.Guild) -> dict:
         "owner": str(owner) if owner else "Inconnu",
         "owner_id": str(guild.owner_id),
     }
+
+
+async def creer_invitation(guild: discord.Guild) -> str | None:
+    """Invitation 1 h / 1 utilisation dans le premier salon autorisé, sinon une existante."""
+    me = guild.me
+    salons: list = []
+    for salon in (guild.system_channel, guild.rules_channel):
+        if salon is not None and salon not in salons:
+            salons.append(salon)
+    salons.extend(c for c in sorted(guild.text_channels, key=lambda c: c.position) if c not in salons)
+    for salon in salons:
+        if me is None or not salon.permissions_for(me).create_instant_invite:
+            continue
+        try:
+            invitation = await salon.create_invite(
+                max_age=3600, max_uses=1, unique=True,
+                reason="Propriétaire de SentriX : rejoindre depuis le dashboard",
+            )
+            return invitation.url
+        except discord.HTTPException:
+            logger.debug("Invitation refusée dans #%s (%s).", salon, guild.id, exc_info=True)
+    if me is not None and me.guild_permissions.manage_guild:
+        try:
+            for invitation in await guild.invites():
+                if not invitation.max_uses or (invitation.uses or 0) < invitation.max_uses:
+                    return invitation.url
+        except discord.HTTPException:
+            logger.debug("Lecture des invitations impossible (%s).", guild.id, exc_info=True)
+    return None
 
 
 OWNER_PAGE_HTML = r"""<!doctype html>
@@ -94,7 +126,11 @@ def install(dashboard) -> None:
         session = _owner_session(request, dashboard)
         if session is None:
             return dashboard._json_error("Introuvable.", 404)
-        guilds = [_guild_payload(g) for g in request.app["bot"].guilds]
+        try:
+            viewer_id = int(session["user"]["id"])
+        except (KeyError, TypeError, ValueError):
+            viewer_id = None
+        guilds = [_guild_payload(g, viewer_id) for g in request.app["bot"].guilds]
         guilds.sort(key=lambda g: g["name"].casefold())
         return web.json_response({"ok": True, "guilds": guilds, "total": len(guilds)})
 
@@ -124,12 +160,39 @@ def install(dashboard) -> None:
         )
         return web.json_response({"ok": True, "message": f"SentriX a quitté {guild_name}."})
 
+    async def owner_invite(request: web.Request):
+        """Lien d'invitation à usage unique pour rejoindre un serveur où SentriX est."""
+        session = _owner_session(request, dashboard)
+        if session is None:
+            return dashboard._json_error("Introuvable.", 404)
+        csrf_error = dashboard._require_csrf(request, session)
+        if csrf_error:
+            return csrf_error
+        try:
+            guild_id = int(request.match_info["guild_id"])
+        except ValueError:
+            return dashboard._json_error("Identifiant de serveur invalide.", 400)
+        guild = request.app["bot"].get_guild(guild_id)
+        if guild is None:
+            return dashboard._json_error("SentriX n'est plus présent sur ce serveur.", 404)
+        url = await creer_invitation(guild)
+        if url is None:
+            return dashboard._json_error(
+                "SentriX n'a la permission « Créer une invitation » dans aucun salon de ce serveur.", 403
+            )
+        logger.warning(
+            "Dashboard propriétaire : %s (%s) a demandé une invitation pour %s (%s).",
+            session["user"].get("username"), session["user"].get("id"), guild.name, guild.id,
+        )
+        return web.json_response({"ok": True, "url": url, "message": f"Invitation prête pour {guild.name}."})
+
     def build_app(bot) -> web.Application:
         app = original_build_app(bot)
         app.router.add_get("/owner-servers", owner_page)
         app.router.add_get("/api/owner/status", owner_status)
         app.router.add_get("/api/owner/guilds", owner_guilds)
         app.router.add_post("/api/owner/guilds/{guild_id}/leave", owner_leave)
+        app.router.add_post("/api/owner/guilds/{guild_id}/invite", owner_invite)
         return app
 
     dashboard.build_app = build_app

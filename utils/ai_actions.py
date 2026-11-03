@@ -797,7 +797,7 @@ def looks_action_request(text: str) -> bool:
         r"crée|créer|ajoute|retire|enleve|renomme|configure|active|desactive|bloque|"
         r"censure|interdit|autorise|rejoint|quitte|connecte|deconnecte|joue|play|"
         r"pause|skip|stop|mets|met|envoie|publie|donne|deplace|change|ouvre|lance|"
-        r"ferme|lock|unlock|cache|affiche|montre|verrouille|deverrouille|rouvre|slowmode)\b",
+        r"ferme|lock|unlock|cache|affiche|montre|verrouille|deverrouille|rouvre|slowmode|mode lent)\b",
         normalized,
     )
     if not action_verb:
@@ -806,7 +806,8 @@ def looks_action_request(text: str) -> bool:
     direct = bool(re.match(
         r"^(?:fais|fait|execute|exécute|utilise|cree|creer|crée|créer|ajoute|"
         r"retire|enleve|configure|mets|met|envoie|publie|donne|change|ouvre|"
-        r"lance|ferme|active|desactive|bloque|censure|autorise|verrouille|deverrouille|rouvre)\b",
+        r"lance|ferme|active|desactive|bloque|censure|autorise|verrouille|deverrouille|rouvre|"
+        r"lock|unlock|slowmode|mode lent)\b",
         normalized,
     ))
     # Une instruction directe ou une formulation polie explicite passe au routeur.
@@ -820,7 +821,9 @@ def _gestes_courants(question: str, normalized: str) -> ParsedAction | None:
     if re.search(r"\b(?:verrouille|lock|ferme)\b(?:\s+(?:le|ce|du))?\s+(?:salon|channel)\b", normalized):
         slots: dict[str, Any] = {}
         reason = _extract_reason(question)
-        if reason:
+        # « lock le salon » : « le » n'est pas une raison ; seule une raison
+        # introduite (« pour … », « raison : … ») est gardée.
+        if reason and re.search(r"\b(?:pour|raison|car|parce)\b", normalized):
             slots["reason"] = reason
         return ParsedAction("channel.lock", slots, 98, "local")
     if re.search(r"\b(?:slowmode|slow mode|mode lent)\b", normalized):
@@ -834,6 +837,18 @@ def _gestes_courants(question: str, normalized: str) -> ParsedAction | None:
     )
     if prefixe and not prefixe.group(1).casefold() in {"le", "la", "du", "de"}:
         return ParsedAction("config.prefix", {"prefix": prefixe.group(1).strip("«»\"'")}, 97, "local")
+    pour_moi = re.search(
+        r"\b(?:donne|ajoute|mets?)\s*-?\s*moi\s+(?:le\s+|un\s+|une\s+)?r[oô]le\b\s*(.*)$",
+        question, re.IGNORECASE,
+    )
+    if pour_moi:
+        role = pour_moi.group(1).strip(" .,:;!?")
+        if normalize_text(role) in {"", "stp", "svp", "s il te plait", "s'il te plait", "s il vous plait"}:
+            role = ""
+        slots = {"target": "__self__"}
+        if role:
+            slots["role"] = role.lstrip("@") if not role.startswith("<@&") else role
+        return ParsedAction("role.give", slots, 97, "local")
     masse = re.search(
         r"\b(donne|ajoute|mets?|retire|enleve|enlève)\s+(?:le\s+)?r[oô]le\s+(.+?)\s+(?:a|à)\s+(?:tout le monde|tous les membres|tout le serveur)\b",
         question, re.IGNORECASE,

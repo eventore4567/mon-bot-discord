@@ -76,3 +76,5 @@ assets/sentrix_emojis/sentrix_*_lock.png
 assets/sentrix_emojis/sentrix_*_success.png
 assets/sentrix_emojis/sentrix_*_trophy.png
 assets/sentrix_emojis/sentrix_live_*.gif
+# Versions colorées animées (tools/generer_emojis_couleur.py), idem.
+assets/sentrix_emojis/sentrix_c_*.gif

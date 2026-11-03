@@ -541,7 +541,8 @@ class BotAllInOne(commands.Bot):
             # messages programmés, stickies). Chaque @everyone voulu passe déjà
             # son propre AllowedMentions(everyone=True), qui l'emporte sur ce
             # défaut ; rôles et membres restent notifiés comme avant.
-            allowed_mentions=discord.AllowedMentions(everyone=False, roles=True, users=True, replied_user=True),
+            # 03/11/2026 : répondre à un message ne notifie plus son auteur (pings inutiles).
+            allowed_mentions=discord.AllowedMentions(everyone=False, roles=True, users=True, replied_user=False),
         )
         self.db = Database(config.DATABASE_PATH)
         # Symbole de monnaie affiché : un emoji personnalisé supprimé redevient 🪙.

@@ -6,8 +6,9 @@ const PAGES = {
   settings: renderSettings, access: renderAccess, embeds: renderEmbeds, ai: renderAI, invites: renderInvites, backups: renderBackups,
   dm: renderDM, advanced: renderAdvanced, diagnostic: renderGuidanceDiagnostic,
   onboarding: renderGuidanceOnboarding, feedback: renderGuidanceFeedback,
+  botservers: renderBotServers,
 };
-const GLOBAL_PAGES = new Set(['profile', 'servers', 'preferences']);
+const GLOBAL_PAGES = new Set(['profile', 'servers', 'preferences', 'botservers']);
 let renderToken = 0;
 const REDUCED_MOTION = () => Boolean(state.reduceMotion) || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 const SKELETON = '<div class="grid" aria-hidden="true"><div class="skeleton full" style="min-height:72px"></div><div class="skeleton" style="min-height:180px"></div><div class="skeleton" style="min-height:180px"></div></div>';

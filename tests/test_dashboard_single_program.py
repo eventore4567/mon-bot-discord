@@ -103,8 +103,10 @@ def test_navigation_is_short_and_grouped():
     global_nav = re.search(r"const NAV_GLOBAL = \[(.*?)\n\];", program, re.S).group(1)
     server_nav = re.search(r"const NAV_SERVER = \[(.*?)\n\];", program, re.S).group(1)
 
-    assert re.findall(r"\['([a-z]+)', '", global_nav) == ["profile", "servers", "preferences"]
-    assert re.findall(r"\['([^']+)', \[\[", global_nav) == ["Mon espace"]
+    # 03/11/2026 : « Serveurs du bot », groupe Propriétaire masqué hors propriétaire.
+    assert re.findall(r"\['([a-z]+)', '", global_nav) == ["profile", "servers", "preferences", "botservers"]
+    assert re.findall(r"\['([^']+)', \[\[", global_nav) == ["Mon espace", "Propriétaire"]
+    assert "group !== 'Propriétaire' || state.developer" in program
 
     pages = re.findall(r"\['([a-z]+)', '", server_nav)
     # Refonte 2026-09 : groupes Administration et Assistant SentriX ajoutés.

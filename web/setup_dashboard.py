@@ -53,7 +53,8 @@ def _member_data(guild: discord.Guild, user_id: int) -> dict:
     }
 
 
-def _command_catalog(bot) -> list[dict]:
+def _all_commands(bot) -> dict[str, dict]:
+    """Toutes les commandes chargées (préfixe compris) : sert à VALIDER un nom."""
     commands = {}
     for command in bot.walk_commands():
         name = command.qualified_name.strip().lower()
@@ -61,10 +62,47 @@ def _command_catalog(bot) -> list[dict]:
             continue
         commands[name] = {
             "name": name,
+            "label": f"+{name}",
             "description": (command.description or command.help or "Aucune description")[:180],
             "protected": name in PROTECTED_COMMANDS,
         }
-    return sorted(commands.values(), key=lambda item: item["name"])
+    return commands
+
+
+def _command_catalog(bot, disabled: list[str] | tuple[str, ...] = ()) -> list[dict]:
+    """Commandes affichées au dashboard : celles du menu « / » actuel.
+
+    03/11/2026 : la liste montrait ~380 anciennes commandes « + » (+zombie,
+    +wordreact…). Elle suit désormais utils/slash_catalog.CATALOG, la source du
+    menu publié. Le nom envoyé reste celui de la commande source : la désactiver
+    coupe sa version « / » et sa version préfixe. Une commande déjà désactivée
+    mais absente du menu reste listée pour pouvoir la réactiver.
+    """
+    toutes = _all_commands(bot)
+    items: dict[str, dict] = {}
+    try:
+        from utils import slash_catalog
+
+        entrees = slash_catalog.CATALOG
+    except Exception:
+        entrees = ()
+    for entree in entrees:
+        source = str(entree.source or "").strip().lower()
+        if source not in toutes or source in items:
+            continue
+        items[source] = {
+            "name": source,
+            "label": f"/{entree.path}",
+            "description": str(entree.description or toutes[source]["description"])[:180],
+            "protected": source in PROTECTED_COMMANDS,
+        }
+    if not items:  # catalogue illisible : mieux vaut l'ancienne liste qu'une page vide
+        items = dict(toutes)
+    for name in disabled:
+        name = str(name or "").strip().lower()
+        if name in toutes and name not in items:
+            items[name] = dict(toutes[name])
+    return sorted(items.values(), key=lambda item: item["label"])
 
 
 async def handle_setup_data(request: web.Request) -> web.Response:
@@ -130,7 +168,7 @@ async def handle_setup_data(request: web.Request) -> web.Response:
     conf = await db.get_guild_config(guild_id)
     return web.json_response({
         "ok": True,
-        "commands": _command_catalog(bot),
+        "commands": _command_catalog(bot, [row["command_name"] for row in disabled_rows]),
         "disabled_commands": [row["command_name"] for row in disabled_rows],
         "ignored_channels": [str(row["channel_id"]) for row in ignored_rows],
         "command_blocked_channels": [str(row["channel_id"]) for row in command_blocked_rows],
@@ -185,7 +223,7 @@ async def handle_setup_action(request: web.Request) -> web.Response:
     if action == "command":
         command_name = str(payload.get("command") or "").strip().lower()
         enabled = bool(payload.get("enabled"))
-        catalog = {item["name"]: item for item in _command_catalog(bot)}
+        catalog = _all_commands(bot)
         if command_name not in catalog:
             return dashboard._json_error("Cette commande n'existe pas.", 404)
         if command_name in PROTECTED_COMMANDS:
@@ -258,7 +296,7 @@ async def handle_setup_action(request: web.Request) -> web.Response:
             if channel_id not in channel_ids:
                 channel_ids.append(channel_id)
 
-        catalog = {item["name"]: item for item in _command_catalog(bot)}
+        catalog = _all_commands(bot)
         command_names = []
         for raw in raw_commands:
             command_name = str(raw or "").strip().lower()

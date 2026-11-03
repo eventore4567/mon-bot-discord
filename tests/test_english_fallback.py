@@ -58,8 +58,12 @@ def test_panne_coupe_la_passe_et_garde_le_texte(monkeypatch):
 def test_vue_et_embed_traduits_sur_place(monkeypatch):
     from services import translation as tr
 
+    appels = []
+
     async def faux(text, target, *, source="auto", provider=None):
-        return tr.Translation(text="EN:" + text, target=target, source=source)
+        appels.append(text)
+        # Comme un vrai traducteur : chaque ligne traduite, retours à la ligne gardés.
+        return tr.Translation(text="\n".join("EN:" + l for l in text.split("\n")), target=target, source=source)
 
     monkeypatch.setattr(tr, "translate", faux)
     monkeypatch.setenv("SENTRIX_TRADUCTION_AUTO", "1")
@@ -80,6 +84,32 @@ def test_vue_et_embed_traduits_sur_place(monkeypatch):
     assert embed.title == "EN:Configuration du serveur"
     assert embed.description == "Already English text here."
     assert texte == "EN:Aucun ticket ouvert pour le moment."
+    # Un seul appel pour tout le message (Google refuse au-delà de 5 requêtes/s).
+    assert len(appels) == 1
+
+
+def test_trop_lent_la_traduction_continue_en_fond(monkeypatch):
+    from services import translation as tr
+
+    async def lent(text, target, *, source="auto", provider=None):
+        await asyncio.sleep(0.2)
+        return tr.Translation(text="\n".join("EN:" + l for l in text.split("\n")), target=target, source=source)
+
+    monkeypatch.setattr(tr, "translate", lent)
+    monkeypatch.setenv("SENTRIX_TRADUCTION_AUTO", "1")
+    monkeypatch.setattr(ef, "BUDGET_SECONDES", 0.05)
+    ef._cache.clear()
+    ef._coupe_jusqua = 0.0
+
+    async def scenario():
+        premier = await ef.traduire_charge("Aucun salon de logs configuré.", [], None)
+        await asyncio.sleep(0.3)
+        second = await ef.traduire_charge("Aucun salon de logs configuré.", [], None)
+        return premier, second
+
+    premier, second = asyncio.run(scenario())
+    assert premier == "Aucun salon de logs configuré."
+    assert second == "EN:Aucun salon de logs configuré."
 
 
 def test_interrupteur_coupe_la_seconde_passe(monkeypatch):

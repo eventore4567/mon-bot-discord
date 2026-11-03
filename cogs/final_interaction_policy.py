@@ -279,6 +279,14 @@ def _cards_from_text(value: Any) -> list[discord.Embed]:
     return cards
 
 
+#: Commandes dont la réponse DOIT notifier les personnes citées.
+PING_ROOTS = frozenset({
+    "say", "announce", "annonce", "embed", "giveaway", "gstart", "gend", "greroll",
+    "remind", "reminder", "rappel", "ticket", "poll", "sondage", "sticky", "echo",
+    "dm", "mention", "pingrole", "ping-role", "staff-ping", "welcome-test",
+})
+
+
 def _explicit_ping_requested(kwargs: dict) -> bool:
     allowed = kwargs.get("allowed_mentions")
     if allowed is None:
@@ -665,6 +673,12 @@ def _install_context_send() -> None:
     async def context_send(self: commands.Context, *args, **kwargs):
         root = _root_name(getattr(self, "command", None)) or _COMMAND_ROOT.get()
         interaction = getattr(self, "interaction", None)
+        if kwargs.get("allowed_mentions") is None and root not in PING_ROOTS:
+            # 03/11/2026 (« enlève les pings inutiles ») : une réponse de commande
+            # affiche les membres cités sans les notifier (classements, profils,
+            # cible d'une commande). Les commandes faites pour prévenir quelqu'un
+            # (PING_ROOTS) et tout appel qui fixe allowed_mentions gardent leurs pings.
+            kwargs["allowed_mentions"] = discord.AllowedMentions.none()
         args, kwargs = await _localize_outgoing(
             args,
             kwargs,
@@ -1114,6 +1128,7 @@ __all__ = [
     "_payload_pages",
     "_cards_from_text",
     "_clean_embed",
+    "PING_ROOTS",
     "_explicit_ping_requested",
     "_root_from_interaction",
     "_root_name",
