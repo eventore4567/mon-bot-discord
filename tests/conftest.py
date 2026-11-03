@@ -9,3 +9,6 @@ e2e. Le comportement « + » coupé est testé explicitement
 import os
 
 os.environ.setdefault("SENTRIX_PREFIXE_ACTIF", "1")
+# Traduction automatique des serveurs anglais (utils/english_fallback) : coupée en
+# test, pour des sorties déterministes et sans réseau.
+os.environ.setdefault("SENTRIX_TRADUCTION_AUTO", "0")

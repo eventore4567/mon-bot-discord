@@ -421,6 +421,21 @@ async def _localize_outgoing(
     if view is not None:
         language_runtime.translate_view_in_place(view, setup=setup_surface, protect=protection)
 
+    # Ce que le dictionnaire ne connaît pas partait en français : seconde passe
+    # par traduction automatique (cache, budget borné, jamais bloquante).
+    if not preserve_body:
+        try:
+            from utils import english_fallback
+
+            embeds = [e for e in ([new_kwargs.get("embed")] + list(new_kwargs.get("embeds") or ()))
+                      if isinstance(e, discord.Embed)]
+            content, positional = _content_from(new_args, new_kwargs)
+            translated = await english_fallback.traduire_charge(content, embeds, view)
+            if translated != content:
+                new_args, new_kwargs = _set_content(new_args, new_kwargs, positional=positional, value=translated)
+        except Exception:
+            logger.debug("Seconde passe anglaise impossible guild=%s", guild_id, exc_info=True)
+
     return new_args, new_kwargs
 
 

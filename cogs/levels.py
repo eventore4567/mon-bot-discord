@@ -1333,35 +1333,36 @@ class Levels(commands.Cog, name="Levels"):
             )
 
         nombre = stats_service.format_number
-        # Conserver les niveaux et XP visibles, y compris au niveau zéro.
-        # Les tableaux code rendaient les mentions/emojis en texte brut.
-        top = []
-        for rank, (_uid, name, niveau, xp) in enumerate(classement[:10], start=1):
-            display = discord.utils.escape_markdown(str(name)[:35])
-            top.append(f"**{rank}.** {display} · **Niv. {niveau}** · {nombre(xp)} XP")
+        # Même présentation que le classement économique : rang aligné, membre
+        # mentionné sans notification, niveau puis XP.
+        from cogs.economy import _rang
 
+        top = [
+            f"{_rang(i)} <@{uid}> · **Niv. {niveau}** · {nombre(xp)} XP"
+            for i, (uid, _nom, niveau, xp) in enumerate(classement[:10], start=1)
+        ]
         rank = next(
-            (i for i, (uid, *_r) in enumerate(classement, start=1)
-             if uid == ctx.author.id), None,
+            (i for i, (uid, *_r) in enumerate(classement, start=1) if uid == ctx.author.id), None,
         )
         if rank is None:
-            position = "Tu n'es pas encore classé."
+            position = "Vous n'êtes pas encore classé."
         else:
             _uid, _name, level, xp = classement[rank - 1]
-            position = f"**#{rank}** sur {len(classement)} · **Niveau {level}** · {nombre(xp)} XP"
+            position = f"**#{rank}** sur {len(classement)} · **Niv. {level}** · {nombre(xp)} XP"
 
         await panels.envoyer(
             ctx,
             panels.Panneau(
                 titre="Classement des niveaux",
-                sous_titre=f"{len(classement)} membres · {ctx.guild.name}",
+                sous_titre=f"{len(classement)} membre{'s' if len(classement) > 1 else ''}",
                 kind="brand",
                 sections=[
                     panels.Section("Top 10", texte="\n".join(top)),
-                    panels.Section("Ton classement", texte=position),
+                    panels.Section("Votre rang", texte=position),
                 ],
                 pied="",
             ),
+            allowed_mentions=discord.AllowedMentions.none(),
         )
 
     @commands.hybrid_command(name="set-level-role", description="[Admin] Associer un rôle à un niveau.", with_app_command=False)

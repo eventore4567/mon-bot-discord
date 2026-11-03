@@ -2570,6 +2570,12 @@ class Ai(commands.Cog, name="Ai"):
             return
 
         mentioned = self.bot.user is not None and self.bot.user in message.mentions
+        if mentioned:
+            # « @SentriX + » change le préfixe, même quand l'IA est coupée.
+            from utils import mention_prefix
+
+            if await mention_prefix.gerer(self.bot, message):
+                return
         name_match = re.match(r"^(?:sentrix|ssentrix|sentri|snetri|snentrix)\b", content, re.IGNORECASE)
         name_trigger = name_match is not None
         reference = getattr(message, "reference", None)

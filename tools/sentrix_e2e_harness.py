@@ -35,6 +35,7 @@ if str(ROOT) not in sys.path:
 # --- Environnement AVANT tout import du dépôt (config.DATABASE_PATH est figé au 1er import).
 _TMP = tempfile.mkdtemp(prefix="sentrix-e2e-")
 os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
+os.environ.setdefault("SENTRIX_TRADUCTION_AUTO", "0")  # utils/english_fallback : pas de réseau
 os.environ["DATABASE_PATH"] = str(pathlib.Path(_TMP) / "sentrix-e2e.db")
 for _var in ("POSTGRES_URL", "DATABASE_URL", "REDIS_URL", "OPENAI_API_KEY"):
     os.environ.pop(_var, None)
