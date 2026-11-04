@@ -367,24 +367,39 @@ class InviteTrackerRuntime(commands.Cog):
         _patch_setup_v74(self.bot)
 
     @commands.Cog.listener()
-    async def on_member_join(self, member: discord.Member) -> None:
+    async def on_sentrix_invite_recorded(
+        self,
+        member: discord.Member,
+        inviter_id: int | None,
+        code: str | None,
+    ) -> None:
+        """Publish the public feed after the authoritative Invites cog has finished.
+
+        A fixed delay raced against the V77 API retries (> 1 second); this custom
+        event is dispatched after record_invite_join, avoiding stale/unknown text.
+        """
         if member.bot:
             return
-        # Le cog Invites enregistre d'abord l'invitation détectée. Un court délai rend ce
-        # listener indépendant de l'ordre dans lequel discord.py a enregistré les cogs.
-        await asyncio.sleep(0.8)
-        row = await self.bot.db.get_invited_by(member.guild.id, member.id)
-        inviter_id = row["inviter_id"] if row and row["inviter_id"] else None
         if inviter_id:
-            stats = await self.bot.db.get_invite_stats(member.guild.id, int(inviter_id))
-            count = int(stats.get("active", 0))
-            suffix = "invite" if count == 1 else "invites"
-            text = (
-                f"{member.mention} has been invited by <@{int(inviter_id)}> "
-                f"and has now **{count}** {suffix}."
-            )
+            try:
+                stats = await self.bot.db.get_invite_stats(member.guild.id, int(inviter_id))
+                count = int(stats.get("active", 0))
+            except Exception:
+                logger.warning("Invite stats unavailable for guild=%s", member.guild.id, exc_info=True)
+                count = None
+            if count is None:
+                text = f"{member.mention} joined · invited by <@{int(inviter_id)}>."
+            else:
+                suffix = "invite" if count == 1 else "invites"
+                text = (
+                    f"{member.mention} joined · invited by <@{int(inviter_id)}> "
+                    f"· **{count}** active {suffix}."
+                )
         else:
-            text = f"{member.mention} joined the server, but SentriX couldn't determine who invited them."
+            # Discord cannot reliably attribute vanity URLs, inaccessible invite
+            # lists, or some simultaneous joins. Avoid repeating "inviter unknown"
+            # in a public channel while retaining the underlying audit record.
+            text = f"{member.mention} joined the server."
         await _send_feed_message(self.bot, member.guild, text)
 
     @commands.Cog.listener()
@@ -400,7 +415,7 @@ class InviteTrackerRuntime(commands.Cog):
             # Retire l'espace avant le point tout en gardant le format lisible dans le code.
             text = text.replace("> .", ">.")
         else:
-            text = f"**{display}** has left the server. Their inviter was unknown."
+            text = f"**{display}** left the server."
         await _send_feed_message(self.bot, member.guild, text)
 
 
