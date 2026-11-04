@@ -67,10 +67,15 @@ async def main() -> int:
     await asyncio.wait_for(h.run_prefix(bot, guild, f"+sticky-set <#{h.CID}> @everyone lisez le règlement", **ADMIN), 15)
     await h.settle(idle=0.3, maximum=2)
     plus._no_sticky.clear()
+    from cogs import sentrix_plus
+    sentrix_plus.STICKY_REPOST_DELAY_SECONDS = 0.2
     since = len(h.CALLS)
     for index in range(6):
         bot.dispatch("message", h.build_message(bot, guild, f"message {index}", **MEMBER))
         await h.settle(idle=0.2, maximum=1)
+    # La republication attend un court silence (une seule par rafale).
+    await asyncio.sleep(sentrix_plus.STICKY_REPOST_DELAY_SECONDS + 0.1)
+    await h.settle(idle=0.2, maximum=1)
     reposts = [p for p in sent_to(since, h.CID) if "lisez le règlement" in str(p.get("content"))]
     check(len(reposts) >= 1, "le sticky est bien republié", str(len(reposts)))
     check(all((p.get("allowed_mentions") or {}).get("parse") == [] for p in reposts),
