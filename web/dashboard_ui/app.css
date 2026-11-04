@@ -1910,3 +1910,10 @@ body::before,body::after,.cc-hero-glow,.log-center-hero::before{display:none!imp
 .workspace-head::before,.workspace-head::after{display:none!important}
 .workspace-head h1{font-family:var(--sx-serif);font-size:30px;font-weight:600}
 .sx-workspace-kicker{text-transform:none!important;letter-spacing:0!important;font-size:13px!important;color:var(--muted)!important;background:none!important}
+.cc-etat{display:flex;flex-direction:column;gap:2px;min-width:160px;padding:4px 18px;border-left:1px solid var(--line)}
+.cc-etat small{color:var(--muted);font-size:12px}
+.cc-etat strong{font-family:var(--sx-serif);font-size:21px;font-weight:600;line-height:1.15;white-space:nowrap}
+.cc-etat.cc-ok strong{color:var(--green,#55d69a)}
+.cc-etat.cc-warn strong{color:var(--amber,#efbd61)}
+.cc-etat.cc-bad strong{color:var(--red,#ff7081)}
+.cc-etat span{color:var(--muted);font-size:12px}

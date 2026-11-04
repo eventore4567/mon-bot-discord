@@ -154,14 +154,13 @@ function healthState(score, bad) {
 }
 
 function healthRing(score, kind, label) {
-  const r = 46, c = 2 * Math.PI * r, value = Math.max(0, Math.min(100, Number(score) || 0));
-  return `<div class="cc-ring cc-${kind}" role="img" aria-label="Santé du serveur : ${value} %, ${esc(label)}">
-    <svg viewBox="0 0 120 120" aria-hidden="true">
-      <circle class="cc-ring-track" cx="60" cy="60" r="${r}"/>
-      <circle class="cc-ring-value" cx="60" cy="60" r="${r}" stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${c.toFixed(1)}" data-target="${(c * (1 - value / 100)).toFixed(1)}"/>
-    </svg>
-    <div class="cc-ring-copy"><strong><span data-count="${value}">0</span><sup>%</sup></strong><small>santé</small></div>
-    <span class="cc-ring-label badge ${kind}">${esc(label)}</span>
+  // 04/11/2026 : plus de jauge circulaire animée « 68 % santé » (effet tableau de
+  // bord générique) : un état écrit, le score en petit.
+  const value = Math.max(0, Math.min(100, Number(score) || 0));
+  return `<div class="cc-ring cc-etat cc-${kind}" role="status" aria-label="État du serveur : ${esc(label)}, ${value} sur 100">
+    <small>État du serveur</small>
+    <strong>${esc(label)}</strong>
+    <span>Score ${value} / 100</span>
   </div>`;
 }
 
@@ -302,11 +301,9 @@ async function renderOverview() {
 
   content().innerHTML = `<div class="grid sx-overview-layout cc">
     <section class="cc-hero full" aria-label="Centre de commande">
-      <div class="cc-hero-glow" aria-hidden="true"></div>
       <div class="cc-identity">
         <span class="cc-server-icon">${icon}</span>
         <div>
-          <span class="cc-eyebrow">Centre de commande</span>
           <h2>${esc(g.name || 'Serveur')}</h2>
           <span class="cc-live ${online ? 'on' : 'off'}"><i aria-hidden="true"></i>${online ? `SentriX en ligne${Number.isFinite(latency) ? ` · ${number(latency)} ms` : ''}` : 'SentriX se reconnecte à Discord'}</span>
         </div>
@@ -339,7 +336,7 @@ async function renderOverview() {
       <div class="list">${issues.slice(0, 6).map(x => `<div class="row"><div class="row-main"><b>${esc(x.title)}</b><small>${esc(x.detail)}</small></div><div class="row-actions"><span class="badge ${x.kind}">${x.kind === 'bad' ? 'Bloquant' : 'À vérifier'}</span><button class="btn sm" type="button" data-go="${esc(x.page)}">Ouvrir</button></div></div>`).join('')}</div>
     </section>` : ''}
     <section class="sx-module-section full" aria-labelledby="sx-modules-title">
-      <div class="sx-section-heading"><div><span class="sx-section-eyebrow">CONFIGURATION</span><h2 id="sx-modules-title">Modules de votre serveur</h2><p>Activez seulement ce dont vous avez besoin. Chaque carte mène à ses réglages.</p></div><span class="sx-section-counter">${number(activeCount)} / ${number(OVERVIEW_CARDS.length)} actifs</span></div>
+      <div class="sx-section-heading"><div><h2 id="sx-modules-title">Modules de votre serveur</h2><p>Activez seulement ce dont vous avez besoin. Chaque carte mène à ses réglages.</p></div><span class="sx-section-counter">${number(activeCount)} / ${number(OVERVIEW_CARDS.length)} actifs</span></div>
       <div class="module-grid">${OVERVIEW_CARDS.map(card => moduleCard(card, mods[card.key])).join('')}</div>
     </section>
   </div>`;
