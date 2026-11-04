@@ -567,6 +567,45 @@ SPAM_NOTICE_MAX_MENTIONS = 10
 SPAM_ESCALATION_RESET_SECONDS = 86400
 SPAM_MUTE_DURATIONS_SECONDS = (600, 1800, 3600, 10800, 21600, 43200, 86400)
 SPAM_TIMEOUT_SECONDS = SPAM_MUTE_DURATIONS_SECONDS[0]
+#: Palier de la première rafale : 1 = rappel, 2 = avertissement, 3 = mute 10 min.
+SPAM_PREMIER_PALIER = 3
+#: Spam soutenu : messages ÷ fenêtre longue (2× le seuil de rafale en 20 s).
+SPAM_FENETRE_LONGUE = 20
+#: Majuscules : dès 5 lettres (« WWWWW », « # WWWWWW »), plus de 70 % en capitales.
+CAPS_LETTRES_MIN = 5
+CAPS_RATIO = 0.7
+#: Pings répétés sur plusieurs messages : même personne 3 fois, ou 6 mentions, en 60 s.
+PINGS_FENETRE = 60
+PINGS_MEME_CIBLE = 3
+PINGS_TOTAL = 6
+_JETONS_NON_TEXTE = re.compile(r"<a?:\w+:\d+>|<[@#][!&]?\d+>|<t:\d+(?::\w)?>|https?://\S+")
+
+
+def _instant_message(message) -> float:
+    """Heure d'ENVOI du message (Discord), pas celle où SentriX le traite.
+
+    04/11/2026 : un spammeur « qui lag », ou un bot ralenti, faisait arriver une
+    rafale étalée dans le temps : comptée à l'heure de traitement, elle ne
+    franchissait jamais « 5 messages en 6 s ». Une horloge aberrante (> 5 min
+    d'écart) retombe sur l'heure courante.
+    """
+    maintenant = time.time()
+    cree = getattr(message, "created_at", None)
+    try:
+        instant = cree.timestamp() if cree is not None else maintenant
+    except Exception:  # noqa: BLE001
+        return maintenant
+    if not isinstance(instant, (int, float)) or isinstance(instant, bool):
+        return maintenant
+    return float(instant) if abs(maintenant - instant) <= 300 else maintenant
+
+
+def _trop_de_majuscules(contenu: str) -> bool:
+    texte = _JETONS_NON_TEXTE.sub(" ", str(contenu or ""))
+    lettres = [c for c in texte if c.isalpha()]
+    if len(lettres) < CAPS_LETTRES_MIN:
+        return False
+    return sum(1 for c in lettres if c.isupper()) / len(lettres) > CAPS_RATIO
 #: 04/11/2026 — mode strict décidé par le PROPRIÉTAIRE du serveur : l'AutoMod
 #: s'applique aussi aux administrateurs (le propriétaire reste exempté).
 AUTOMOD_STRICT_SCHEMA = """
@@ -823,6 +862,14 @@ TOGGLE_FIELDS = [
     "security_vanity", "security_prune", "security_permissions", "join_gate", "risk_engine",
     "escalation",
 ]
+
+#: Allumées à l'arrivée sur un serveur qui n'a encore aucun filtre (04/11/2026).
+#: Pas l'anti-liens ni l'anti-bot : ils bloquent des usages légitimes tant que
+#: le serveur n'a pas choisi ses liens et ses bots autorisés.
+PROTECTIONS_DE_BASE = (
+    "antispam", "antimention", "anticaps", "antiinvite", "antiscam", "antiinsult",
+    "antiraid", "antinuke", "escalation",
+)
 
 # Protections qui inspectent un message et permettent le bypass par rôle
 # OU par membre individuel. Un salon strict reprend toujours la priorité
@@ -1804,8 +1851,29 @@ class AutoMod(commands.Cog, name="Automod"):
 
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild) -> None:
+        # 04/11/2026 : un serveur neuf n'avait AUCUN filtre actif (tout à 0 par
+        # défaut) — spam, pings et majuscules passaient sans rien. Protections de
+        # base allumées à l'arrivée, seulement si personne n'a encore rien réglé.
+        try:
+            await self.activer_protections_de_base(guild.id)
+        except Exception:  # noqa: BLE001 — l'arrivée du bot ne doit jamais échouer
+            logger.warning("Protections de base non activées guild=%s", guild.id, exc_info=True)
         # Serveur neuf : réconcilie toutes les protections natives utiles.
         await self._sync_native_suite(guild)
+
+    async def activer_protections_de_base(self, guild_id: int) -> bool:
+        """Allume PROTECTIONS_DE_BASE si aucun filtre n'est encore actif. Vrai si fait."""
+        conf = await self.bot.db.get_automod(guild_id)
+        deja = conf is not None and any(
+            int(conf[champ] or 0) for champ in TOGGLE_FIELDS if champ in conf.keys()
+        )
+        if deja:
+            return False
+        for champ in PROTECTIONS_DE_BASE:
+            await self.bot.db.set_automod(guild_id, champ, 1)
+        self.automod_cache.pop(guild_id, None)
+        logger.info("Protections de base activées pour le serveur %s.", guild_id)
+        return True
 
     async def log_action(
         self,
@@ -2194,8 +2262,11 @@ class AutoMod(commands.Cog, name="Automod"):
         member: discord.Member,
         reason: str,
     ) -> tuple[str | None, int, int | None, str]:
-        """Rappel -> warn -> timeout 10m, 30m, 1h, 3h, 6h, 12h, 24h."""
-        stage = await self._next_spam_stage(guild.id, member.id)
+        """Timeout 10m, 30m, 1h, 3h, 6h, 12h, 24h (rappel et warn sautés par défaut)."""
+        # 04/11/2026 (« j'ai spam plein de fois, no sanction ») : la première rafale
+        # ne donnait qu'un rappel, la deuxième un warn ; le mute n'arrivait qu'à la
+        # troisième. Le spam est maintenant sanctionné dès la première rafale.
+        stage = await self._next_spam_stage(guild.id, member.id) + (SPAM_PREMIER_PALIER - 1)
 
         if stage == 1:
             return (
@@ -3524,6 +3595,13 @@ class AutoMod(commands.Cog, name="Automod"):
         ) and await self.security_filter_applies_to(message, "antimention"):
             return await self._delete_and_warn(message, "Mention massive détectée.", "antimention")
 
+        # 04/11/2026 (« j'ai ping un mec 5 fois, aucun anti-ping ») : les mentions
+        # réparties sur plusieurs messages comptent aussi.
+        if conf.get("antimention") and not getattr(message, "_sentrix_edit", False):
+            motif_pings = self._pings_repetes(message)
+            if motif_pings and await self.security_filter_applies_to(message, "antimention"):
+                return await self._delete_and_warn(message, motif_pings, "antimention")
+
         # Un lien de phishing passe AVANT l'anti-liens générique. Sinon le
         # message est supprimé comme simple lien, la protection anti-arnaque
         # ne voit jamais l'URL et le modérateur perd la vraie cause.
@@ -3691,12 +3769,10 @@ class AutoMod(commands.Cog, name="Automod"):
 
         if (
             conf["anticaps"]
+            and _trop_de_majuscules(message.content)
             and await self.security_filter_applies_to(message, "anticaps")
-            and len(message.content) >= 10
         ):
-            letters = [char for char in message.content if char.isalpha()]
-            if letters and sum(1 for char in letters if char.isupper()) / len(letters) > 0.7:
-                return await self._delete_and_warn(message, "Trop de majuscules (SPAM CAPS).", "anticaps")
+            return await self._delete_and_warn(message, "Trop de majuscules (SPAM CAPS).", "anticaps")
 
         if conf["antiemoji"] and await self.security_filter_applies_to(message, "antiemoji"):
             emoji_count = len(re.findall(r"<a?:\w+:\d+>|[\U0001F300-\U0001FAFF]", message.content))
@@ -3734,12 +3810,21 @@ class AutoMod(commands.Cog, name="Automod"):
                 and time.monotonic() - incident.started < SPAM_INCIDENT_WINDOW_SECONDS
             ):
                 return await self._delete_and_warn(message, incident.reason, incident.filter_name)
-            self.spam_tracker.ajouter(key, message)
-            if self.spam_tracker.compter(key, fenetre=seuils.secondes) >= seuils.messages:
+            instant = _instant_message(message)
+            self.spam_tracker.ajouter(key, message, maintenant=instant)
+            rafale = self.spam_tracker.compter(key, maintenant=instant, fenetre=seuils.secondes) >= seuils.messages
+            fenetre_longue = min(SPAM_FENETRE_LONGUE, self.spam_tracker.fenetre)
+            soutenu = (
+                not rafale
+                and self.spam_tracker.compter(key, maintenant=instant, fenetre=fenetre_longue) >= 2 * seuils.messages
+            )
+            if rafale or soutenu:
                 # La rafale entière part, pas seulement le message qui franchit le seuil :
                 # les premiers restaient affichés (4 par spammeur, mesuré).
                 burst = [
-                    m for m in self.spam_tracker.valeurs(key, fenetre=seuils.secondes)
+                    m for m in self.spam_tracker.valeurs(
+                        key, maintenant=instant, fenetre=seuils.secondes if rafale else fenetre_longue
+                    )
                     if m is not None and m is not message
                 ]
                 self.spam_tracker.reinitialiser(key)
@@ -3772,6 +3857,32 @@ class AutoMod(commands.Cog, name="Automod"):
             if motif_repete:
                 self.repeat_tracker.reinitialiser(key)
                 return await self._delete_and_warn(message, motif_repete, "antispam")
+
+    def _pings_repetes(self, message) -> str | None:
+        """Même membre pingué 3 fois, ou 6 mentions, en 60 s par le même auteur."""
+        auteur = getattr(message.author, "id", None)
+        bot_id = getattr(getattr(self.bot, "user", None), "id", None)
+        reponse = getattr(getattr(message, "reference", None), "resolved", None)
+        cible_reponse = getattr(getattr(reponse, "author", None), "id", None)
+        cibles = [
+            int(u.id) for u in getattr(message, "mentions", ()) or ()
+            if not getattr(u, "bot", False) and u.id not in {auteur, bot_id, cible_reponse}
+        ]
+        cibles += [int(r.id) for r in getattr(message, "role_mentions", ()) or ()]
+        if not cibles:
+            return None
+        suivi = self.__dict__.get("_pings_tracker")
+        if suivi is None:
+            suivi = self.__dict__["_pings_tracker"] = FenetreGlissante(fenetre=PINGS_FENETRE, purge_toutes=500)
+        cle = (message.guild.id, auteur)
+        instant = _instant_message(message)
+        for cible in set(cibles):
+            suivi.ajouter(cle, cible, maintenant=instant)
+        recentes = suivi.valeurs(cle, maintenant=instant)
+        if len(recentes) >= PINGS_TOTAL or any(recentes.count(c) >= PINGS_MEME_CIBLE for c in set(cibles)):
+            suivi.reinitialiser(cle)
+            return "Mentions répétées (ping spam)."
+        return None
 
     def _coordinated_copies(
         self, message: discord.Message, link_content: str, comptes: int = COORDINATED_AUTHORS

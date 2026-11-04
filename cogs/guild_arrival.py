@@ -216,6 +216,14 @@ class GuildArrivalView(discord.ui.View):
                 "Le choix de langue doit être effectué dans un serveur.",
                 ephemeral=True,
             )
+        # 04/11/2026 : seul le staff change la langue de tout le serveur.
+        perms = getattr(interaction.user, "guild_permissions", None)
+        proprietaire = getattr(getattr(interaction, "guild", None), "owner_id", None) == interaction.user.id
+        if not (proprietaire or (perms and (perms.administrator or perms.manage_guild))):
+            return await interaction.response.send_message(
+                "Seuls les administrateurs peuvent choisir la langue du serveur.",
+                ephemeral=True,
+            )
 
         try:
             from . import language_runtime

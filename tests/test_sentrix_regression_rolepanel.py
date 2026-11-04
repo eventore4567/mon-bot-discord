@@ -6,9 +6,15 @@ SOURCE = (ROOT / "sentrix_regression_runtime.py").read_text(encoding="utf-8")
 SHIM = (ROOT / "cogs" / "sentrix_regression_fix.py").read_text(encoding="utf-8")
 
 
-def test_rolepanel_never_creates_discord_roles():
-    assert "create_role(" not in SOURCE
-    assert "rôles déjà existants" in SOURCE
+def test_rolepanel_ne_cree_des_roles_que_sur_un_modele_choisi():
+    # 04/11/2026 (« pourquoi ça propose pas de rôles ? ») : des modèles prêts à
+    # l'emploi. Seule creer_roles_du_modele crée un rôle, et seulement s'il manque.
+    assert SOURCE.count("create_role(") == 1
+    debut = SOURCE.index("async def creer_roles_du_modele")
+    fin = SOURCE.index("class BuilderRolePicker")
+    assert "create_role(" in SOURCE[debut:fin]
+    assert "existant is not None" in SOURCE[debut:fin]  # rôle déjà présent : réutilisé
+    assert "Choisir des rôles existants" in SOURCE
     assert "discord.ui.RoleSelect" in SOURCE
     assert "rolepanel_existing_roles_only" in SOURCE
 

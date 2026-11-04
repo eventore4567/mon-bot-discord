@@ -843,6 +843,14 @@ class _VueTarget(VueReflexe):
         else:
             await _finish(self.cog.bot, self.ctx, "target", self.session_id, "loss", 0)
         self.terminer()
+        # 04/11/2026 : une fois la partie finie, tous les boutons grisés se
+        # ressemblaient. La bonne cible passe en vert, un mauvais clic en rouge.
+        for bouton in self.children:
+            if isinstance(bouton, _BoutonTarget):
+                if self.choix[bouton.position] == self.cible:
+                    bouton.style = discord.ButtonStyle.success
+                elif bouton.position == position:
+                    bouton.style = discord.ButtonStyle.danger
         await self.cog.rendre(self, interaction, "Cible", kind="success" if self.gagne else "danger")
 
 
