@@ -20,10 +20,10 @@ GROUPS = (
     ("spam", "Anti-Spam", "Flood, links, invites, pings and message spam.",
      ("antispam", "antilink", "antiinvite",
       "antimention", "anticaps", "antiemoji")),
-    ("server", "Server Guard", "Protect critical channels, roles and permissions.",
-     ("antinuke",)),
     ("content", "Content Filter", "Detect scams and prohibited language.",
      ("antiscam", "antiinsult")),
+    ("server", "Anti-Nuke", "Protect channels, roles and recover after attacks.",
+     ("antinuke",)),
 )
 LOG_CATEGORIES = ("automod", "spam", "raid")
 LOG_LABELS = {"automod": "AutoMod", "spam": "Anti-Spam", "raid": "Anti-Raid"}
@@ -113,44 +113,138 @@ class PrivatePanel(discord.ui.LayoutView):
 
 
 class AutoModCenterView(PrivatePanel):
+    """Four compact categories, with dangerous Anti-Nuke controls isolated."""
+
     def __init__(self, bot, guild, author_id: int):
         super().__init__(bot, guild, author_id)
         self.group = None
+        self._confirm_nuke_off = False
+
+    async def _navigate(self, interaction, group: str | None):
+        self.group = group
+        self._confirm_nuke_off = False
+        await self.show(interaction)
 
     async def render(self):
         current = await self.bot.db.get_automod(self.guild.id)
         if self.group is None:
-            total = sum(bool(_value(current, field)) for field in AUTOMOD_TOGGLE_LABELS)
+            groups = [(key, label, description, fields) for key, label, description, fields in GROUPS]
+            total = sum(bool(_value(current, f)) for _k, _l, _d, fields in groups for f in fields)
+            available = sum(len(fields) for _k, _l, _d, fields in groups)
             box = self._container(
                 "AutoMod",
-                f"{total}/{len(AUTOMOD_TOGGLE_LABELS)} protections enabled. "
-                "Choose a category to configure.",
+                f"**{total}/{available} protections enabled**\n"
+                "Manage one category at a time. No duplicate settings or clutter.",
             )
-            for key, label, description, fields in GROUPS:
-                active = sum(bool(_value(current, field)) for field in fields)
-                box.add_item(discord.ui.TextDisplay(
-                    f"**{label}**  ·  {active}/{len(fields)} enabled\n-# {description}"
+            for index, (key, label, description, fields) in enumerate(groups):
+                active = sum(bool(_value(current, f)) for f in fields)
+                button = self._button(
+                    "Configure", lambda interaction, group=key: self._navigate(interaction, group),
+                    primary=key == "server" and not bool(active),
+                )
+                box.add_item(discord.ui.Section(
+                    discord.ui.TextDisplay(
+                        f"**{label}**  ·  {active}/{len(fields)} ON\n-# {description}"
+                    ),
+                    accessory=button,
                 ))
-            async def open_raid(interaction):
-                self.group = "raid"
-                await self.show(interaction)
-            async def open_spam(interaction):
-                self.group = "spam"
-                await self.show(interaction)
-            async def open_server(interaction):
-                self.group = "server"
-                await self.show(interaction)
-            async def open_content(interaction):
-                self.group = "content"
-                await self.show(interaction)
+                if index < len(groups) - 1:
+                    box.add_item(discord.ui.Separator())
             async def open_logs(interaction):
                 await AutoModLogsView(self.bot, self.guild, self.author_id).open(interaction)
+            self._buttons(box, self._button("Logs & History", open_logs))
+        elif self.group == "server":
+            active = bool(_value(current, "antinuke"))
+            box = self._container(
+                "Anti-Nuke",
+                ("**Enabled**" if active else "**Disabled**") +
+                " · Critical server protection",
+            )
+            missing = []
+            permissions = self.guild.me.guild_permissions if self.guild.me else discord.Permissions.none()
+            for key, label in (
+                ("view_audit_log", "View Audit Log"),
+                ("manage_channels", "Manage Channels"),
+                ("manage_roles", "Manage Roles"),
+                ("ban_members", "Ban Members"),
+            ):
+                if not getattr(permissions, key, False):
+                    missing.append(label)
+            box.add_item(discord.ui.TextDisplay(
+                "**Protection status**\n"
+                + ("Active — monitors sensitive server changes." if active
+                   else "Inactive — no Anti-Nuke enforcement.")
+                + ("\n**Missing bot permissions:** " + ", ".join(missing)
+                   if missing else "\n**Permissions:** available")
+            ))
+            try:
+                policy = await self.bot.db.fetchone(
+                    "SELECT action_threshold, window_seconds FROM antinuke_policy WHERE guild_id = ?",
+                    (self.guild.id,),
+                )
+            except Exception:
+                policy = None
+            if policy:
+                box.add_item(discord.ui.TextDisplay(
+                    f"**Action threshold:** {int(policy['action_threshold'])} actions "
+                    f"in {int(policy['window_seconds'])} seconds."
+                ))
+            else:
+                box.add_item(discord.ui.TextDisplay(
+                    "**Action threshold:** default server policy"
+                ))
+            try:
+                incident = await self.bot.db.fetchone(
+                    "SELECT id, created_at FROM security_incidents "
+                    "WHERE guild_id = ? ORDER BY created_at DESC LIMIT 1",
+                    (self.guild.id,),
+                )
+            except Exception:
+                incident = None
+            if incident:
+                box.add_item(discord.ui.TextDisplay(
+                    f"**Last incident:** <t:{int(incident['created_at'])}:R>"
+                ))
+            else:
+                box.add_item(discord.ui.TextDisplay(
+                    "**Recent incidents:** none recorded"
+                ))
+            owner_only = self.author_id != int(self.guild.owner_id)
+            if owner_only:
+                box.add_item(discord.ui.TextDisplay(
+                    "-# Only the server owner can change Anti-Nuke. "
+                    "Other authorized staff can review its status."
+                ))
+
+            async def toggle_nuke(interaction):
+                if interaction.user.id != int(self.guild.owner_id):
+                    return await interaction.response.send_message(
+                        "Only the server owner can change Anti-Nuke.", ephemeral=True
+                    )
+                # Disabling critical protection is two-step to avoid misclicks.
+                if active and not self._confirm_nuke_off:
+                    self._confirm_nuke_off = True
+                    return await self.show(interaction)
+                try:
+                    await self.bot.db.set_automod(self.guild.id, "antinuke", int(not active))
+                except Exception:
+                    logger.exception("Unable to change Anti-Nuke guild=%s", self.guild.id)
+                    return await interaction.response.send_message(
+                        "Anti-Nuke could not be updated.", ephemeral=True
+                    )
+                self._confirm_nuke_off = False
+                await self.show(interaction)
+
+            toggle = self._button(
+                "Confirm disable" if self._confirm_nuke_off else
+                ("Disable Anti-Nuke" if active else "Enable Anti-Nuke"),
+                toggle_nuke,
+                primary=not active,
+                disabled=owner_only,
+            )
             self._buttons(box,
-                self._button("Anti-Raid", open_raid, primary=True),
-                self._button("Anti-Spam", open_spam),
-                self._button("Server Guard", open_server),
-                self._button("Content Filter", open_content),
-                self._button("Logs & History", open_logs),
+                toggle,
+                self._button("Back", lambda interaction: self._navigate(interaction, None)),
             )
         else:
             _key, label, description, fields = next(g for g in GROUPS if g[0] == self.group)
@@ -158,10 +252,10 @@ class AutoModCenterView(PrivatePanel):
             box = self._container(label, description)
             box.add_item(discord.ui.TextDisplay(
                 f"**{len(enabled)}/{len(fields)} enabled**\n"
-                "Select the protections you want. Changes save automatically."
+                "Select protections. Your changes are saved when you confirm."
             ))
             select = discord.ui.Select(
-                placeholder="Choose active protections",
+                placeholder="Select enabled protections",
                 min_values=0,
                 max_values=len(fields),
                 options=[
@@ -181,21 +275,19 @@ class AutoModCenterView(PrivatePanel):
                             await self.bot.db.set_automod(self.guild.id, field, new_value)
                 except Exception:
                     logger.exception("Failed to save AutoMod protections for guild=%s", self.guild.id)
-                    return await interaction.response.send_message("Unable to save the protection settings.", ephemeral=True)
+                    return await interaction.response.send_message(
+                        "Unable to save the protection settings.", ephemeral=True
+                    )
                 await self.show(interaction)
             select.callback = change
             box.add_item(discord.ui.ActionRow(select))
-            async def back(interaction):
-                self.group = None
-                await self.show(interaction)
-            async def open_logs(interaction):
-                await AutoModLogsView(self.bot, self.guild, self.author_id).open(interaction)
-            self._buttons(box,
-                self._button("Back to AutoMod", back),
-                self._button("Logs & History", open_logs),
+            self._buttons(
+                box,
+                self._button("Back to AutoMod",
+                             lambda interaction: self._navigate(interaction, None)),
             )
         box.add_item(discord.ui.TextDisplay(
-            "-# SentriX · Existing security protections only · Settings saved instantly"
+            "-# SentriX · Real protection states · Private configuration"
         ))
 
 
