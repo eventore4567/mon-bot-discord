@@ -441,6 +441,39 @@ class SentriXHelpV79(discord.ui.LayoutView):
             )
         else:
             self._build_home()
+        from . import language_runtime as lang
+        guild_id = getattr(getattr(self.member, "guild", None), "id", None)
+        if lang.cached_language(self.bot, guild_id) == lang.LANG_EN:
+            replacements = (
+                ("Centre d'aide SentriX", "SentriX Help Center"),
+                ("Toutes les commandes", "All commands"),
+                ("Voir les commandes", "View commands"),
+                ("Précédent", "Previous"), ("Suivant", "Next"),
+                ("Rechercher", "Search"), ("Détails", "Details"),
+                ("Accueil", "Home"), ("Retour", "Back"),
+                ("Fermer", "Close"), ("commande(s)", "commands"),
+                ("commandes uniques", "unique commands"),
+                ("Catégories : page", "Categories: page"),
+                ("Permission nécessaire", "Required permission"),
+                ("Permission :", "Access:"), ("Utilisation", "Usage"),
+                ("Résultats pour", "Results for"),
+                ("Aucun résultat", "No results"),
+                ("Aucune commande ne correspond à cette recherche.", "No commands match your search."),
+            )
+            def english(value):
+                result = str(value or "")
+                for french, translated in replacements:
+                    result = result.replace(french, translated)
+                return result
+            def localize(item):
+                if isinstance(item, discord.ui.TextDisplay):
+                    item.content = english(item.content)
+                elif isinstance(item, discord.ui.Button) and item.label:
+                    item.label = english(item.label)
+                for child in getattr(item, "children", ()):
+                    localize(child)
+            for item in self.children:
+                localize(item)
 
     def _build_home(self) -> None:
         entries = _catalog(self.bot)
