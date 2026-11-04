@@ -102,6 +102,8 @@ async def _tracker_state(bot: commands.Bot, guild: discord.Guild) -> str:
         if log_problem:
             return "! À CORRIGER"
     if feed["feed_enabled"] and channel is not None:
+        if not guild.me or not guild.me.guild_permissions.manage_guild:
+            return "! ATTRIBUTION IMPOSSIBLE (Gérer le serveur)"
         return "● ACTIF"
     return "— À CONFIGURER"
 
@@ -113,6 +115,11 @@ async def _build_invitation_page(view) -> None:
     feed = await get_feed_setting(view.bot, view.guild.id)
     feed_channel, feed_problem = _channel_ok(view.guild, feed["feed_channel_id"])
     feed_enabled = bool(feed["feed_enabled"] and feed_channel and not feed_problem)
+    # Without Manage Server, Discord hides the invite usage counters. A working
+    # public feed does not imply that inviter attribution is possible.
+    can_track_invites = bool(
+        view.guild.me and view.guild.me.guild_permissions.manage_guild
+    )
 
     logs = await log_service.get_log_setting(view.bot, view.guild.id, CATEGORY)
     log_id = logs.get("channel_id")
@@ -199,6 +206,12 @@ async def _build_invitation_page(view) -> None:
 
     container.add_item(discord.ui.Separator())
     problem_text = f"\n⚠️ {feed_problem}" if feed_problem else ""
+    attribution_help = (
+        "Invite attribution: Ready (requires a stored invite snapshot)."
+        if can_track_invites else
+        "Invite attribution unavailable: give SentriX the Manage Server permission. "
+        "Join/leave announcements can still run, but the inviter cannot be identified."
+    )
     container.add_item(
         discord.ui.TextDisplay(
             "### 2. Salon où afficher les invitations\n"
@@ -206,7 +219,8 @@ async def _build_invitation_page(view) -> None:
             "**Arrivée :** `@membre has been invited by @inviter and has now 10 invites.`\n"
             "**Départ :** `pseudo has left the server. They had been invited by @inviter.`\n\n"
             f"**Salon :** {feed_channel.mention if feed_channel else 'Non configuré'} · "
-            f"**État :** {'Activé' if feed_enabled else 'Inactif'}{problem_text}"
+            f"**État :** {'Activé' if feed_enabled else 'Inactif'}{problem_text}\n"
+            f"-# {attribution_help}"
         )
     )
 
