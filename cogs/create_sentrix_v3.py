@@ -37,6 +37,33 @@ logger = logging.getLogger("bot.create-sentrix-v3")
 # 20 lectures d'audit log et 20 messages avec upload de bannière, donc un rate limit.
 _DELAI_REGROUPEMENT_POSITIONS = 3.0
 
+
+def resumer_deplacement_roles(reels: dict[int, tuple[int, int]]):
+    """Ce que le staff a vraiment fait, à partir des positions avant/après.
+
+    Déplacer un rôle de N crans décale d'UN cran tous les rôles traversés : le
+    rôle déplacé est celui qui a le plus bougé. Retourne :
+    - ("deplace", [rôles déplacés], nombre de rôles seulement décalés) ;
+    - ("echange", a, b) pour deux rôles voisins inversés ;
+    - None si tout n'a bougé que d'un cran (rôle créé ou supprimé ailleurs).
+    """
+    if not reels:
+        return None
+    ecarts = {rid: abs(apres - avant) for rid, (avant, apres) in reels.items()}
+    plus_grand = max(ecarts.values())
+    if plus_grand <= 1:
+        if len(reels) == 2:
+            a, b = sorted(reels, key=lambda rid: reels[rid][1], reverse=True)
+            return ("echange", a, b)
+        if len(reels) == 1:
+            return ("deplace", list(reels), 0)
+        return None
+    principaux = sorted(
+        (rid for rid, ecart in ecarts.items() if ecart > 1),
+        key=lambda rid: ecarts[rid], reverse=True,
+    )[:5]
+    return ("deplace", principaux, len(reels) - len(principaux))
+
 RUNTIME_MARKER = "Create SentriX V3"
 _VOICE_JOINED_AT: dict[tuple[int, int], tuple[int, float]] = {}
 
@@ -1059,31 +1086,40 @@ class CreateSentriXV3(commands.Cog, name="CreateSentriXV3"):
                 target_ids=set(reels),
             )
 
-            lignes = []
-            for role_id, (avant, apres) in sorted(reels.items(), key=lambda item: item[1][1], reverse=True):
-                role = guild.get_role(role_id)
-                nom = role.mention if role is not None else f"`{role_id}`"
-                lignes.append(f"{nom} : {avant} → {apres}")
+            resume = resumer_deplacement_roles(reels)
+            if resume is None:
+                # Tous décalés d'un seul cran : effet de bord d'un rôle créé ou
+                # supprimé, déjà journalisé par son propre log. Rien à dire ici.
+                return
 
-            if len(reels) == 1:
-                titre = "Rôle modifié"
-                fields = [
-                    ("Rôle", lignes[0].split(" : ")[0], True),
-                    ("Position modifiée", lignes[0].split(" : ", 1)[1], False),
-                ]
+            def mention(role_id: int) -> str:
+                role = guild.get_role(role_id)
+                return role.mention if role is not None else f"`{role_id}`"
+
+            if resume[0] == "echange":
+                _, a, b = resume
+                titre = "Rôles échangés"
+                fields = [("Rôles", f"{mention(a)} ⇄ {mention(b)}", False)]
             else:
-                titre = "Rôles déplacés"
-                fields = [
-                    ("Rôles concernés", f"**{len(reels)}** (décalés lors d’un réarrangement)", True),
-                    ("Positions modifiées", "\n".join(lignes[:8]) + (f"\n… et {len(lignes)-8} autres rôles." if len(lignes)>8 else ""), False),
-                ]
+                # 04/11/2026 (« juste le rôle, pas les 3 petits points ») : seuls les
+                # rôles réellement déplacés, jamais la liste des rôles décalés.
+                _, principaux, decales = resume
+                titre = "Rôle déplacé" if len(principaux) == 1 else "Rôles déplacés"
+                lignes = []
+                for role_id in principaux:
+                    avant, apres = reels[role_id]
+                    sens = "⬆️ monté" if apres > avant else "⬇️ descendu"
+                    lignes.append(f"{mention(role_id)} · {avant} → {apres} ({sens} de {abs(apres - avant)})")
+                fields = [("Rôle" if len(principaux) == 1 else "Rôles", "\n".join(lignes), False)]
+                if decales:
+                    fields.append(("Autres rôles", f"{decales} décalé(s) d'un cran", True))
             if actor is not None:
                 fields.append(("Modérateur", f"<@{actor.id}>", True))
 
             panel = embeds.canonical_log_embed(titre, fields=fields)
             ids: list[tuple[str, int]] = []
-            if len(reels) == 1:
-                ids.append(("Copier l'ID du rôle", next(iter(reels))))
+            if resume[0] == "deplace" and len(resume[1]) == 1:
+                ids.append(("Copier l'ID du rôle", resume[1][0]))
             if actor is not None:
                 ids.append(("Copier l'ID du modérateur", actor.id))
 

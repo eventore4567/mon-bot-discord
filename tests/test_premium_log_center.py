@@ -154,7 +154,8 @@ def test_premium_log_has_persistent_history_and_unban_buttons_without_reference(
     )
     items = list(_walk(view))
     actions = [i for i in items if isinstance(i, PremiumLogAction)]
-    assert {a.action for a in actions} == {"history", "unban"}
+    # 04/11/2026 (« enlève l'historique des logs ») : seul « Lever le ban » reste.
+    assert {a.action for a in actions} == {"unban"}
     assert all(str(GUILD_ID) in a.item.custom_id for a in actions)
     text = "\n".join(
         str(getattr(i, "content", "")) for i in items

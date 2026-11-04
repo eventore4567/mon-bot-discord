@@ -39,7 +39,9 @@ def test_deleted_log_unverified_actor_is_explicit():
         log_type="message_delete",
     )
     # Sans entrée d'audit, Discord dit implicitement qui : l'auteur ou un bot.
-    assert "**Supprimé par :** l’auteur lui-même ou un bot" in text
+    # 04/11/2026 : sans entrée d'audit, c'est l'auteur (toute suppression par un
+    # autre compte, bot compris, laisse une trace).
+    assert "**Supprimé par :** l’auteur du message" in text
     assert "Non identifié" not in text
     assert "<@1457325087928881000>" not in text
 

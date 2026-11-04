@@ -534,9 +534,10 @@ def narrative_body(
             if actor_mention:
                 lines.append(f"**Supprimé par :** {actor_mention}")
             else:
-                # Discord n'inscrit au journal d'audit que la suppression par un
-                # AUTRE membre : sans entrée, c'est l'auteur lui-même ou un bot.
-                lines.append("**Supprimé par :** l’auteur lui-même ou un bot")
+                # Discord inscrit au journal d'audit toute suppression par un AUTRE
+                # compte (bots compris) : sans entrée, c'est l'auteur lui-même.
+                # 04/11/2026 : « l'auteur lui-même ou un bot » était vague.
+                lines.append("**Supprimé par :** l’auteur du message")
     elif event_type == "message_edit":
         # Auteur + salon sont déjà dans l'en-tête compact : ne pas les répéter
         # dans une phrase supplémentaire.
@@ -1664,9 +1665,18 @@ class WideLogView(discord.ui.LayoutView):
         if identity_ref:
             identity_ref += _id_chip(identity_id)
         identity_display = identity_ref or (safe_text(identity_name)[:80] if identity_name else "")
-        # A role-reorder event may carry a count (17) as its "identity".
+        # 04/11/2026 : un membre parti n'est plus résolu par Discord, sa mention
+        # s'affichait « @. ». Son nom en clair passe devant la mention.
+        nom_clair = safe_text(identity_name or "").strip()
+        if (
+            event_type in {"member_leave", "member_ban", "member_kick"}
+            and identity_ref and nom_clair and not nom_clair.startswith("<")
+        ):
+            identity_display = f"**{discord.utils.escape_markdown(nom_clair)[:60]}** · {identity_display}"
+        # A role-reorder event may carry a count (17, « 18** ») as its "identity".
         # It is not an individual Discord entity: avoid "Élément · 17".
-        if title.casefold() in {"rôles déplacés", "roles moved"} and identity_display.isdecimal() and len(identity_display) < 15:
+        compte = identity_display.strip("*` ")
+        if title.casefold() in {"rôles déplacés", "roles moved", "rôles échangés"} and compte.isdecimal() and len(compte) < 15:
             identity_display = ""
         if not identity_display and event_type in {"invite_create", "invite_delete"}:
             identity_display = "Non renseigné par Discord"
@@ -1831,16 +1841,11 @@ class WideLogView(discord.ui.LayoutView):
                 logger.exception("SENTRIX TRACE V7 actions separator")
             for row in rows:
                 container.add_item(row)
-        if guild_id and identity_id and event_type in {
-            "member_ban", "member_unban", "member_kick", "member_warn",
-            "member_timeout", "member_untimeout", "member_join", "member_leave",
-            "role_add", "role_remove", "member_roles", "message_delete", "message_edit",
-        }:
+        # 04/11/2026 (« enlève l'historique des logs ») : plus de bouton
+        # « Historique » sous chaque log. Seule action gardée : lever un ban.
+        if guild_id and identity_id and event_type == "member_ban":
             from cogs.log_history_center import PremiumLogAction
-            actions = [PremiumLogAction("history", guild_id, identity_id)]
-            if event_type == "member_ban":
-                actions.append(PremiumLogAction("unban", guild_id, identity_id))
-            container.add_item(discord.ui.ActionRow(*actions))
+            container.add_item(discord.ui.ActionRow(PremiumLogAction("unban", guild_id, identity_id)))
         self.add_item(container)
 
 
