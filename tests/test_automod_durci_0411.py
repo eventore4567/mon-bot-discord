@@ -63,28 +63,27 @@ def test_pings_repetes_sur_plusieurs_messages():
 
 
 class _Base:
-    def __init__(self, ligne):
-        self.ligne, self.actives = ligne, []
-
-    async def get_automod(self, guild_id):
-        return self.ligne
+    def __init__(self):
+        self.actives = []
 
     async def set_automod(self, guild_id, champ, valeur):
         self.actives.append(champ)
 
 
-def test_protections_de_base_sur_un_serveur_neuf_seulement():
+def test_aucun_filtre_n_est_active_d_office_a_l_arrivee():
+    """04/11/2026 : « enlève les automod déjà activés » — chaque serveur choisit."""
     cog = am.AutoMod.__new__(am.AutoMod)
-    cog.automod_cache = {}
-    vierge = {champ: 0 for champ in am.TOGGLE_FIELDS}
-    cog.bot = SimpleNamespace(db=_Base(vierge))
-    assert asyncio.run(cog.activer_protections_de_base(1)) is True
-    assert set(cog.bot.db.actives) == set(am.PROTECTIONS_DE_BASE)
-    assert "antilink" not in cog.bot.db.actives  # liens et bots : au choix du serveur
-    regle = dict(vierge, antilink=1)
-    cog.bot = SimpleNamespace(db=_Base(regle))
-    assert asyncio.run(cog.activer_protections_de_base(1)) is False
+    cog.bot = SimpleNamespace(db=_Base())
+    synchro = []
+
+    async def sync(guild):
+        synchro.append(guild.id)
+
+    cog._sync_native_suite = sync
+    asyncio.run(cog.on_guild_join(SimpleNamespace(id=1)))
     assert cog.bot.db.actives == []
+    assert synchro == [1]
+    assert not hasattr(am, "PROTECTIONS_DE_BASE")
 
 
 def test_le_spam_est_sanctionne_des_la_premiere_rafale():
