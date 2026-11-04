@@ -218,8 +218,13 @@ class MemberTests(unittest.TestCase):
 
     def test_member_gets_no_moderation_or_admin_command(self):
         b = FakeBackend()
-        for cmd in ("ban", "kick", "mute", "clear", "setup", "antiraid", "dm"):
+        for cmd in ("ban", "kick", "mute", "clear", "antiraid", "dm"):
             self.assertFalse(decide(b, member(), cmd).allowed, cmd)
+
+    def test_member_can_open_setup_read_only(self):
+        decision = decide(FakeBackend(), member(), "setup")
+        self.assertTrue(decision.allowed)
+        self.assertEqual(decision.policy, "public-setup-readonly")
 
     def test_denial_always_carries_the_standard_header(self):
         d = decide(FakeBackend(), member(), "ban")
