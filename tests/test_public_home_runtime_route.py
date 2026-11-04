@@ -38,8 +38,8 @@ def test_root_is_intercepted_before_any_dashboard_index_wrapper():
     response, called = asyncio.run(_call("/"))
     assert response.status == 200
     assert called["handler"] is False
-    assert "Moins de chaos." in response.text
-    assert "product-shell" in response.text
+    assert "Le bot qui garde votre serveur Discord en ordre." in response.text
+    assert 'class="wrap hero"' in response.text
     assert response.headers["X-SentriX-Surface"] == "public-home-v3"
     assert "no-store" in response.headers["Cache-Control"]
 
@@ -48,7 +48,7 @@ def test_home_alias_is_intercepted_as_public_landing():
     response, called = asyncio.run(_call("/home"))
     assert response.status == 200
     assert called["handler"] is False
-    assert "product-shell" in response.text
+    assert 'class="wrap hero"' in response.text
     assert response.headers["X-SentriX-Surface"] == "public-home-v3"
 
 

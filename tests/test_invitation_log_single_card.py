@@ -160,7 +160,8 @@ def test_formatted_log_is_a_readable_card_without_quoted_bar_or_repeated_identit
     displays = [item.content for item in container.children if isinstance(item, discord.ui.TextDisplay)]
     combined = "\n".join(displays)
     assert "🔗 Ressources" in combined
-    assert "**Créateur** · <@111111111111111111>" in combined
+    # 04/11/2026 : nom en clair devant la mention (« @utilisateur-inconnu » sinon).
+    assert "**Créateur** · **Toxic** · <@111111111111111111>" in combined
     assert "## Invitation créée" in combined
     assert "Item" not in combined
     assert "> " not in combined

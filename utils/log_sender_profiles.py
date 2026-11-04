@@ -32,6 +32,9 @@ _locks: dict[tuple[int, int], asyncio.Lock] = {}
 _application_ownership: dict[int, bool] = {}
 _schema_ready: set[int] = set()
 _profile_cache: dict[tuple[int, str], tuple[float, dict]] = {}
+#: Salon -> instant (monotonic) jusqu'auquel le webhook mini-profil n'est plus essayé.
+_webhook_en_pause: dict[int, float] = {}
+PAUSE_WEBHOOK_SECONDES = 600.0
 
 
 async def ensure_schema(bot) -> None:
@@ -205,6 +208,10 @@ async def send_with_profile(channel, view: discord.ui.View, files: list[discord.
     """Returns the message, or None to let the bot send the original V2 card."""
     if not profile.get("enabled") or not isinstance(channel, discord.TextChannel):
         return None
+    # Webhook refusé « introuvable » il y a peu : envoi direct par le bot, sans
+    # retenter à chaque log (04/11/2026).
+    if _webhook_en_pause.get(int(channel.id), 0.0) > time.monotonic():
+        return None
     webhook = await _webhook(channel)
     if webhook is None:
         logger.debug("Mini-profil non disponible : permission webhook absente channel=%s", channel.id)
@@ -243,6 +250,8 @@ async def send_with_profile(channel, view: discord.ui.View, files: list[discord.
             channel.id, has_actions, type(exc).__name__,
         )
         _webhooks.pop((int(channel.guild.id), int(channel.id)), None)
+        if isinstance(exc, discord.NotFound):
+            _webhook_en_pause[int(channel.id)] = time.monotonic() + PAUSE_WEBHOOK_SECONDES
         return None
 
 

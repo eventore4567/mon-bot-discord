@@ -59,7 +59,9 @@ async def main() -> int:
     # /events a quitté le menu « / » (02/11/2026) : le texte cite le « + » qui marche.
     check("+event-list" in t, "événement introuvable : la liste des noms exacts", t[:200])
     t = await say("+afk pause café")
-    check("pause café" in t and "prochain message" in t, "AFK : comment le statut se retire", t[:220])
+    # 03/11/2026 (commit « fix(afk) ») : la réponse ne répète plus comment le statut
+    # se retire ; elle confirme le statut et sa raison.
+    check("pause café" in t and "est maintenant AFK" in t, "AFK : statut et raison confirmés", t[:220])
 
     failed = [r for r in RESULTS if not r[0]]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} étapes réussies.")

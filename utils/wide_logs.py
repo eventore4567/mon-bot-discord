@@ -920,9 +920,9 @@ def narrative_body(
         if failed and failed.casefold() != "aucun":
             # Un signal seul doit rester visible : compact_fields élimine les
             # petits champs, et une image sans contexte ne permet aucun audit.
-            lines.append("**Points à examiner :**\n" + failed[:1050])
+            lines.append("**Critères non remplis :**\n" + criteres_non_remplis(failed)[:1050])
         elif decision and "non vérifié" in decision.casefold():
-            lines.append("**Points à examiner :** Aucun signal individuel renseigné.")
+            lines.append("**Critères non remplis :** aucun signal individuel renseigné.")
         neutral = _field_value_exact(embed, "Signaux neutres / non disponibles")
         if neutral and neutral.isdecimal() and int(neutral):
             lines.append(f"**Signaux indisponibles (non pénalisants) :** {neutral}")
@@ -1665,12 +1665,13 @@ class WideLogView(discord.ui.LayoutView):
         if identity_ref:
             identity_ref += _id_chip(identity_id)
         identity_display = identity_ref or (safe_text(identity_name)[:80] if identity_name else "")
-        # 04/11/2026 : un membre parti n'est plus résolu par Discord, sa mention
-        # s'affichait « @. ». Son nom en clair passe devant la mention.
+        # 04/11/2026 : Discord affiche « @utilisateur-inconnu » (ou « @. ») pour un
+        # membre qu'il n'a pas en cache — un nouvel arrivant comme un membre parti.
+        # Pour toute mention de MEMBRE, son nom en clair passe devant la mention.
         nom_clair = safe_text(identity_name or "").strip()
         if (
-            event_type in {"member_leave", "member_ban", "member_kick"}
-            and identity_ref and nom_clair and not nom_clair.startswith("<")
+            identity_ref.startswith("<@") and not identity_ref.startswith("<@&")
+            and nom_clair and not nom_clair.startswith("<")
         ):
             identity_display = f"**{discord.utils.escape_markdown(nom_clair)[:60]}** · {identity_display}"
         # A role-reorder event may carry a count (17, « 18** ») as its "identity".
@@ -1966,6 +1967,65 @@ def _schedule_history(channel: discord.abc.Messageable, embed: discord.Embed, lo
         logger.debug("Aucune boucle asyncio active pour l'historique des logs.")
 
 
+def _copier_fichiers(files: list[discord.File]) -> list[tuple[bytes, str, bool, str | None]]:
+    """Contenu des pièces jointes, lu une fois AVANT le premier envoi.
+
+    04/11/2026 : un webhook refusé (NotFound) ferme les fichiers après son essai ;
+    le repli « envoi par le bot » repartait avec des fichiers fermés et le log
+    était perdu (« I/O operation on closed file », des dizaines par heure en
+    production). Chaque tentative reçoit désormais des fichiers neufs.
+    """
+    copies = []
+    for item in files:
+        try:
+            item.fp.seek(0)
+            donnees = item.fp.read()
+        except Exception:  # noqa: BLE001 — fichier déjà inutilisable : on l'écarte
+            logger.warning("Pièce jointe de log illisible : %s", getattr(item, "filename", "?"))
+            continue
+        copies.append((
+            donnees, str(getattr(item, "filename", "") or "fichier"),
+            bool(getattr(item, "spoiler", False)), getattr(item, "description", None),
+        ))
+    return copies
+
+
+def _fichiers_neufs(copies: list[tuple[bytes, str, bool, str | None]]) -> list[discord.File]:
+    import io
+
+    return [
+        discord.File(io.BytesIO(donnees), filename=nom, spoiler=spoiler, description=description)
+        for donnees, nom, spoiler, description in copies
+    ]
+
+
+_AGE_COMPTE = re.compile(r"compte âgé d'au moins (\d+)\s*(heure|jour)s?", re.IGNORECASE)
+
+
+def criteres_non_remplis(texte: str) -> str:
+    """« Points à examiner » listait des critères écrits au positif (« Profil avec
+    avatar ») alors qu'ils ne sont PAS remplis, et les cinq seuils d'âge à la suite.
+    04/11/2026 : chaque critère manqué porte ❌, et l'âge tient sur une ligne."""
+    lignes = [l.strip().lstrip("•-*· ").strip() for l in str(texte or "").splitlines() if l.strip()]
+    ages, autres = [], []
+    for ligne in lignes:
+        trouve = _AGE_COMPTE.search(ligne)
+        if trouve:
+            heures = int(trouve.group(1)) * (24 if trouve.group(2).lower().startswith("jour") else 1)
+            ages.append((heures, trouve.group(1), trouve.group(2).lower()))
+        else:
+            autres.append(ligne)
+    sortie = [f"❌ {ligne}" for ligne in autres]
+    if ages:
+        _h, nombre, unite = min(ages)
+        if int(nombre) == 1:
+            duree = "d'une heure" if unite.startswith("heure") else "d'un jour"
+        else:
+            duree = f"de {nombre} {unite}s"
+        sortie.insert(0, f"❌ Compte créé il y a moins {duree}")
+    return "\n".join(sortie)
+
+
 def _rewind_file(file: discord.File | None) -> None:
     if file is None:
         return
@@ -2168,19 +2228,17 @@ async def send_wide_log(
         "SXTRACE 6 TRANSPORT phase=before-send channel=%s event_type=%s files=%s view=%s",
         getattr(channel, "id", "?"), event_type, len(files), type(view).__name__,
     )
+    copies = _copier_fichiers(files)
     try:
         message = None
         if sender_profile and sender_profile.get("enabled"):
             from utils.log_sender_profiles import send_with_profile
             message = await send_with_profile(
-                channel, view, files, sender_profile, allowed_mentions=NO_PINGS,
+                channel, view, _fichiers_neufs(copies), sender_profile, allowed_mentions=NO_PINGS,
             )
-            if message is None:
-                # Webhook may have consumed the file handles on failure.
-                for uploaded in files:
-                    _rewind_file(uploaded)
         if message is None:
-            message = await channel.send(view=view, files=files, allowed_mentions=NO_PINGS)
+            # Fichiers neufs : ceux du webhook ont pu être fermés par son échec.
+            message = await channel.send(view=view, files=_fichiers_neufs(copies), allowed_mentions=NO_PINGS)
         logger.debug(
             "SXTRACE 6 TRANSPORT phase=after-send channel=%s event_type=%s message_id=%s",
             getattr(channel, "id", "?"), event_type, getattr(message, "id", "?"),

@@ -118,30 +118,54 @@ async def clear(bot: Any, guild_id: int) -> None:
     await bot.db.execute("DELETE FROM welcome_autoroles WHERE guild_id=?", (guild_id,))
 
 
-async def apply(bot: Any, member: discord.Member) -> tuple[list[discord.Role], list[str]]:
-    """Donne à ``member`` chaque rôle configuré encore valide.
+#: (serveur, raison) déjà signalés : un rôle supprimé ne doit pas inonder les
+#: journaux à chaque arrivée (268 lignes en 2 min mesurées le 04/11/2026).
+_DEJA_SIGNALES: set[tuple[int, str]] = set()
 
-    Renvoie (rôles donnés, raisons des rôles écartés). Un rôle refusé n'empêche
-    pas les autres d'être donnés.
+
+async def apply_detail(bot: Any, member: discord.Member) -> tuple[list[discord.Role], list[str], list[str]]:
+    """(rôles donnés, problèmes DÉFINITIFS, échecs TEMPORAIRES).
+
+    Définitif : rôle supprimé, trop haut, géré, dangereux, refus 403/404 —
+    réessayer ne changera rien tant que le staff n'a pas corrigé la config.
+    Temporaire : Discord indisponible (429, 5xx…) — à réessayer plus tard.
     """
     if getattr(member, "bot", False) is True:
-        return [], []
+        return [], [], []
     given: list[discord.Role] = []
-    skipped: list[str] = []
+    definitifs: list[str] = []
+    temporaires: list[str] = []
     for role_id in await configured_ids(bot, member.guild.id):
         role = member.guild.get_role(role_id)
         problem = role_problem(member.guild, role)
         if problem:
-            skipped.append(f"{role_id}: {problem}")
+            definitifs.append(f"{role_id}: {problem}")
             continue
         if role in member.roles:
             continue
         try:
             await member.add_roles(role, reason="Rôle d'arrivée SentriX")
         except discord.HTTPException as exc:
-            skipped.append(f"{role_id}: Discord a refusé ({exc.status})")
+            cible = definitifs if getattr(exc, "status", 0) in (403, 404) else temporaires
+            cible.append(f"{role_id}: Discord a refusé ({exc.status})")
             continue
         given.append(role)
-    if skipped:
-        logger.warning("Rôles d'arrivée écartés guild=%s user=%s : %s", member.guild.id, member.id, " | ".join(skipped))
-    return given, skipped
+    nouveaux = [d for d in definitifs if (member.guild.id, d) not in _DEJA_SIGNALES]
+    for raison in nouveaux:
+        _DEJA_SIGNALES.add((member.guild.id, raison))
+    if nouveaux or temporaires:
+        logger.warning(
+            "Rôles d'arrivée écartés guild=%s user=%s : %s",
+            member.guild.id, member.id, " | ".join([*nouveaux, *temporaires]),
+        )
+    return given, definitifs, temporaires
+
+
+async def apply(bot: Any, member: discord.Member) -> tuple[list[discord.Role], list[str]]:
+    """Donne à ``member`` chaque rôle configuré encore valide.
+
+    Renvoie (rôles donnés, raisons des rôles écartés). Un rôle refusé n'empêche
+    pas les autres d'être donnés.
+    """
+    given, definitifs, temporaires = await apply_detail(bot, member)
+    return given, [*definitifs, *temporaires]
