@@ -22,4 +22,6 @@ jobs:
       - name: Compile changed source
         run: python -m py_compile cogs/automod_center_v118.py cogs/setup_control_center.py
       - name: Run AutoMod panel tests
+        env:
+          DISCORD_TOKEN: "ci-placeholder-not-a-real-token"
         run: python -m pytest -q tests/test_automod_center_v118.py
