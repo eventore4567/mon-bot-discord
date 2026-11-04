@@ -502,8 +502,12 @@ def _replace_welcome_listeners(bot) -> None:
         if await core.module_enabled(bot, member.guild.id, "roles"):
             # Chaque rôle est revérifié ici (hiérarchie, rôle géré, permissions
             # dangereuses) : la configuration a pu changer depuis le réglage.
-            _given, skipped = await welcome_autoroles.apply(bot, member)
-            roles_ok = not skipped
+            # 04/11/2026 : un rôle supprimé ou mal placé est un problème de
+            # configuration, pas un échec à réessayer. Le compter comme échec
+            # relançait le rattrapage des arrivées en boucle (268 tentatives et
+            # un scan complet des membres à chaque tour, mesuré en production).
+            _given, _definitifs, temporaires = await welcome_autoroles.apply_detail(bot, member)
+            roles_ok = not temporaires
         # Ne réserve l'événement que si le module Bienvenue est réellement actif.
         # Sinon un autre module d'onboarding pourrait être bloqué alors que SentriX
         # n'enverra finalement aucun message.

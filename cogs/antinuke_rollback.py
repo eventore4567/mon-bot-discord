@@ -571,6 +571,12 @@ def _patch_punishment(bot: commands.Bot) -> None:
 
     async def punish_with_rollback(_self, guild: discord.Guild, actor_id: int, reason: str):
         rollback = bot.get_cog(_COG_NAME)
+        # 04/11/2026 : quand l'anti-nuke V55 est chargé, c'est LUI qui restaure
+        # (sanction d'abord, puis rôles, catégories, salons, positions et permissions).
+        # Restaurer ici aussi recréait chaque salon une seconde fois : V55 ne
+        # retrouve pas l'ancien identifiant d'un salon déjà recréé par ce module.
+        if bot.get_cog("AntiNukeEmergencyV55") is not None:
+            rollback = None
         if rollback is not None:
             try:
                 await rollback.rollback_actor(guild, actor_id, reason)

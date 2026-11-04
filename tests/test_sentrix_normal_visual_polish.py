@@ -29,24 +29,23 @@ def page():
 
 def test_public_site_preserves_real_actions_and_has_polished_copy():
     html = page()
-    assert "Protégez votre communauté, organisez votre staff" in html
-    assert "Vos questions, nos réponses." in html
+    # 04/11/2026 : texte simple et concret (refonte éditoriale de l'accueil).
+    assert "Le bot qui garde votre serveur Discord en ordre." in html
+    assert "Questions fréquentes." in html
     assert 'href="/app" data-dashboard-entry' in html
     assert 'href="__INVITE__"' not in html
     assert 'href="/docs"' in html
     assert 'href="/support"' in html
     assert 'href="/premium"' in html
-    assert "moins de chaos" in html.lower()
     assert 'href="#main"' in html
 
 
 def test_public_site_aligns_cards_and_mobile_typography():
     html = page()
     for required in (
-        "SentriX Normal V1",
-        ".hero-proof{gap:10px;",
-        ".proof span{font-size:10.5px;",
-        ".faq-list summary{padding:15px 0;font-size:13px",
+        ".commands div{display:grid;grid-template-columns:minmax(220px,.8fr) 1.2fr",
+        ".facts{display:grid;grid-template-columns:repeat(3,1fr)",
+        "summary{cursor:pointer;font-weight:600;font-size:18px",
         "@media(max-width:720px)",
         "@media(max-width:430px)",
         "@media(prefers-reduced-motion:reduce)",

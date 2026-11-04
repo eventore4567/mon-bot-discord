@@ -33,7 +33,8 @@ function accentAlpha(hex, alpha = .18) {
   return `rgb(${r} ${g} ${b} / ${alpha})`;
 }
 const DASHBOARD_THEME_BASES = {
-  sentrix: { bg:'#0b0d10', bg2:'#101318', rail:'#101318', sidebar:'#101318', panel:'#15191f', panel2:'#1a1f27', panel3:'#202630', line:'#2a313c', line2:'#343d49', text:'#f2f5f8', muted:'#929dac', soft:'#bac3cf', hover:'#1a1f27', success:'#55d69a', warning:'#efbd61', danger:'#ff7081' },
+  // 04/11/2026 : thème par défaut « sobre », mêmes teintes que la page d'accueil.
+  sentrix: { bg:'#141311', bg2:'#181715', rail:'#181715', sidebar:'#181715', panel:'#1c1b18', panel2:'#22201d', panel3:'#2a2824', line:'#34312c', line2:'#433f39', text:'#efebe3', muted:'#958f84', soft:'#c9c3b8', hover:'#22201d', success:'#55d69a', warning:'#efbd61', danger:'#ff7081' },
   oled: { bg:'#000000', bg2:'#050607', rail:'#020304', sidebar:'#020304', panel:'#0b0d10', panel2:'#101318', panel3:'#15191f', line:'#1c222a', line2:'#29313b', text:'#f7f7f8', muted:'#9ba3ad', soft:'#c8ced6', hover:'#101318', success:'#55d69a', warning:'#efbd61', danger:'#ff7081' },
   midnight: { bg:'#070b14', bg2:'#0b111d', rail:'#080d17', sidebar:'#0b111d', panel:'#111827', panel2:'#162033', panel3:'#1d2a40', line:'#23324a', line2:'#31435f', text:'#f1f6ff', muted:'#8fa0b8', soft:'#c0ccda', hover:'#162033', success:'#4ed69d', warning:'#f0bd66', danger:'#ff7485' },
   graphite: { bg:'#0d0e10', bg2:'#121417', rail:'#101214', sidebar:'#121417', panel:'#181b1f', panel2:'#1e2227', panel3:'#252a30', line:'#30363d', line2:'#3b434c', text:'#f3f4f6', muted:'#9aa1aa', soft:'#c6cbd1', hover:'#1e2227', success:'#58d39a', warning:'#eebd67', danger:'#ff7586' },
@@ -160,12 +161,12 @@ function captureThemeSnapshot(name='') {
     id: String(Date.now()),
     name: String(name||'').trim().slice(0,32) || 'Mon thème',
     theme,
-    accent: normalizeAccent((()=>{try{return localStorage.getItem('sentrix:accent')||'#4da3ff';}catch(_){return '#4da3ff';}})()),
+    accent: normalizeAccent((()=>{try{return localStorage.getItem('sentrix:accent')||'#8f86ff';}catch(_){return '#8f86ff';}})()),
     colors: readThemeColors(theme),
-    banner:(()=>{try{return localStorage.getItem('sentrix:banner')||'aurora';}catch(_){return 'aurora';}})(),
+    banner:(()=>{try{return localStorage.getItem('sentrix:banner')||'minimal';}catch(_){return 'minimal';}})(),
     density:(()=>{try{return localStorage.getItem('sentrix:density')||'comfortable';}catch(_){return 'comfortable';}})(),
     radius:(()=>{try{return localStorage.getItem('sentrix:radius')||'rounded';}catch(_){return 'rounded';}})(),
-    glow:(()=>{try{return localStorage.getItem('sentrix:glow')!=='0';}catch(_){return true;}})(),
+    glow:(()=>{try{return localStorage.getItem('sentrix:glow')==='1';}catch(_){return false;}})(),
     reduceMotion:(()=>{try{return localStorage.getItem('sentrix:reduce-motion')==='1';}catch(_){return false;}})(),
   };
 }
@@ -184,15 +185,17 @@ function applyThemeSnapshot(snapshot) {
   applyGlobalPreferences();
 }
 function applyGlobalPreferences() {
-  let theme='sentrix',accent='#4da3ff',reduced=false,glow=true,density='comfortable',radius='rounded',banner='aurora';
+  // 04/11/2026 : défauts « sobres » — accent violet, sans halo, bannière minimale.
+  // Les préférences déjà enregistrées par l'utilisateur restent prioritaires.
+  let theme='sentrix',accent='#8f86ff',reduced=false,glow=false,density='comfortable',radius='rounded',banner='minimal';
   try {
     theme=localStorage.getItem('sentrix:theme')||'sentrix';
-    accent=normalizeAccent(localStorage.getItem('sentrix:accent')||'#4da3ff');
+    accent=normalizeAccent(localStorage.getItem('sentrix:accent')||'#8f86ff');
     reduced=localStorage.getItem('sentrix:reduce-motion')==='1';
-    glow=localStorage.getItem('sentrix:glow')!=='0';
+    glow=localStorage.getItem('sentrix:glow')==='1';
     density=localStorage.getItem('sentrix:density')||'comfortable';
     radius=localStorage.getItem('sentrix:radius')||'rounded';
-    banner=localStorage.getItem('sentrix:banner')||'aurora';
+    banner=localStorage.getItem('sentrix:banner')||'minimal';
   } catch (_) {}
   const allowedThemes=new Set(['sentrix','oled','midnight','graphite']);
   const allowedDensity=new Set(['comfortable','compact']);

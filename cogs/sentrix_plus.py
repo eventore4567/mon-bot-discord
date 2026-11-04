@@ -705,7 +705,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
             allowed_mentions=discord.AllowedMentions.none(),
         )
 
-    @sticky.command(name="list")
+    @sticky.command(name="list", description="Lister les messages épinglés automatiques du serveur.")
     @commands.guild_only()
     @commands.has_guild_permissions(manage_messages=True)
     async def sticky_list(self, ctx: commands.Context):
@@ -724,7 +724,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
             ephemeral=bool(ctx.interaction), allowed_mentions=discord.AllowedMentions.none()
         )
 
-    @sticky.command(name="remove")
+    @sticky.command(name="remove", description="Retirer le message épinglé automatique d'un salon.")
     @commands.guild_only()
     @commands.has_guild_permissions(manage_messages=True)
     async def sticky_remove(self, ctx: commands.Context, channel: discord.TextChannel):
@@ -815,7 +815,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
         )
         await ctx.send(f"Le sticky de {channel.mention} est republié tous les {every} message(s).", allowed_mentions=discord.AllowedMentions.none())
 
-    @commands.command(name="sticky-off")
+    @commands.command(name="sticky-off", description="Retirer le message épinglé automatique de ce salon.")
     @commands.guild_only()
     @commands.has_guild_permissions(manage_messages=True)
     async def sticky_off(self, ctx: commands.Context, channel: discord.TextChannel):

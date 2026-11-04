@@ -78,9 +78,14 @@ async def main() -> int:
             bot.dispatch("guild_channel_update", before, after)
         return fire
 
+    def entete_membre(texte: str) -> bool:
+        # 04/11/2026 : le nom en clair peut précéder la mention (« @utilisateur-inconnu »).
+        import re as _re
+        return bool(_re.search(r"\*\*Membre\*\* · (?:\*\*[^*]+\*\* · )?" + _re.escape(member), texte))
+
     cards = await case("+giverole", f"+giverole {member} <@&{h.PING_ROLE_ID}>", roles(plus=[h.PING_ROLE_ID]))
     text = " ".join(cards)
-    check(f"**Membre** · {member}" in text and f"par {mod}" in text,
+    check(entete_membre(text) and f"par {mod}" in text,
           "+giverole : le membre en en-tête et le vrai modérateur, pas SentriX", text[:200])
 
     cards = await case("+removerole", f"+removerole {member} <@&{h.MEMBER_ROLE_ID}>", roles(minus=[h.MEMBER_ROLE_ID]))
@@ -104,7 +109,7 @@ async def main() -> int:
     await asyncio.wait_for(h.run_prefix(bot, guild, f"+give-money {member} 500", **admin), 15)
     await h.settle(idle=2.0, maximum=6)
     text = " ".join(logs_since(since))
-    check(f"**Membre** · {member}" in text, "+give-money : le membre crédité en en-tête", text[:200])
+    check(entete_membre(text), "+give-money : le membre crédité en en-tête", text[:200])
 
     failed = [r for r in RESULTS if not r[0]]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} étapes réussies.")

@@ -1879,3 +1879,34 @@ html:not([data-density="compact"]) .workspace{
 @media(max-width:680px){.log-center-hero{padding:17px}.log-center-summary{gap:6px}.log-stat{padding:10px}.log-stat>strong{font-size:21px}.log-summary-bottom{flex-direction:column;gap:3px}.log-center-tools{align-items:stretch}.log-filter-buttons{width:100%}.log-route-grid{grid-template-columns:minmax(0,1fr)}.log-route-card{padding:13px}.log-group-head{align-items:flex-start}.log-center-layout{gap:13px}}
 @media(max-width:385px){.log-route-controls{grid-template-columns:minmax(0,1fr)}.log-route-toggle{max-width:160px}.log-filter-buttons .btn{flex:1 1 40%}.log-center-summary{grid-template-columns:repeat(3,minmax(0,1fr))}.log-stat>span{font-size:10px}}
 @media(prefers-reduced-motion:reduce){.log-route-card{transition:none}}
+
+/* ===================================================================== */
+/* SentriX sobre (04/11/2026) — « le dashboard pue l'IA » : halos bleus,   */
+/* dégradés, flou, auras animées. Même identité que l'accueil : surfaces  */
+/* unies, bordures fines, un seul accent, titres en serif. Les thèmes     */
+/* choisis par l'utilisateur (html[data-theme]) gardent leurs couleurs.   */
+/* ===================================================================== */
+:root{
+  --bg:#141311;--bg2:#181715;--panel:#1c1b18;--panel2:#22201d;--panel3:#2a2824;
+  --line:#34312c;--line2:#433f39;--text:#efebe3;--muted:#958f84;--soft:#c9c3b8;
+  --blue:#8f86ff;--blue2:#aaa3ff;--blue-bg:#25223f;--accent-glow:transparent;
+  --accent-soft:rgba(143,134,255,.10);--rail-bg:#181715;--sidebar-bg:#181715;--hover-bg:#22201d;
+  --sx-serif:ui-serif,"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+}
+body{background:var(--bg)!important}
+body::before,body::after,.cc-hero-glow,.log-center-hero::before{display:none!important;animation:none!important}
+.card,.cc-hero,.cc-events,.log-center-hero,.guidance-hero,.guidance-diagnostic-head,
+.global-quick-card,.global-quick-card.accent,.global-hero,.sidebar .server-head,
+.experience-command,.personalization-preview,.theme-palette-card,.theme-preset-card{
+  background:var(--panel)!important;box-shadow:none!important;backdrop-filter:none!important;
+  -webkit-backdrop-filter:none!important;border-color:var(--line)!important}
+.topbar,.sidebar,.server-rail{backdrop-filter:none!important;-webkit-backdrop-filter:none!important;box-shadow:none!important}
+.brand-mark,.cc-server-icon,.global-avatar,.guidance-progress i{background:var(--blue-bg)!important;box-shadow:none!important}
+.btn.primary{background:var(--blue)!important;border-color:var(--blue)!important;color:#141311!important;box-shadow:none!important}
+*{text-shadow:none!important}
+[class*="glow"],[class*="aura"]{box-shadow:none!important}
+#pageTitle,.page-title,.card-head h2,.global-hero h1,.guidance-hero h1{font-family:var(--sx-serif);font-weight:600;letter-spacing:-.01em}
+.workspace-head{background:transparent!important;box-shadow:none!important;border:0!important;padding-left:0!important;padding-right:0!important}
+.workspace-head::before,.workspace-head::after{display:none!important}
+.workspace-head h1{font-family:var(--sx-serif);font-size:30px;font-weight:600}
+.sx-workspace-kicker{text-transform:none!important;letter-spacing:0!important;font-size:13px!important;color:var(--muted)!important;background:none!important}

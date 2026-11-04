@@ -24,49 +24,28 @@ def _html() -> str:
     return public_home_v3.render(SimpleNamespace(app={"bot": object()}), _Dashboard)
 
 
-def test_v3_has_premium_product_structure():
+def test_landing_editoriale_structure():
+    # 04/11/2026 : refonte « éditoriale » — le vrai produit plutôt qu'une maquette.
     page = _html()
     for marker in (
-        'id="fx"',
-        'class="product-shell"',
-        'class="hero-proof"',
-        'class="wrap status-strip reveal"',
-        'class="rail-track"',
-        'class="bento stagger"',
-        'id="security"',
-        'class="tour reveal"',
-        'id="automation"',
-        'id="ai"',
-        'id="faq"',
-        'class="wrap final reveal"',
+        'class="wrap hero"', 'class="chat"', 'id="commandes"', 'class="commands"',
+        'id="securite"', 'class="facts"', 'id="dashboard"', 'id="faq"', 'class="final"',
     ):
         assert marker in page
+    for exemple in ("/moderation ban", "+music saif", "/role menu", "/security strict", "Bannissement effectué"):
+        assert exemple in page
 
-
-def test_v3_has_interactive_motion_and_reduced_motion_fallback():
+def test_landing_sans_tics_de_page_generee():
+    """« On voit direct que c'est de l'IA » : plus de halos, dégradés, cubes,
+    animations au défilement ni slogan en dégradé."""
     page = _html()
-    for marker in (
-        "@keyframes floatPanel",
-        "@keyframes radar",
-        "@keyframes marquee",
-        "@keyframes draw",
-        "@keyframes paneIn",
-        "IntersectionObserver",
-        'addEventListener("pointermove"',
-        'requestAnimationFrame(tick)',
-        'data-pane="pane-security"',
-        'data-pane="pane-tickets"',
-        'data-pane="pane-economy"',
-        'id="progress"',
-        'id="pointerRing"',
-        # Deux dollars, et sans le commentaire qui dupliquait cette ligne dans
-        # le source : le test passait grâce à lui, pas grâce au code.
-        'const interactive=$$(".card,.step,.security-box,.tour-screen,.ai-card,.terminal,.status-strip,.workflow-demo")',
-        'perspective(1100px) rotateX(',
+    for tic in (
+        "radial-gradient", "linear-gradient", "@keyframes", "backdrop-filter",
+        "IntersectionObserver", "requestAnimationFrame", "perspective(", "Moins de chaos",
+        "Haute disponibilité", 'class="reveal', "pointermove",
     ):
-        assert marker in page
+        assert tic not in page, tic
     assert "@media(prefers-reduced-motion:reduce)" in page
-
 
 def test_v3_uses_only_real_public_metrics():
     page = _html()
@@ -102,22 +81,16 @@ def test_dashboard_entry_has_no_horizontal_layout_shift():
     assert "translateX(-12px)" not in polish
 
 
-def test_v3_hero_headline_stays_compact_and_balanced():
+def test_titre_simple_et_lisible():
     page = _html()
-    assert 'class="hero-line">Moins de chaos.</span>' in page
-    assert 'class="accent">Plus de contrôle.</span>' in page
-    assert "font-size:clamp(48px,5.2vw,76px)" in page
+    assert "<h1>Le bot qui garde votre serveur Discord en ordre.</h1>" in page
+    assert "font-size:clamp(40px,5vw,64px)" in page
     assert "@media(max-width:1180px)" in page
-    assert "font-size:clamp(38px,10.5vw,52px)" in page
 
-
-def test_v3_hero_has_richer_capability_cards():
+def test_securite_expliquee_concretement():
     page = _html()
-    assert 'class="hero-proof"' in page
-    assert "Sécurité centralisée" in page
-    assert "Haute disponibilité" in page
-    assert "Configuration directe" in page
-
+    for fait in ("Anti-spam", "Anti-nuke", "Logs lisibles", "noms, catégories, positions et permissions"):
+        assert fait in page
 
 def test_v3_home_never_boots_private_guild_data():
     page = _html()
@@ -132,11 +105,10 @@ def test_v3_is_mobile_and_accessibility_aware():
     assert "@media(max-width:430px)" in page
     assert "@media(max-width:380px)" in page
     assert "@media(pointer:coarse)" in page
-    assert 'e.pointerType==="touch"' in page
     assert 'class="skip" href="#main"' in page
     assert 'aria-label="Navigation principale"' in page
     assert 'aria-expanded="false"' in page
-
+    assert 'setAttribute("aria-expanded"' in page
 
 def test_v3_javascript_syntax_is_valid(tmp_path: Path):
     node = subprocess.run(["node", "--version"], capture_output=True, text=True)
