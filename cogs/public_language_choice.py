@@ -37,13 +37,13 @@ def install(bot: commands.Bot) -> None:
         fr = discord.ui.Button(
             label="Francais",
             emoji="🇫🇷",
-            style=discord.ButtonStyle.primary,
+            style=discord.ButtonStyle.secondary,
             custom_id="sentrix:language:fr",
         )
         en = discord.ui.Button(
             label="English",
             emoji="🇬🇧",
-            style=discord.ButtonStyle.secondary,
+            style=discord.ButtonStyle.primary,
             custom_id="sentrix:language:en",
         )
 

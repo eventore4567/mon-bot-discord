@@ -441,6 +441,67 @@ class SentriXHelpV79(discord.ui.LayoutView):
             )
         else:
             self._build_home()
+        from . import language_runtime as lang
+        guild_id = getattr(getattr(self.member, "guild", None), "id", None)
+        if lang.cached_language(self.bot, guild_id) == lang.LANG_EN:
+            replacements = (
+                ("Centre d'aide SentriX", "SentriX Help Center"),
+                ("Toutes les commandes", "All commands"),
+                ("Voir les commandes", "View commands"),
+                ("Précédent", "Previous"), ("Suivant", "Next"),
+                ("Rechercher", "Search"), ("Détails", "Details"),
+                ("Accueil", "Home"), ("Retour", "Back"),
+                ("Fermer", "Close"), ("commande(s)", "commands"),
+                ("commandes uniques", "unique commands"),
+                ("Catégories : page", "Categories: page"),
+                ("Le catalogue affiche maintenant **toutes les commandes enregistrées** : commandes `+`, commandes `/`, sous-commandes slash et commandes administratives.", "Browse all registered prefix and slash commands, including subcommands and administration tools."),
+                ("Catalogue complet des commandes `+` et `/` enregistrées dans SentriX.", "Complete catalog of SentriX prefix and slash commands."),
+                ("Aucune syntaxe disponible.", "No syntax available."),
+                ("Relancez `+help` ou `/help` pour rouvrir le centre d'aide.", "Use `+help` or `/help` to reopen Help."),
+                ("commandes administratives", "administration commands"),
+                ("uniquement en /", "slash only"),
+                ("en +", "with +"),
+                ("en /", "with /"),
+                ("Modération", "Moderation"),
+                ("Sécurité", "Security"),
+                ("Bienvenue & rôles", "Welcome & roles"),
+                ("Économie & niveaux", "Economy & levels"),
+                ("Intelligence artificielle", "Artificial intelligence"),
+                ("Jeux & événements", "Games & events"),
+                ("Musique", "Music"),
+                ("Utilitaires", "Utilities"),
+                ("Ban, kick, mute, warn, clear et gestion des sanctions.", "Bans, kicks, timeouts and warnings."),
+                ("Anti-spam, anti-raid, vérification et protections du serveur.", "AutoMod, anti-raid and server protection."),
+                ("Support, panels, tickets et outils liés aux demandes.", "Support panels and ticket tools."),
+                ("Bienvenue, rôles, autorôles et outils de communauté.", "Welcome, roles and community tools."),
+                ("Journaux du serveur, historique et suivi des actions.", "Server logs, history and activity."),
+                ("Argent, banque, boutique, XP, niveaux et progression.", "Currency, bank, shop, XP and levels."),
+                ("Assistant SentriX, recherche, mémoire et génération d'images.", "SentriX AI, search, memory and images."),
+                ("YouTube, TikTok, Twitch et rôles de notification.", "YouTube, TikTok, Twitch and notification roles."),
+                ("Mini-jeux, giveaways, activités et divertissement.", "Mini-games, giveaways and events."),
+                ("Lecture et commandes musicales disponibles sur SentriX.", "Music playback and controls in SentriX."),
+                ("Informations, statistiques, serveur, membre et outils pratiques.", "Information, statistics and server utilities."),
+                ("Configuration et outils avancés pour gérer le serveur.", "Server setup and advanced administration."),
+                ("Permission nécessaire", "Required permission"),
+                ("Permission :", "Access:"), ("Utilisation", "Usage"),
+                ("Résultats pour", "Results for"),
+                ("Aucun résultat", "No results"),
+                ("Aucune commande ne correspond à cette recherche.", "No commands match your search."),
+            )
+            def english(value):
+                result = str(value or "")
+                for french, translated in replacements:
+                    result = result.replace(french, translated)
+                return result
+            def localize(item):
+                if isinstance(item, discord.ui.TextDisplay):
+                    item.content = english(item.content)
+                elif isinstance(item, discord.ui.Button) and item.label:
+                    item.label = english(item.label)
+                for child in getattr(item, "children", ()):
+                    localize(child)
+            for item in self.children:
+                localize(item)
 
     def _build_home(self) -> None:
         entries = _catalog(self.bot)
