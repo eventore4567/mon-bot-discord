@@ -257,6 +257,11 @@ class PgConnection:
         self._savepoints = 0
         # last_insert_rowid() de SQLite : le dernier rowid inséré sur cette connexion.
         self._last_rowid: int | None = None
+        # « CREATE … IF NOT EXISTS » déjà réussis (texte normalisé). Les cogs les
+        # rejouent à chaque commande : sans ce cache, chacun prenait le verrou
+        # d'écriture puis relisait le catalogue Postgres (jusqu'à 1,2 s mesuré
+        # en production, /setup à 3-5 s). Vidé par tout autre DDL.
+        self._ddl_idempotents: set[str] = set()
 
     # ------------------------------------------------------------ ouverture
 
@@ -371,6 +376,9 @@ class PgConnection:
             return PgCursor()
         if kind == "select" and self._tx is None:
             return await self._run(self._pool, translated, params, pooled=True)
+        cle_ddl = _cle_ddl_idempotent(translated.sql) if kind == "ddl" else None
+        if cle_ddl is not None and self._tx is None and cle_ddl in self._ddl_idempotents:
+            return PgCursor()
         async with self._lock:
             opened_here = False
             if kind == "dml" and self._tx is None:
@@ -398,6 +406,11 @@ class PgConnection:
             if kind == "ddl":
                 # Sous le verrou : la connexion principale ne sert qu'à une opération à la fois.
                 await self._refresh_after_ddl(translated.sql)
+                if cle_ddl is None:
+                    # DROP, ALTER, RENAME… : une table créée plus tôt peut avoir changé.
+                    self._ddl_idempotents.clear()
+                elif self._tx is None:
+                    self._ddl_idempotents.add(cle_ddl)
         return cursor
 
     async def execute_and_commit(self, sql: str, parameters: Iterable[Any] | None = None) -> PgCursor:
@@ -572,6 +585,16 @@ class PgConnection:
 
 
 _LAST_ROWID = re.compile(r"\blast_insert_rowid\s*\(\s*\)", re.I)
+_DDL_IDEMPOTENT = re.compile(
+    r"^\s*CREATE\s+(?:UNIQUE\s+)?(?:TABLE|INDEX)\s+IF\s+NOT\s+EXISTS\b", re.I
+)
+
+
+def _cle_ddl_idempotent(sql: str) -> str | None:
+    """Texte normalisé d'un « CREATE TABLE/INDEX IF NOT EXISTS », sinon None."""
+    if not _DDL_IDEMPOTENT.match(sql or ""):
+        return None
+    return " ".join(sql.split())
 
 
 def _rowcount(status: str) -> int:
