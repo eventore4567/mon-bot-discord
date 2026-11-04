@@ -58,3 +58,44 @@ def test_official_setup_opens_both_panels_not_a_duplicate_cog():
     source = Path("cogs/setup_control_center.py").read_text(encoding="utf-8")
     assert "AutoModCenterView(self.bot, self.guild, self.author_id).open(interaction)" in source
     assert "AutoModLogsView(self.bot, self.guild, self.author_id).open(interaction)" in source
+
+def test_automod_home_and_nuke_panel_render_compactly():
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, Mock
+
+    guild = SimpleNamespace(
+        id=10,
+        owner_id=100,
+        me=SimpleNamespace(guild_permissions=discord.Permissions.all()),
+    )
+    bot = Mock()
+    bot.db.get_automod = AsyncMock(return_value={
+        "antiraid": 1,
+        "antinuke": 1,
+        "antilink": 1,
+    })
+    bot.db.fetchone = AsyncMock(return_value=None)
+
+    async def render_both():
+        view = AutoModCenterView(bot, guild, 100)
+        await view.render()
+        assert len(view.children) == 1
+        assert isinstance(view.children[0], discord.ui.Container)
+        assert len(view.children[0].children) <= 10
+
+        view.group = "server"
+        await view.render()
+        assert len(view.children) == 1
+        assert isinstance(view.children[0], discord.ui.Container)
+        assert len(view.children[0].children) <= 10
+
+    asyncio.run(render_both())
+
+
+def test_antinuke_is_owner_only_with_two_step_disable():
+    source = Path("cogs/automod_center_v118.py").read_text(encoding="utf-8")
+    assert "interaction.user.id != int(self.guild.owner_id)" in source
+    assert "Confirm disable" in source
+    assert "self._confirm_nuke_off = True" in source
+    assert "if self.avance" in Path("cogs/setup_control_center.py").read_text(encoding="utf-8")
