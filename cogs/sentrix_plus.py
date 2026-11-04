@@ -18,6 +18,10 @@ from utils import sentrix_panels as panels
 from discord.ext import commands, tasks
 
 logger = logging.getLogger("bot.sentrix-plus")
+# Intervalle minimal entre deux republications d'un même sticky : une rafale de
+# messages ne provoque qu'une republication par intervalle, et un salon toujours
+# actif garde son sticky visible (attendre le silence ne le republierait jamais).
+STICKY_REPOST_DELAY_SECONDS = 3.0
 
 STAR_EMOJI = "⭐"
 VOICE_CATEGORY_NAME = "SENTRIX — VOCAUX"
@@ -97,6 +101,8 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
         self._no_sticky: dict[int, bool] = {}
         self.bot = bot
         self._sticky_locks: dict[int, asyncio.Lock] = {}
+        # Une seule republication du sticky en attente par salon.
+        self._sticky_pending: dict[int, asyncio.Task] = {}
 
     async def cog_load(self) -> None:
         await self._ensure_tables()
@@ -111,6 +117,9 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
     async def cog_unload(self) -> None:
         if self.scheduled_worker.is_running():
             self.scheduled_worker.cancel()
+        for tache in list(self._sticky_pending.values()):
+            tache.cancel()
+        self._sticky_pending.clear()
 
     async def _ensure_tables(self) -> None:
         statements = [
@@ -866,21 +875,51 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
                 )
                 return
 
-            if row["message_id"]:
+        # 04/11/2026 : une rafale de messages (spam, conversation rapide) relisait,
+        # supprimait et republiait le sticky À CHAQUE message — plus de 10 000
+        # réponses 429 de Discord en production. La republication est maintenant
+        # limitée : au plus une toutes les STICKY_REPOST_DELAY_SECONDS par salon.
+        en_attente = self._sticky_pending.get(channel_id)
+        if en_attente is not None and not en_attente.done():
+            return
+        self._sticky_pending[channel_id] = asyncio.create_task(
+            self._sticky_repost_later(message.channel)
+        )
+
+    async def _sticky_repost_later(self, channel) -> None:
+        channel_id = int(channel.id)
+        try:
+            await asyncio.sleep(STICKY_REPOST_DELAY_SECONDS)
+            lock = self._sticky_locks.setdefault(channel_id, asyncio.Lock())
+            async with lock:
+                row = await self.bot.db.fetchone(
+                    "SELECT content,message_id FROM sentrix_sticky WHERE channel_id=?",
+                    (channel_id,),
+                )
+                if not row:
+                    return
+                if row["message_id"]:
+                    try:
+                        # Suppression directe : pas de lecture préalable du message.
+                        await channel.get_partial_message(int(row["message_id"])).delete()
+                    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                        pass
                 try:
-                    previous = await message.channel.fetch_message(int(row["message_id"]))
-                    await previous.delete()
-                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                    pass
-            try:
-                mode, displayed = self._sticky_decode(row["content"])
-                sticky = await self._sticky_post(message.channel, displayed, mode)
-            except (discord.Forbidden, discord.HTTPException):
-                return
-            await self.bot.db.execute(
-                "UPDATE sentrix_sticky SET message_id=?,counter=0 WHERE channel_id=?",
-                (sticky.id, message.channel.id),
-            )
+                    mode, displayed = self._sticky_decode(row["content"])
+                    sticky = await self._sticky_post(channel, displayed, mode)
+                except (discord.Forbidden, discord.HTTPException, ValueError):
+                    return
+                await self.bot.db.execute(
+                    "UPDATE sentrix_sticky SET message_id=?,counter=0 WHERE channel_id=?",
+                    (sticky.id, channel_id),
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Republication du sticky impossible channel=%s", channel_id)
+        finally:
+            if self._sticky_pending.get(channel_id) is asyncio.current_task():
+                self._sticky_pending.pop(channel_id, None)
 
     # ------------------------------------------------------------------
     # SCHEDULED ANNOUNCEMENTS

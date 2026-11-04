@@ -67,11 +67,16 @@ async def main() -> int:
     row = await db.fetchone("SELECT every_messages FROM sentrix_sticky WHERE channel_id=?", (h.CID,))
     check(row is not None and int(row["every_messages"]) == 3, "/sticky frequency enregistre la fréquence")
     bot.get_cog("SentriXPlus")._no_sticky.clear()
+    from cogs import sentrix_plus
+    sentrix_plus.STICKY_REPOST_DELAY_SECONDS = 0.2
     since = len(h.CALLS)
     for index in range(3):
         bot.dispatch("message", h.build_message(bot, guild, f"bavardage {index}", author_id=h.TARGET_ID,
                                                 author_roles=(h.MEMBER_ROLE_ID,)))
         await h.settle(idle=0.2, maximum=1)
+    # La republication attend un court silence (une seule par rafale).
+    await asyncio.sleep(sentrix_plus.STICKY_REPOST_DELAY_SECONDS + 0.1)
+    await h.settle(idle=0.2, maximum=1)
     reposted = any("Lisez le règlement" in str((js or {}).get("content")) for m, p, js in h.CALLS[since:]
                    if m == "POST" and p == f"/channels/{h.CID}/messages")
     check(reposted, "le sticky est republié après 3 messages")
