@@ -409,6 +409,9 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
         "antinuke", "antinuke-whitelist-add", "antinuke-whitelist-remove",
         "antinuke-whitelist-list", "lockdown-server", "unlock-server",
         "automod-status", "automod-native-sync", "security-check", "automod-escalation",
+        # Lecture pour le staff sécurité ; activer/couper reste réservé au
+        # propriétaire du serveur (vérifié dans la commande, 04/11/2026).
+        "automod-strict",
         "automod-exempt-role-add", "automod-exempt-role-remove",
         "automod-history", "security-level", "blacklist-add",
         "blacklist-remove", "blacklist-list",

@@ -644,6 +644,52 @@ REMINDER_BATCH = 50
 REMINDER_STALE_SECONDS = 24 * 3600
 
 
+def _destinataires_bugs() -> list[int]:
+    """Propriétaires de SentriX : créateur principal puis OWNER_IDS, sans doublon."""
+    import config
+    from database.db import PRIMARY_CREATOR_ID
+
+    ids: list[int] = []
+    for valeur in (PRIMARY_CREATOR_ID, *getattr(config, "OWNER_IDS", ())):
+        try:
+            valeur = int(valeur)
+        except (TypeError, ValueError):
+            continue
+        if valeur and valeur not in ids:
+            ids.append(valeur)
+    return ids
+
+
+async def _envoyer_bug_aux_proprietaires(bot: commands.Bot, ctx: commands.Context, texte: str) -> int:
+    """Envoie le bug signalé en message privé à chaque propriétaire. Ne lève jamais."""
+    guild = ctx.guild
+    salon = getattr(ctx, "channel", None)
+    lien = getattr(getattr(ctx, "message", None), "jump_url", None)
+    lignes = [
+        "## 🐛 Nouveau bug signalé",
+        f"> {discord.utils.escape_mentions(str(texte))[:1500]}".replace("\n", "\n> "),
+        "",
+        f"**Par :** {ctx.author} (`{ctx.author.id}`)",
+        f"**Serveur :** {guild.name} (`{guild.id}`)" if guild else "**Serveur :** message privé",
+    ]
+    if salon is not None and guild is not None:
+        lignes.append(f"**Salon :** #{getattr(salon, 'name', '?')} (`{salon.id}`)")
+    if lien:
+        lignes.append(f"[Voir le message]({lien})")
+    contenu = "\n".join(lignes)[:1990]
+    envoyes = 0
+    for user_id in _destinataires_bugs():
+        try:
+            user = bot.get_user(user_id) or await bot.fetch_user(user_id)
+            await user.send(contenu, allowed_mentions=discord.AllowedMentions.none())
+            envoyes += 1
+        except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+            logger.warning("Bug signalé : MP impossible au propriétaire %s.", user_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("Bug signalé : envoi au propriétaire %s échoué.", user_id)
+    return envoyes
+
+
 class Utility(commands.Cog, name="Utility"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -1978,6 +2024,8 @@ class Utility(commands.Cog, name="Utility"):
             "INSERT INTO bug_reports (guild_id, user_id, content, created_at) VALUES (?, ?, ?, ?)",
             (ctx.guild.id if ctx.guild else None, ctx.author.id, texte, now()),
         )
+        # 04/11/2026 : le propriétaire de SentriX reçoit chaque bug en message privé.
+        asyncio.create_task(_envoyer_bug_aux_proprietaires(self.bot, ctx, texte), name="sentrix-bug-dm")
         await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Signalement enregistré', description='🐛 Merci, votre signalement a été enregistré.', kind='success')))
 
     @commands.hybrid_command(name="afk", description="Se mettre en mode AFK (absent).")

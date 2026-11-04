@@ -16,10 +16,12 @@ from datetime import datetime, timezone
 import discord
 from discord.ext import commands
 
+import config
+
 
 logger = logging.getLogger("bot.release-announcer")
 
-TARGET_INVITE = "https://discord.gg/5P5Bqjqu5t"
+TARGET_INVITE = config.OFFICIAL_SERVER_URL
 TARGET_CHANNEL_NAME = "📢・annonces-sentrix"
 TARGET_BRANCH = "main"
 TARGET_REPOSITORY = "mon-bot-discord"

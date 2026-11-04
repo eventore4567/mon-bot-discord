@@ -107,7 +107,8 @@ async def test_idle_player_can_open_search_without_already_connected_bot():
     interaction = _interaction()
     await _button(panel, "add").callback(interaction)
     interaction.response.send_modal.assert_awaited_once()
-    assert _button(panel, "pause").desactive
+    # 04/11/2026 : au repos, plus de boutons grisés — seulement « Ajouter un titre ».
+    assert [b.libelle for b in panel.boutons_source] == ["Ajouter un titre"]
     assert not _button(panel, "add").desactive
 
 
@@ -244,10 +245,18 @@ async def test_member_players_are_tracked_separately():
     queue = music.get_queue(1)
     first = SimpleNamespace(id=11, channel=SimpleNamespace(id=10), edit=AsyncMock())
     second = SimpleNamespace(id=12, channel=SimpleNamespace(id=10), edit=AsyncMock())
+    first.delete = AsyncMock()
     with patch.object(panels, 'envoyer', AsyncMock(side_effect=[first, second])):
         await music._show_player(object(), queue)
         await music._show_player(object(), queue)
-    assert len(music._player_messages) == 2
+    # 04/11/2026 (« il a spam ») : un seul lecteur par salon, le nouveau remplace l'ancien.
+    assert list(music._player_messages) == [(1, 12)]
+    first.delete.assert_awaited_once()
+    third = SimpleNamespace(id=13, channel=SimpleNamespace(id=99), edit=AsyncMock())
+    with patch.object(panels, 'envoyer', AsyncMock(return_value=third)):
+        await music._show_player(object(), queue)
+    # Un autre salon garde son propre lecteur.
+    assert sorted(music._player_messages) == [(1, 12), (1, 13)]
 
 
 @pytest.mark.asyncio

@@ -372,7 +372,7 @@ CATEGORY_COMMANDS = {
         "antiemoji", "antiraid", "antibot", "antiaccount", "antiscam",
         "antinuke", "antinuke-whitelist-add", "antinuke-whitelist-remove",
         "antinuke-whitelist-list", "lockdown-server", "unlock-server",
-        "automod-status", "security-check", "automod-escalation",
+        "automod-status", "security-check", "automod-escalation", "automod-strict",
         "automod-exempt-role-add", "automod-exempt-role-remove",
         "automod-history", "security-level", "blacklist-add",
         "blacklist-remove", "blacklist-list", "blacklist-user",

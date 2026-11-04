@@ -24,7 +24,8 @@ def test_help_exposes_discreet_growth_links():
     assert '"Ajouter SentriX"' in HELP_SOURCE
     # Plus de lien publicitaire vers le dashboard dans l'aide (Jayden, 22/10/2026).
     assert '"Dashboard"' not in HELP_SOURCE
-    assert '"Serveur support"' in HELP_SOURCE
+    # 04/11/2026 : le bouton s'appelle « Serveur officiel » (lien config.OFFICIAL_SERVER_URL).
+    assert '"Serveur officiel"' in HELP_SOURCE
     assert "_add_growth_links(self, bot)" in HELP_SOURCE
     assert "discord.ButtonStyle.link" in HELP_SOURCE
     assert "row=3" in HELP_SOURCE
@@ -61,8 +62,12 @@ def test_dashboard_has_production_config_fallback():
 
 
 def test_support_button_requires_a_configured_url():
-    assert '"SENTRIX_SUPPORT_URL"' in HELP_SOURCE
-    assert '"SUPPORT_SERVER_URL"' in HELP_SOURCE
+    # 04/11/2026 : les variables d'environnement sont lues à un seul endroit,
+    # config.official_server_url(), avec repli sur le lien officiel.
+    config_source = (ROOT / "config.py").read_text(encoding="utf-8")
+    assert '"SENTRIX_SUPPORT_URL"' in config_source
+    assert '"SUPPORT_SERVER_URL"' in config_source
+    assert "config.official_server_url()" in HELP_SOURCE
     # Les liens ne sont créés que lorsqu'une URL valide a réellement été résolue.
     assert "if url:" in HELP_SOURCE
     assert "view.add_item" in HELP_SOURCE

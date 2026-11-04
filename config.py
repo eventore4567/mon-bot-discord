@@ -39,6 +39,24 @@ WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")         # /weather (sinon fallbac
 # fonctionne dès l'installation, juste moins précis pour le matching.
 SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
 SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
+# Serveur officiel SentriX (04/11/2026) : lien unique utilisé par l'aide, l'arrivée
+# sur un serveur, le serveur officiel et les annonces de mise à jour.
+OFFICIAL_SERVER_URL = "https://discord.gg/TZwhdmJWf"
+_INVITATIONS_RETIREES = frozenset({"https://discord.gg/5P5Bqjqu5t"})
+
+
+def official_server_url() -> str:
+    """Lien du serveur officiel ; une variable d'environnement peut le remplacer,
+    sauf si elle pointe encore vers une ancienne invitation retirée."""
+    for nom in ("SENTRIX_SUPPORT_URL", "SUPPORT_SERVER_URL"):
+        valeur = (os.getenv(nom) or "").strip().rstrip("/")
+        if valeur.startswith("https://") and valeur not in _INVITATIONS_RETIREES:
+            return valeur
+    return OFFICIAL_SERVER_URL
+
+
+# Recherche musique (utils/music/catalog.py) : YouTube Data API v3, titres approximatifs.
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 
 # Modèles API OpenAI actuels. Les noms internes Luna/Terra/Sol restent gérés dans
 # utils/ai_service.py. Railway peut toujours fournir un override explicite si nécessaire.

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 from aiohttp.test_utils import make_mocked_request
@@ -53,4 +54,11 @@ def test_dockerfile_uses_static_ffmpeg_without_apt_disk_exhaustion():
     assert "mwader/static-ffmpeg:8.1.2" in dockerfile
     assert "COPY --from=ffmpeg_static /ffmpeg /usr/local/bin/ffmpeg" in dockerfile
     assert "COPY --from=ffmpeg_static /ffprobe /usr/local/bin/ffprobe" in dockerfile
-    assert "RUN apt-get" not in dockerfile
+    # ffmpeg ne repasse jamais par apt (>200 paquets, disque Railway saturé). Seule
+    # exception, depuis le 04/11/2026 : libopus0, un seul petit paquet sans
+    # recommandations, indispensable à la voix (discord.opus.OpusNotLoaded sans lui).
+    instructions = "\n".join(l for l in dockerfile.splitlines() if not l.lstrip().startswith("#"))
+    installs = re.findall(r"apt-get install[^\n]*", instructions)
+    assert installs == ["apt-get install -y --no-install-recommends libopus0 \\"], installs
+    assert "ffmpeg" not in " ".join(installs)
+    assert "rm -rf /var/lib/apt/lists/*" in dockerfile

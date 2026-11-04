@@ -9,6 +9,12 @@ FROM python:3.11-slim
 COPY --from=deno /deno /usr/local/bin/deno
 COPY --from=ffmpeg_static /ffmpeg /usr/local/bin/ffmpeg
 COPY --from=ffmpeg_static /ffprobe /usr/local/bin/ffprobe
+# libopus : discord.py encode l'audio en Opus avec cette bibliothèque. Sans elle,
+# toute lecture échoue (discord.opus.OpusNotLoaded, vu en production le 04/11/2026).
+# Elle arrivait avec l'ancien `apt-get install ffmpeg` ; un seul petit paquet ici.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libopus0 \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 

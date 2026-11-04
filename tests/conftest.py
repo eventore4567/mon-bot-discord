@@ -15,3 +15,5 @@ os.environ.setdefault("SENTRIX_TRADUCTION_AUTO", "0")
 # Bande en tête des cartes : coupée en production (03/11/2026), mais la suite
 # vérifie toujours sa mécanique (image et pièce jointe livrées ensemble).
 os.environ.setdefault("SENTRIX_BANDEAUX", "1")
+# Recherche musique : pas d'appel réseau aux API de catalogue pendant les tests.
+os.environ.setdefault("SENTRIX_MUSIC_CATALOG", "0")

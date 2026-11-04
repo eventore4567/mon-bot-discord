@@ -17,8 +17,8 @@ from utils import sentrix_panels as panels
 logger = logging.getLogger("bot.guild-arrival")
 
 WELCOME_COLOUR = 0x6C5CE7
-OFFICIAL_SUPPORT_URL = "https://discord.gg/5P5Bqjqu5t"
-SUPPORT_URL = (os.getenv("SUPPORT_SERVER_URL") or OFFICIAL_SUPPORT_URL).strip()
+OFFICIAL_SUPPORT_URL = config.OFFICIAL_SERVER_URL
+SUPPORT_URL = config.official_server_url()
 PUBLIC_HOME_URL = (
     os.getenv("SENTRIX_PUBLIC_HOME_URL")
     or "https://sentrixbot.up.railway.app/home"
