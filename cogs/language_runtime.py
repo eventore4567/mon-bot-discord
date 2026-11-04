@@ -912,8 +912,8 @@ class LanguageChoiceView(discord.ui.View):
         super().__init__(timeout=None)
         self.bot = bot
 
-        fr = discord.ui.Button(label="Francais", emoji="🇫🇷", style=discord.ButtonStyle.primary, custom_id="sentrix:language:fr")
-        en = discord.ui.Button(label="English", emoji="🇬🇧", style=discord.ButtonStyle.secondary, custom_id="sentrix:language:en")
+        fr = discord.ui.Button(label="Francais", emoji="🇫🇷", style=discord.ButtonStyle.secondary, custom_id="sentrix:language:fr")
+        en = discord.ui.Button(label="English", emoji="🇬🇧", style=discord.ButtonStyle.primary, custom_id="sentrix:language:en")
 
         async def choose(interaction: discord.Interaction, language: str):
             if interaction.guild is None:
@@ -925,7 +925,7 @@ class LanguageChoiceView(discord.ui.View):
                 )
             await set_language(self.bot, interaction.guild.id, language)
             if language == LANG_EN:
-                e = embeds.success("English is now the server language. Command names in `+help` and the setup interface are displayed in English.", title="🇬🇧 Language selected")
+                e = embeds.success("English selected. Help and setup use English; individual command replies depend on their translations.", title="🇬🇧 Language selected")
             else:
                 e = embeds.success("Le francais est maintenant la langue du serveur. Les noms dans `+help` et l'interface de configuration sont affiches en francais.", title="🇫🇷 Langue selectionnee")
             await panels.editer(interaction.response, panels.depuis_embed(e))
