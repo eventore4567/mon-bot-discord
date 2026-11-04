@@ -271,6 +271,22 @@ def noms_disponibles() -> list[str]:
 # Résolution — ce que le reste du bot utilise
 # ---------------------------------------------------------------------------
 
+#: 03/11/2026 (Jayden : « rends tous les emojis animés et colorés ») : chaque icône
+#: a une version colorée et animée ``sentrix_c_<nom>`` (tools/generer_emojis_couleur.py),
+#: téléversée à côté de l'originale. L'originale garde son nom, donc les anciens
+#: messages gardent leurs icônes ; tout nouvel affichage prend la version animée.
+PREFIXE_ANIME = "sentrix_c_"
+
+
+def _resolu(nom: str) -> str | None:
+    """Marquage connu pour ``nom`` : la version animée d'abord, sinon l'originale."""
+    if nom.startswith(PREFIXE) and not nom.startswith(PREFIXE_ANIME):
+        anime = _RESOLUS.get((PREFIXE_ANIME + nom[len(PREFIXE):])[:32])
+        if anime:
+            return anime
+    return _RESOLUS.get(nom)
+
+
 def emoji(nom: str) -> str:
     """Marquage de l'icône SentriX, ou un repli sobre.
 
@@ -279,7 +295,7 @@ def emoji(nom: str) -> str:
     repli de ``REPLIS`` — ou une chaîne vide, ce qui ne casse aucun affichage.
     """
     nom = _normaliser(nom)
-    resolu = _RESOLUS.get(nom)
+    resolu = _resolu(nom)
     if resolu:
         return resolu
     return REPLIS.get(nom, "")
@@ -293,7 +309,7 @@ def partiel(nom: str) -> discord.PartialEmoji | None:
     emoji reste parfaitement valide — c'est le repli correct ici.
     """
     nom = _normaliser(nom)
-    resolu = _RESOLUS.get(nom)
+    resolu = _resolu(nom)
     if not resolu:
         return None
     try:
@@ -342,7 +358,7 @@ def traduire(texte: str) -> str:
     for unicode_, nom in sorted(EQUIVALENCES.items(), key=lambda kv: -len(kv[0])):
         if unicode_ not in valeur:
             continue
-        icone = _RESOLUS.get(_normaliser(nom))
+        icone = _resolu(_normaliser(nom))
         if icone:
             valeur = valeur.replace(unicode_, icone)
     return valeur
@@ -447,6 +463,13 @@ async def synchroniser(bot, *, forcer: bool = False) -> dict[str, int]:
     except Exception:
         logger.warning("Pack complémentaire indisponible, les emojis existants restent actifs.", exc_info=True)
     try:
+        from tools.generer_emojis_couleur import generer as generer_couleur
+
+        resultat = await asyncio.to_thread(generer_couleur, DOSSIER)
+        logger.info("Icônes colorées animées : %s nouvelle(s).", resultat["crees"])
+    except Exception:
+        logger.warning("Icônes animées indisponibles, les icônes fixes restent actives.", exc_info=True)
+    try:
         existants = await bot.fetch_application_emojis()
     except Exception:
         logger.warning(
@@ -533,6 +556,7 @@ __all__ = [
     "ANIMES_AUTORISES",
     "DOSSIER",
     "PREFIXE",
+    "PREFIXE_ANIME",
     "REPLIS",
     "appliquer_a_la_vue",
     "amorcer",

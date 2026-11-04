@@ -567,6 +567,57 @@ SPAM_NOTICE_MAX_MENTIONS = 10
 SPAM_ESCALATION_RESET_SECONDS = 86400
 SPAM_MUTE_DURATIONS_SECONDS = (600, 1800, 3600, 10800, 21600, 43200, 86400)
 SPAM_TIMEOUT_SECONDS = SPAM_MUTE_DURATIONS_SECONDS[0]
+#: Palier de la première rafale : 1 = rappel, 2 = avertissement, 3 = mute 10 min.
+SPAM_PREMIER_PALIER = 3
+#: Spam soutenu : messages ÷ fenêtre longue (2× le seuil de rafale en 20 s).
+SPAM_FENETRE_LONGUE = 20
+#: Majuscules : dès 5 lettres (« WWWWW », « # WWWWWW »), plus de 70 % en capitales.
+CAPS_LETTRES_MIN = 5
+CAPS_RATIO = 0.7
+#: Pings répétés sur plusieurs messages : même personne 3 fois, ou 6 mentions, en 60 s.
+PINGS_FENETRE = 60
+PINGS_MEME_CIBLE = 3
+PINGS_TOTAL = 6
+_JETONS_NON_TEXTE = re.compile(r"<a?:\w+:\d+>|<[@#][!&]?\d+>|<t:\d+(?::\w)?>|https?://\S+")
+
+
+def _instant_message(message) -> float:
+    """Heure d'ENVOI du message (Discord), pas celle où SentriX le traite.
+
+    04/11/2026 : un spammeur « qui lag », ou un bot ralenti, faisait arriver une
+    rafale étalée dans le temps : comptée à l'heure de traitement, elle ne
+    franchissait jamais « 5 messages en 6 s ». Une horloge aberrante (> 5 min
+    d'écart) retombe sur l'heure courante.
+    """
+    maintenant = time.time()
+    cree = getattr(message, "created_at", None)
+    try:
+        instant = cree.timestamp() if cree is not None else maintenant
+    except Exception:  # noqa: BLE001
+        return maintenant
+    if not isinstance(instant, (int, float)) or isinstance(instant, bool):
+        return maintenant
+    return float(instant) if abs(maintenant - instant) <= 300 else maintenant
+
+
+def _trop_de_majuscules(contenu: str) -> bool:
+    texte = _JETONS_NON_TEXTE.sub(" ", str(contenu or ""))
+    lettres = [c for c in texte if c.isalpha()]
+    if len(lettres) < CAPS_LETTRES_MIN:
+        return False
+    return sum(1 for c in lettres if c.isupper()) / len(lettres) > CAPS_RATIO
+#: 04/11/2026 — mode strict décidé par le PROPRIÉTAIRE du serveur : l'AutoMod
+#: s'applique aussi aux administrateurs (le propriétaire reste exempté).
+AUTOMOD_STRICT_SCHEMA = """
+CREATE TABLE IF NOT EXISTS sentrix_automod_strict (
+    guild_id INTEGER PRIMARY KEY,
+    admins INTEGER NOT NULL DEFAULT 0,
+    updated_by INTEGER,
+    updated_at INTEGER
+)
+"""
+_STRICT_TTL_SECONDES = 30.0
+
 SPAM_ESCALATION_SCHEMA = """
 CREATE TABLE IF NOT EXISTS sentrix_spam_escalation (
     guild_id INTEGER NOT NULL,
@@ -811,6 +862,14 @@ TOGGLE_FIELDS = [
     "security_vanity", "security_prune", "security_permissions", "join_gate", "risk_engine",
     "escalation",
 ]
+
+#: Allumées à l'arrivée sur un serveur qui n'a encore aucun filtre (04/11/2026).
+#: Pas l'anti-liens ni l'anti-bot : ils bloquent des usages légitimes tant que
+#: le serveur n'a pas choisi ses liens et ses bots autorisés.
+PROTECTIONS_DE_BASE = (
+    "antispam", "antimention", "anticaps", "antiinvite", "antiscam", "antiinsult",
+    "antiraid", "antinuke", "escalation",
+)
 
 # Protections qui inspectent un message et permettent le bypass par rôle
 # OU par membre individuel. Un salon strict reprend toujours la priorité
@@ -1792,8 +1851,29 @@ class AutoMod(commands.Cog, name="Automod"):
 
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild) -> None:
+        # 04/11/2026 : un serveur neuf n'avait AUCUN filtre actif (tout à 0 par
+        # défaut) — spam, pings et majuscules passaient sans rien. Protections de
+        # base allumées à l'arrivée, seulement si personne n'a encore rien réglé.
+        try:
+            await self.activer_protections_de_base(guild.id)
+        except Exception:  # noqa: BLE001 — l'arrivée du bot ne doit jamais échouer
+            logger.warning("Protections de base non activées guild=%s", guild.id, exc_info=True)
         # Serveur neuf : réconcilie toutes les protections natives utiles.
         await self._sync_native_suite(guild)
+
+    async def activer_protections_de_base(self, guild_id: int) -> bool:
+        """Allume PROTECTIONS_DE_BASE si aucun filtre n'est encore actif. Vrai si fait."""
+        conf = await self.bot.db.get_automod(guild_id)
+        deja = conf is not None and any(
+            int(conf[champ] or 0) for champ in TOGGLE_FIELDS if champ in conf.keys()
+        )
+        if deja:
+            return False
+        for champ in PROTECTIONS_DE_BASE:
+            await self.bot.db.set_automod(guild_id, champ, 1)
+        self.automod_cache.pop(guild_id, None)
+        logger.info("Protections de base activées pour le serveur %s.", guild_id)
+        return True
 
     async def log_action(
         self,
@@ -2048,7 +2128,7 @@ class AutoMod(commands.Cog, name="Automod"):
         # all-perms. Elle prime sur les salons stricts et les overrides, mais
         # ne désactive AUCUNE protection globale de sécurité du serveur.
         member = _as_member(message.author, message.guild)
-        if _is_discord_administrator(member):
+        if _is_discord_administrator(member) and not await self.admins_soumis(message.guild.id):
             return False
 
         policy = await self.get_security_filter_policy_cached(message.guild.id, canonical)
@@ -2110,7 +2190,7 @@ class AutoMod(commands.Cog, name="Automod"):
         """Détermine l'immunité AutoMod avec un override personnel explicite."""
         if not isinstance(member, discord.Member):
             return False
-        if _is_discord_administrator(member):
+        if _is_discord_administrator(member) and not await self.admins_soumis(member.guild.id):
             return True
 
         override = await self.get_immunity_override_cached(member.guild.id, member.id)
@@ -2123,6 +2203,39 @@ class AutoMod(commands.Cog, name="Automod"):
         if exempt_ids and any(r.id in exempt_ids for r in member.roles):
             return True
         return False
+
+    async def _admin_exempte(self, member, guild_id: int) -> bool:
+        """Administrateur exempté des filtres de messages, sauf en mode strict."""
+        return _is_discord_administrator(member) and not await self.admins_soumis(guild_id)
+
+    async def admins_soumis(self, guild_id: int) -> bool:
+        """Mode strict du propriétaire : les administrateurs passent aussi par l'AutoMod."""
+        cache = self.__dict__.setdefault("_strict_cache", {})
+        maintenant = time.monotonic()
+        connu = cache.get(int(guild_id))
+        if connu is not None and maintenant - connu[1] < _STRICT_TTL_SECONDES:
+            return connu[0]
+        actif = False
+        try:
+            await self.bot.db.execute(AUTOMOD_STRICT_SCHEMA)
+            row = await self.bot.db.fetchone(
+                "SELECT admins FROM sentrix_automod_strict WHERE guild_id=?", (int(guild_id),)
+            )
+            actif = bool(row and int(row["admins"] or 0))
+        except Exception:  # noqa: BLE001 — base indisponible : comportement historique
+            logger.debug("Mode strict AutoMod illisible guild=%s", guild_id, exc_info=True)
+        cache[int(guild_id)] = (actif, maintenant)
+        return actif
+
+    async def definir_admins_soumis(self, guild_id: int, actif: bool, auteur_id: int) -> None:
+        await self.bot.db.execute(AUTOMOD_STRICT_SCHEMA)
+        await self.bot.db.execute(
+            "INSERT INTO sentrix_automod_strict (guild_id,admins,updated_by,updated_at) VALUES (?,?,?,?) "
+            "ON CONFLICT(guild_id) DO UPDATE SET admins=excluded.admins,"
+            "updated_by=excluded.updated_by,updated_at=excluded.updated_at",
+            (int(guild_id), 1 if actif else 0, int(auteur_id), int(time.time())),
+        )
+        self.__dict__.setdefault("_strict_cache", {})[int(guild_id)] = (bool(actif), time.monotonic())
 
     async def _next_spam_stage(self, guild_id: int, user_id: int) -> int:
         await self.bot.db.execute(SPAM_ESCALATION_SCHEMA)
@@ -2149,8 +2262,11 @@ class AutoMod(commands.Cog, name="Automod"):
         member: discord.Member,
         reason: str,
     ) -> tuple[str | None, int, int | None, str]:
-        """Rappel -> warn -> timeout 10m, 30m, 1h, 3h, 6h, 12h, 24h."""
-        stage = await self._next_spam_stage(guild.id, member.id)
+        """Timeout 10m, 30m, 1h, 3h, 6h, 12h, 24h (rappel et warn sautés par défaut)."""
+        # 04/11/2026 (« j'ai spam plein de fois, no sanction ») : la première rafale
+        # ne donnait qu'un rappel, la deuxième un warn ; le mute n'arrivait qu'à la
+        # troisième. Le spam est maintenant sanctionné dès la première rafale.
+        stage = await self._next_spam_stage(guild.id, member.id) + (SPAM_PREMIER_PALIER - 1)
 
         if stage == 1:
             return (
@@ -2266,7 +2382,8 @@ class AutoMod(commands.Cog, name="Automod"):
             return None, count
         if member.id == guild.owner_id:
             return None, count  # le propriétaire du serveur n'est jamais sanctionné
-        if member.top_role >= guild.me.top_role:
+        # Discord refuse aussi tout timeout sur un administrateur (mode strict).
+        if member.top_role >= guild.me.top_role or member.guild_permissions.administrator:
             # Hors de portée des sanctions Discord, mais plus hors de vue.
             return await self._repondre_abus_privilegie(guild, member, reason, count), count
 
@@ -3007,6 +3124,46 @@ class AutoMod(commands.Cog, name="Automod"):
             ),
         )
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(description)))
+    @commands.hybrid_command(name="automod-strict", description="Mode strict (propriétaire) : AutoMod pour tous, administrateurs compris.", with_app_command=False)
+    @app_commands.describe(etat="on, off ou vide pour voir l'état")
+    async def automod_strict(self, ctx: commands.Context, etat: str = ""):
+        """04/11/2026 : seul le propriétaire du serveur (ou du bot) décide que
+        l'AutoMod s'applique aussi aux administrateurs. « on » active en plus tous
+        les filtres et l'escalade ; le propriétaire lui-même reste exempté."""
+        if ctx.guild is None:
+            return
+        etat = str(etat or "").strip().casefold()
+        actif = await self.admins_soumis(ctx.guild.id)
+        if etat not in {"on", "off", "oui", "non", "activer", "desactiver", "désactiver"}:
+            texte = (
+                "**Mode strict : actif** — l'AutoMod s'applique à tout le monde, administrateurs compris "
+                "(sauf le propriétaire)." if actif else
+                "**Mode strict : inactif** — les administrateurs ne sont pas filtrés."
+            )
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info(
+                texte + f"\nLe propriétaire du serveur l'active avec `{ctx.clean_prefix}automod-strict on`."
+            )))
+        if ctx.author.id != ctx.guild.owner_id and ctx.author.id not in config.OWNER_IDS:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(
+                "Seul le propriétaire du serveur peut changer le mode strict."
+            )))
+        allumer = etat in {"on", "oui", "activer"}
+        await self.definir_admins_soumis(ctx.guild.id, allumer, ctx.author.id)
+        if allumer:
+            for field in TOGGLE_FIELDS:
+                await self.bot.db.set_automod(ctx.guild.id, field, 1)
+            await self.bot.db.set_automod(ctx.guild.id, "escalation", 1)
+            self.automod_cache.pop(ctx.guild.id, None)
+            message = (
+                "**Mode strict activé.** Tous les filtres et l'escalade sont actifs, et l'AutoMod "
+                "s'applique maintenant aux administrateurs aussi (le propriétaire reste exempté).\n"
+                "-# Discord interdit d'exclure temporairement un administrateur : ses messages sont "
+                "supprimés et, en cas d'abus répété, ses rôles à risque sont retirés et vous êtes prévenu."
+            )
+        else:
+            message = "**Mode strict désactivé.** Les administrateurs ne sont plus filtrés ; les autres filtres restent comme ils sont."
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(message)))
+
     @commands.hybrid_command(name="automod-escalation", description="Activer/désactiver l'escalade automatique des sanctions AutoMod.", with_app_command=False)
     @app_commands.describe(etat="Activer ou désactiver l'escalade")
     @app_commands.choices(etat=TOGGLE_CHOICES)
@@ -3290,7 +3447,7 @@ class AutoMod(commands.Cog, name="Automod"):
         if not conf:
             return False
         if isinstance(invoker, discord.Member) and (
-            _is_discord_administrator(invoker) or await self.is_automod_exempt(invoker)
+            await self._admin_exempte(invoker, message.guild.id) or await self.is_automod_exempt(invoker)
         ):
             return False
         reason = self._external_app_reason(message, conf)
@@ -3397,7 +3554,7 @@ class AutoMod(commands.Cog, name="Automod"):
             return
         # Le bypass admin s'applique AVANT la blacklist, le spam, l'anti-arnaque,
         # les insultes et toute détection qui pourrait supprimer un message.
-        if _is_discord_administrator(_as_member(message.author, message.guild)):
+        if await self._admin_exempte(_as_member(message.author, message.guild), message.guild.id):
             # Prouve que le message de l'administrateur est bien arrivé au bot.
             # Si Discord l'intercepte auparavant, seul on_automod_action apparaît.
             if LINK_RE.search(_normalize_link_text(message.content)):
@@ -3437,6 +3594,13 @@ class AutoMod(commands.Cog, name="Automod"):
             or len({u.id for u in message.mentions} | {r.id for r in message.role_mentions}) >= 5
         ) and await self.security_filter_applies_to(message, "antimention"):
             return await self._delete_and_warn(message, "Mention massive détectée.", "antimention")
+
+        # 04/11/2026 (« j'ai ping un mec 5 fois, aucun anti-ping ») : les mentions
+        # réparties sur plusieurs messages comptent aussi.
+        if conf.get("antimention") and not getattr(message, "_sentrix_edit", False):
+            motif_pings = self._pings_repetes(message)
+            if motif_pings and await self.security_filter_applies_to(message, "antimention"):
+                return await self._delete_and_warn(message, motif_pings, "antimention")
 
         # Un lien de phishing passe AVANT l'anti-liens générique. Sinon le
         # message est supprimé comme simple lien, la protection anti-arnaque
@@ -3605,12 +3769,10 @@ class AutoMod(commands.Cog, name="Automod"):
 
         if (
             conf["anticaps"]
+            and _trop_de_majuscules(message.content)
             and await self.security_filter_applies_to(message, "anticaps")
-            and len(message.content) >= 10
         ):
-            letters = [char for char in message.content if char.isalpha()]
-            if letters and sum(1 for char in letters if char.isupper()) / len(letters) > 0.7:
-                return await self._delete_and_warn(message, "Trop de majuscules (SPAM CAPS).", "anticaps")
+            return await self._delete_and_warn(message, "Trop de majuscules (SPAM CAPS).", "anticaps")
 
         if conf["antiemoji"] and await self.security_filter_applies_to(message, "antiemoji"):
             emoji_count = len(re.findall(r"<a?:\w+:\d+>|[\U0001F300-\U0001FAFF]", message.content))
@@ -3648,12 +3810,21 @@ class AutoMod(commands.Cog, name="Automod"):
                 and time.monotonic() - incident.started < SPAM_INCIDENT_WINDOW_SECONDS
             ):
                 return await self._delete_and_warn(message, incident.reason, incident.filter_name)
-            self.spam_tracker.ajouter(key, message)
-            if self.spam_tracker.compter(key, fenetre=seuils.secondes) >= seuils.messages:
+            instant = _instant_message(message)
+            self.spam_tracker.ajouter(key, message, maintenant=instant)
+            rafale = self.spam_tracker.compter(key, maintenant=instant, fenetre=seuils.secondes) >= seuils.messages
+            fenetre_longue = min(SPAM_FENETRE_LONGUE, self.spam_tracker.fenetre)
+            soutenu = (
+                not rafale
+                and self.spam_tracker.compter(key, maintenant=instant, fenetre=fenetre_longue) >= 2 * seuils.messages
+            )
+            if rafale or soutenu:
                 # La rafale entière part, pas seulement le message qui franchit le seuil :
                 # les premiers restaient affichés (4 par spammeur, mesuré).
                 burst = [
-                    m for m in self.spam_tracker.valeurs(key, fenetre=seuils.secondes)
+                    m for m in self.spam_tracker.valeurs(
+                        key, maintenant=instant, fenetre=seuils.secondes if rafale else fenetre_longue
+                    )
                     if m is not None and m is not message
                 ]
                 self.spam_tracker.reinitialiser(key)
@@ -3686,6 +3857,32 @@ class AutoMod(commands.Cog, name="Automod"):
             if motif_repete:
                 self.repeat_tracker.reinitialiser(key)
                 return await self._delete_and_warn(message, motif_repete, "antispam")
+
+    def _pings_repetes(self, message) -> str | None:
+        """Même membre pingué 3 fois, ou 6 mentions, en 60 s par le même auteur."""
+        auteur = getattr(message.author, "id", None)
+        bot_id = getattr(getattr(self.bot, "user", None), "id", None)
+        reponse = getattr(getattr(message, "reference", None), "resolved", None)
+        cible_reponse = getattr(getattr(reponse, "author", None), "id", None)
+        cibles = [
+            int(u.id) for u in getattr(message, "mentions", ()) or ()
+            if not getattr(u, "bot", False) and u.id not in {auteur, bot_id, cible_reponse}
+        ]
+        cibles += [int(r.id) for r in getattr(message, "role_mentions", ()) or ()]
+        if not cibles:
+            return None
+        suivi = self.__dict__.get("_pings_tracker")
+        if suivi is None:
+            suivi = self.__dict__["_pings_tracker"] = FenetreGlissante(fenetre=PINGS_FENETRE, purge_toutes=500)
+        cle = (message.guild.id, auteur)
+        instant = _instant_message(message)
+        for cible in set(cibles):
+            suivi.ajouter(cle, cible, maintenant=instant)
+        recentes = suivi.valeurs(cle, maintenant=instant)
+        if len(recentes) >= PINGS_TOTAL or any(recentes.count(c) >= PINGS_MEME_CIBLE for c in set(cibles)):
+            suivi.reinitialiser(cle)
+            return "Mentions répétées (ping spam)."
+        return None
 
     def _coordinated_copies(
         self, message: discord.Message, link_content: str, comptes: int = COORDINATED_AUTHORS
@@ -4000,7 +4197,7 @@ class AutoMod(commands.Cog, name="Automod"):
         """
         # Protection de dernier recours pour les autres listeners AutoMod qui
         # appelleraient cette méthode directement, sans passer par le filtre.
-        if _is_discord_administrator(message.author):
+        if await self._admin_exempte(message.author, message.guild.id):
             return
         if not self._sanctioned_messages.claim(message.guild.id, message.id):
             logger.debug(
@@ -4418,7 +4615,7 @@ class AutoMod(commands.Cog, name="Automod"):
         Même verrou d'idempotence que _delete_and_warn : jamais deux sanctions
         sur un message détecté par plusieurs cogs simultanément.
         """
-        if _is_discord_administrator(message.author):
+        if await self._admin_exempte(message.author, message.guild.id):
             return
         if not self._sanctioned_messages.claim(message.guild.id, message.id):
             logger.debug(

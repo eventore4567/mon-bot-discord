@@ -27,9 +27,10 @@ class SearchProvider(MusicProvider):
     can_provide_playback = True  # via les providers de lecture qu'on lui injecte
     can_search_by_text = True
 
-    def __init__(self, playback_providers: list[MusicProvider]):
+    def __init__(self, playback_providers: list[MusicProvider], *, spotify: MusicProvider | None = None):
         super().__init__()
         self._playback_providers = playback_providers
+        self._spotify = spotify
 
     def matches(self, query: str) -> bool:
         # Catch-all : le ProviderManager ne l'essaie qu'après tous les providers à
@@ -37,6 +38,30 @@ class SearchProvider(MusicProvider):
         return True
 
     async def resolve_metadata(self, query: str, *, requested_by: int | None = None) -> list[Track]:
+        # 04/11/2026 : on identifie d'abord le morceau (API de catalogue tolérante aux
+        # fautes : « saif taf du loup » -> « Le taf du loup » de SAÏF), puis on cherche
+        # la source audio avec le titre, l'artiste et la durée exacts.
+        from .. import catalog
+
+        identifie = await catalog.identifier(query, spotify=self._spotify)
+        if identifie is not None:
+            candidates = await gather_candidates(
+                self._playback_providers,
+                title=identifie.title,
+                artist=identifie.artist,
+                duration=identifie.duration,
+            )
+            best = matcher.pick_best(identifie, candidates, original_query=query)
+            if best is not None:
+                best.requested_by = requested_by
+                # Le catalogue connaît le vrai titre et la pochette : on les garde.
+                best.title = identifie.title or best.title
+                best.artist = identifie.artist or best.artist
+                best.thumbnail = best.thumbnail or identifie.thumbnail
+                best.duration = best.duration or identifie.duration
+                return [best]
+            logger.info("music catalog match rejected -> %r, recherche libre", identifie.title)
+
         target = Track(title=query.strip(), requested_by=requested_by, provider=self.name)
         candidates = await gather_candidates(self._playback_providers, title=query.strip(), artist=None, duration=None)
         best = matcher.pick_best(target, candidates, original_query=query)

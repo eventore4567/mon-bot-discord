@@ -77,7 +77,9 @@ CORE_NAME = "SENTRIX CORE"
 #: Bande 1200 × 24 presque transparente, identique aux journaux.
 #: La galerie et sa pièce jointe restent gouvernées par le même interrupteur
 #: pour éviter une référence attachment:// absente qui invaliderait le message.
-BANDEAUX_ACTIFS = True
+# 03/11/2026 : plus de bande en tête des cartes de commandes (« c'est moche »).
+# Les journaux (utils/wide_logs.py) gardent leur propre bande fine.
+BANDEAUX_ACTIFS = __import__("os").environ.get("SENTRIX_BANDEAUX", "0") == "1"
 
 #: Icône de chaque domaine. Toute commande appartient à une famille, donc
 #: toute réponse peut porter son icône — sans qu'on ait à écrire un emoji

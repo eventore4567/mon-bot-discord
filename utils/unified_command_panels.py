@@ -179,6 +179,15 @@ def _fields(embed: discord.Embed | None) -> str:
         return "\n\n".join(blocks)[:3000]
 
 
+def _sans_titre_repete(texte: str, titre: str) -> str:
+    """Retire une première ligne qui répète le titre (« ## Ping » puis « **Ping** »)."""
+    lignes = str(texte or "").split("\n")
+    nu = lambda v: str(v or "").strip().strip("#*_ ").strip().casefold()
+    if lignes and titre and nu(lignes[0]) == nu(titre):
+        return "\n".join(lignes[1:]).strip()
+    return texte
+
+
 class UnifiedCommandPanel(discord.ui.LayoutView):
     """One wide Components V2 card for one SentriX command response."""
 
@@ -211,7 +220,9 @@ class UnifiedCommandPanel(discord.ui.LayoutView):
         else:
             container.add_item(discord.ui.TextDisplay(header))
 
-        description = _clean(getattr(embed, "description", None) if embed else content, limit=2600)
+        description = _sans_titre_repete(
+            _clean(getattr(embed, "description", None) if embed else content, limit=2600), title
+        )
         field_text = _fields(embed)
         body = "\n\n".join(part for part in (description, field_text) if part).strip()
         if body:

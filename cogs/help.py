@@ -466,11 +466,8 @@ def _dashboard_url() -> str | None:
 
 
 def _support_url() -> str | None:
-    for env_name in ("SENTRIX_SUPPORT_URL", "SUPPORT_SERVER_URL"):
-        value = _valid_http_url(os.getenv(env_name, ""))
-        if value:
-            return value
-    return None
+    # 04/11/2026 : le serveur officiel a toujours un lien (config.OFFICIAL_SERVER_URL).
+    return _valid_http_url(config.official_server_url())
 
 
 def _add_growth_links(view: discord.ui.View, bot: commands.Bot) -> None:
@@ -478,7 +475,7 @@ def _add_growth_links(view: discord.ui.View, bot: commands.Bot) -> None:
         # Pas de lien publicitaire vers le dashboard dans l'aide (Jayden, 22/10/2026) :
         # +dashboard reste la commande pour l'ouvrir.
         ("Ajouter SentriX", _invite_url(bot)),
-        ("Serveur support", _support_url()),
+        ("Serveur officiel", _support_url()),
     ):
         if url:
             view.add_item(discord.ui.Button(label=label, style=discord.ButtonStyle.link, url=url, row=3))
@@ -812,7 +809,7 @@ class VueAide(discord.ui.LayoutView):
         boutons: list[discord.ui.Button] = []
         for libelle, url in (
             ("Ajouter SentriX", _invite_url(self.bot)),
-            ("Support", _support_url()),
+            ("Serveur officiel", _support_url()),
         ):
             if url:
                 boutons.append(discord.ui.Button(label=libelle, url=url))

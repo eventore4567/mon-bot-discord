@@ -335,6 +335,22 @@ SETUP_EN_REPLACEMENTS = (
 # Traductions de surface communes. Elles restent ciblées sur le texte d'interface
 # SentriX ; blocs de code, URLs et mentions Discord sont protégés.
 SURFACE_EN_REPLACEMENTS = (
+    # ------------------------------------------------------------------ 04/11/2026
+    # Filtres du setup Sécurité (cogs/setup_control_center.AUTOMOD) : traduits mot à
+    # mot ils donnaient « Anti-recent account », « Detection of mass member » et
+    # laissaient « Anti-lien », « Anti-insultes » en français. Libellés ENTIERS d'abord.
+    ("Détection de suppressions massives de membres", "Mass member removal detection"),
+    ("Analyse des comportements suspects", "Suspicious behaviour analysis"),
+    ("Protection du lien personnalisé", "Vanity link protection"),
+    ("Filtre des nouvelles arrivées", "New arrivals filter"),
+    ("Permissions dangereuses", "Dangerous permissions"),
+    ("Anti-compte récent", "Anti new account"),
+    ("Anti-majuscules", "Anti-caps"),
+    ("Anti-invitation", "Anti-invite"),
+    ("Anti-insultes", "Anti-insults"),
+    ("Anti-lien", "Anti-link"),
+    ("Cochez ou décochez les protections voulues.", "Tick or untick the protections you want."),
+    ("### Modifier les filtres", "### Edit filters"),
     # ------------------------------------------------------------------ 23/10/2026
     # Cartes de sanction (utils/moderation_feedback.py). EN PREMIER, et avant
     # ("Bannissement", "Ban") plus bas : la traduction est une substitution de
@@ -354,6 +370,17 @@ SURFACE_EN_REPLACEMENTS = (
     ("**⚠️ Avertissement enregistré**", "**⚠️ Warning recorded**"),
     ("**🔓 Bannissement levé**", "**🔓 Ban lifted**"),
     ("**🛡️ Action de modération effectuée**", "**🛡️ Moderation action completed**"),
+    # Carte colorée du 04/11/2026 : titres en « ### », signature « 🛡️ Par ».
+    ("### 🚪 Expulsion effectuée", "### 🚪 Member kicked"),
+    ("### 🔨 Bannissement effectué", "### 🔨 Member banned"),
+    ("### ⏳ Bannissement temporaire effectué", "### ⏳ Member temporarily banned"),
+    ("### 🔨 Bannissement par identifiant", "### 🔨 Banned by ID"),
+    ("### 🔇 Timeout appliqué", "### 🔇 Timeout applied"),
+    ("### 🔊 Timeout retiré", "### 🔊 Timeout removed"),
+    ("### ⚠️ Avertissement enregistré", "### ⚠️ Warning recorded"),
+    ("### 🔓 Bannissement levé", "### 🔓 Ban lifted"),
+    ("### 🛡️ Action de modération effectuée", "### 🛡️ Moderation action completed"),
+    ("🛡️ Par ", "🛡️ By "),
     ("**📝 Motif**", "**📝 Reason**"),
     ("**⏱️ Durée**", "**⏱️ Duration**"),
     # « Par » seul mordrait dans « Paris » ou « Partage » ; l'ancre inclut donc

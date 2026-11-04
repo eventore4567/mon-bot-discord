@@ -51,7 +51,7 @@ class ProviderManager:
             self.youtube = YouTubeProvider()
             self.playback_providers = [self.youtube, self.soundcloud]
 
-        self.search = SearchProvider(self.playback_providers)
+        self.search = SearchProvider(self.playback_providers, spotify=self.spotify)
         self.platform_providers: list[MusicProvider] = [
             self.direct, self.spotify, self.deezer, self.soundcloud, self.youtube, self.search,
         ]

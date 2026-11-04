@@ -93,6 +93,8 @@ def _proxy_candidate_path(path: str) -> bool:
         or path == "/api/guilds"
         or path.startswith("/api/guilds/")
         or path.startswith("/api/verify/")
+        # Serveurs du bot (page propriétaire) : lus dans le cache Discord.
+        or path.startswith("/api/owner/")
     )
 
 

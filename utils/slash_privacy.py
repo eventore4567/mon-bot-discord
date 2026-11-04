@@ -5,7 +5,9 @@ n'est visible que par le modérateur qui l'a lancée. Les logs staff, le MP de
 sanction et l'effet sur Discord ne changent pas. En préfixe « + », Discord ne
 sait pas faire d'éphémère : rien ne change.
 
-Les consultations (warnings, case, modhistory…) restent normales.
+04/11/2026 (« fais que tout truc de modo soit visible que pour soi-même ») : les
+consultations de modération (sanctions, avertissements, dossiers, snipe…) sont
+privées aussi ; leur réponse « / » est différée en éphémère dès le départ.
 """
 from __future__ import annotations
 
@@ -20,8 +22,24 @@ PRIVATE_SLASH_ACTIONS = frozenset({
 })
 
 
+#: Consultations staff : rien n'est modifié, mais le résultat ne regarde que le staff.
+PRIVATE_SLASH_CONSULTATIONS = frozenset({
+    "warnings", "case", "modview", "modcenter", "modhistory", "sentrixpro history",
+    "snipe", "editsnipe", "sanctiondm status", "sanctiondm off", "sanctiondm reset",
+    "automod-history", "automod-status", "automod-strict",
+})
+
+
 def commande_privee(nom: str | None) -> bool:
-    return str(nom or "").casefold().strip() in PRIVATE_SLASH_ACTIONS
+    nom = str(nom or "").casefold().strip()
+    return nom in PRIVATE_SLASH_ACTIONS or nom in PRIVATE_SLASH_CONSULTATIONS
+
+
+def consultation_privee(interaction: Any) -> bool:
+    """Consultation staff : à différer en éphémère avant même de l'exécuter."""
+    command = getattr(interaction, "command", None)
+    source = getattr(getattr(command, "callback", None), "_sentrix_original_command", None)
+    return str(source or getattr(command, "name", None) or "").casefold().strip() in PRIVATE_SLASH_CONSULTATIONS
 
 
 def reponse_privee(ctx: Any) -> bool:
@@ -38,4 +56,7 @@ def interaction_privee(interaction: Any) -> bool:
     return commande_privee(source or getattr(command, "name", None))
 
 
-__all__ = ["PRIVATE_SLASH_ACTIONS", "commande_privee", "interaction_privee", "reponse_privee"]
+__all__ = [
+    "PRIVATE_SLASH_ACTIONS", "PRIVATE_SLASH_CONSULTATIONS", "commande_privee",
+    "consultation_privee", "interaction_privee", "reponse_privee",
+]

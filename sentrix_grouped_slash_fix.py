@@ -439,6 +439,17 @@ async def _invoke_original_fixed(
     # rapide répond directement ; une commande lente reçoit « réfléchit… » après
     # SLOW_COMMAND_DEFER_SECONDS (Discord laisse 3 s). Le minuteur vit ici : celui de
     # cogs/slash_reliability_v7 est retiré au boot par cogs/canonical_interactions.
+    # 04/11/2026 : une consultation de modération (sanctions, avertissements…)
+    # ne s'affiche qu'à celui qui la demande : réponse privée dès le départ.
+    from utils.slash_privacy import consultation_privee
+
+    if consultation_privee(interaction) and not interaction.response.is_done():
+        try:
+            await interaction.response.defer(thinking=True, ephemeral=True)
+        except (discord.InteractionResponded, discord.NotFound):
+            pass
+        except discord.HTTPException:
+            logger.debug("Defer privé d'une consultation staff impossible.", exc_info=True)
     watchdog = asyncio.create_task(_defer_if_slow(interaction))
     interaction.extras["sentrix_slow_timer"] = watchdog
     ctx = await _make_context(bot, interaction)

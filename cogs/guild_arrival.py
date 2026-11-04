@@ -17,8 +17,8 @@ from utils import sentrix_panels as panels
 logger = logging.getLogger("bot.guild-arrival")
 
 WELCOME_COLOUR = 0x6C5CE7
-OFFICIAL_SUPPORT_URL = "https://discord.gg/5P5Bqjqu5t"
-SUPPORT_URL = (os.getenv("SUPPORT_SERVER_URL") or OFFICIAL_SUPPORT_URL).strip()
+OFFICIAL_SUPPORT_URL = config.OFFICIAL_SERVER_URL
+SUPPORT_URL = config.official_server_url()
 PUBLIC_HOME_URL = (
     os.getenv("SENTRIX_PUBLIC_HOME_URL")
     or "https://sentrixbot.up.railway.app/home"
@@ -214,6 +214,14 @@ class GuildArrivalView(discord.ui.View):
         if interaction.guild_id is None:
             return await interaction.response.send_message(
                 "Le choix de langue doit être effectué dans un serveur.",
+                ephemeral=True,
+            )
+        # 04/11/2026 : seul le staff change la langue de tout le serveur.
+        perms = getattr(interaction.user, "guild_permissions", None)
+        proprietaire = getattr(getattr(interaction, "guild", None), "owner_id", None) == interaction.user.id
+        if not (proprietaire or (perms and (perms.administrator or perms.manage_guild))):
+            return await interaction.response.send_message(
+                "Seuls les administrateurs peuvent choisir la langue du serveur.",
                 ephemeral=True,
             )
 

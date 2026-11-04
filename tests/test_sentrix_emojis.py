@@ -66,12 +66,13 @@ def test_chaque_nom_a_un_fichier_lisible():
 # =============================================================================
 
 def test_seuls_les_etats_vivants_sont_animes():
-    """« Ne mets pas des animations partout » : une interface qui bouge en
-    permanence fatigue. Le GIF n'est choisi que pour un état qui vit —
-    quelque chose est en cours, ou vient de changer."""
+    """Le nom d'origine d'une icône ne devient pas animé par accident : un GIF
+    déposé plus tard ne remplace pas l'icône fixe déjà publiée. Depuis le
+    03/11/2026, l'animation passe par les versions ``sentrix_c_*`` dédiées."""
     animes = [
         n for n in se.noms_disponibles()
         if (f := se.fichier(n)) is not None and f.suffix.lower() == ".gif"
+        and not n.startswith(se.PREFIXE_ANIME)
     ]
     intrus = sorted(set(animes) - se.ANIMES_AUTORISES)
     assert intrus == [], f"icônes animées hors de la liste autorisée : {intrus}"
@@ -285,3 +286,44 @@ def test_partiel_supporte_aussi_un_emoji_anime():
     assert partiel.animated is True
     assert partiel.name == "sentrix_loading"
 
+
+
+def test_la_version_coloree_animee_passe_avant_l_icone_fixe():
+    """03/11/2026 : « rends tous les emojis animés et colorés »."""
+    se.reinitialiser()
+    se.amorcer({
+        "sentrix_ban": "<:sentrix_ban:410000000000000010>",
+        "sentrix_c_ban": "<a:sentrix_c_ban:410000000000000011>",
+        "sentrix_info": "<:sentrix_info:410000000000000012>",
+    })
+    assert se.emoji("ban") == "<a:sentrix_c_ban:410000000000000011>"
+    assert se.partiel("ban").animated is True
+    # Sans version animée téléversée, l'icône fixe reste affichée.
+    assert se.emoji("info") == "<:sentrix_info:410000000000000012>"
+    se.reinitialiser()
+
+
+def test_le_generateur_colore_et_anime_chaque_icone(tmp_path):
+    import shutil
+    from PIL import Image
+
+    from tools import generer_emojis_couleur as gen
+
+    for nom in ("sentrix_ban.png", "sentrix_trophy.png", "sentrix_bouclier.gif"):
+        source = se.DOSSIER / nom
+        if source.exists():
+            shutil.copy(source, tmp_path / nom)
+    bilan = gen.generer(tmp_path)
+    assert bilan["crees"] >= 2
+    gif = tmp_path / "sentrix_c_ban.gif"
+    with Image.open(gif) as image:
+        assert getattr(image, "n_frames", 1) > 1
+        assert image.size == (128, 128)
+        rgb = image.convert("RGB")
+        couleurs = {c for c in rgb.getdata() if max(c) - min(c) > 60}
+        assert couleurs, "l'icône animée doit être en couleur"
+    assert gif.stat().st_size <= 256 * 1024
+    # Une icône déjà animée d'origine n'est pas dupliquée.
+    assert not (tmp_path / "sentrix_c_bouclier.gif").exists()
+    assert gen.generer(tmp_path)["crees"] == 0  # idempotent
+    assert gen.teinte("sentrix_ban")[1] == (220, 38, 38)

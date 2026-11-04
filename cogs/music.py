@@ -416,6 +416,25 @@ class MusicVoicePanel(discord.ui.View):
         )
 
 
+def _recherche_apres_groupe(ctx) -> str:
+    """Texte écrit après « +music » quand ce n'est pas une sous-commande."""
+    if getattr(ctx, "interaction", None) is not None:
+        return ""
+    passe = str(getattr(ctx, "subcommand_passed", "") or "").strip()
+    reste = ""
+    vue = getattr(ctx, "view", None)
+    if vue is not None:
+        try:
+            reste = str(vue.read_rest() or "").strip()
+        except Exception:  # noqa: BLE001
+            reste = ""
+    # Groupe en invoke_without_command : discord.py remet la lecture avant le mot,
+    # « reste » contient alors déjà « saif » et subcommand_passed est vide.
+    if passe and not reste.startswith(passe):
+        reste = f"{passe} {reste}"
+    return reste.strip()[:300]
+
+
 class Music(commands.Cog, name="Music"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -430,6 +449,12 @@ class Music(commands.Cog, name="Music"):
         # immédiatement, on garde le même panneau et on évite le spam.
         self._join_panel_messages: dict[tuple[int, int], discord.Message] = {}
         self._join_panel_delete_tasks: dict[tuple[int, int], asyncio.Task] = {}
+        # 04/11/2026 (« il a spam ») : UN seul lecteur visible par salon. Chaque
+        # membre qui rejoignait le vocal recevait son propre panneau, et `+music`
+        # en ajoutait un autre : trois membres = trois lecteurs identiques. Le
+        # dernier lecteur publié remplace le précédent ; un membre qui arrive
+        # réutilise celui déjà affiché.
+        self._channel_panels: dict[tuple[int, int], discord.Message] = {}
         self._inactivity_checker.start()
 
     def cog_unload(self):
@@ -702,7 +727,35 @@ class Music(commands.Cog, name="Music"):
                 key = (queue.guild_id, int(message.id))
                 self._player_messages[key] = message
                 self._player_activity[key] = (time.monotonic(), False)
+                await self._remplacer_lecteur_du_salon(queue.guild_id, int(channel_id), message)
         return message
+
+    async def _remplacer_lecteur_du_salon(self, guild_id: int, channel_id: int, message) -> None:
+        """Le nouveau lecteur devient LE lecteur du salon ; l'ancien est supprimé."""
+        cle = (int(guild_id), int(channel_id))
+        lecteurs = self._lecteurs_par_salon()
+        ancien = lecteurs.get(cle)
+        lecteurs[cle] = message
+        if ancien is None or int(getattr(ancien, "id", 0)) == int(message.id):
+            return
+        self._player_messages.pop((int(guild_id), int(ancien.id)), None)
+        self._player_activity.pop((int(guild_id), int(ancien.id)), None)
+        # Les membres rattachés à l'ancien lecteur suivent le nouveau.
+        for membre, lie in list(getattr(self, "_join_panel_messages", {}).items()):
+            if int(getattr(lie, "id", 0)) == int(ancien.id):
+                self._join_panel_messages[membre] = message
+        supprimer = getattr(ancien, "delete", None)
+        if callable(supprimer):
+            try:
+                await supprimer()
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                pass
+
+    def _lecteurs_par_salon(self) -> dict:
+        return self.__dict__.setdefault("_channel_panels", {})
+
+    def _lecteur_du_salon(self, guild_id: int, channel_id: int):
+        return self._lecteurs_par_salon().get((int(guild_id), int(channel_id)))
 
     async def _refresh_player(self, interaction, queue):
         if not interaction.response.is_done():
@@ -757,13 +810,18 @@ class Music(commands.Cog, name="Music"):
             details.append(f"🔎 {_music_source_label(track)}")
         if channel is not None:
             details.append(f"🔊 <#{channel.id}>")
-        details.append(f"File : **{len(queue.tracks)}** · Volume : **{round(queue.volume * 100)} %** · Boucle : **{loop}**")
-        details.append(f"Lecture auto : **{'Oui' if queue.autoplay else 'Non'}**")
-        sections = [panels.Section("", texte="\n".join(details))]
+        # 04/11/2026 : au repos (rien en cours, file vide), le lecteur montrait trois
+        # boutons grisés, un menu et quatre réglages inutiles. Il ne garde plus que
+        # l'essentiel : où écouter et un seul bouton « Ajouter un titre ».
+        au_repos = track is None and not queue.tracks
+        if not au_repos:
+            details.append(f"File : **{len(queue.tracks)}** · Volume : **{round(queue.volume * 100)} %** · Boucle : **{loop}**")
+            details.append(f"Lecture auto : **{'Oui' if queue.autoplay else 'Non'}**")
+        sections = [panels.Section("", texte="\n".join(details))] if details else []
         if track:
             sections.append(panels.Section("Progression", texte=_music_progress_text(queue, track)))
         else:
-            sections.append(panels.Section("Prêt à écouter", texte="Rejoignez un vocal puis choisissez **➕ Ajouter**.\nRecherchez un artiste, un titre ou collez un lien.\n-# La pochette et la progression s’affichent dès le lancement."))
+            sections.append(panels.Section("Prêt à écouter", texte="Rejoignez un vocal puis choisissez **➕ Ajouter un titre**, ou écrivez `+play <titre>`.\n-# Un nom approximatif suffit : SentriX trouve le titre le plus proche."))
 
         async def action(interaction, name):
             if name == "add":
@@ -811,13 +869,15 @@ class Music(commands.Cog, name="Music"):
             banniere=True, sections=sections,
             # Quatre contrôles directs ; le reste dans un menu (Jayden, 22/10/2026 :
             # « pas plein de boutons de partout »). Mêmes actions qu'avant.
-            boutons=[
+            boutons=[button("Ajouter un titre", "add", style=discord.ButtonStyle.success)] if au_repos else [
                 button("Reprendre" if paused else "Pause", "pause", disabled=track is None, style=discord.ButtonStyle.primary),
                 button("Suivant", "skip", disabled=track is None),
                 button("Stop", "stop", disabled=not track and not queue.tracks, style=discord.ButtonStyle.danger),
                 button("Ajouter", "add", style=discord.ButtonStyle.success),
             ], pied="SentriX · Contrôles réservés aux membres du même vocal", timeout=15 * 60,
         )
+        if au_repos:
+            return panneau
         options = [
             discord.SelectOption(label="File d'attente", value="queue", emoji="🎶",
                                  description=f"{len(queue.tracks)} titre(s) à venir"),
@@ -1205,8 +1265,11 @@ class Music(commands.Cog, name="Music"):
                 )
 
         try:
+            from utils.opus_loader import assurer_opus
+
+            assurer_opus()  # sans libopus, voice.play lève OpusNotLoaded
             voice.play(source, after=_after)
-        except (discord.ClientException, OSError, RuntimeError) as exc:
+        except (discord.ClientException, discord.opus.OpusNotLoaded, OSError, RuntimeError) as exc:
             logger.error(
                 "music voice play failed -> guild=%s track=%s error=%s",
                 queue.guild_id,
@@ -1531,14 +1594,16 @@ class Music(commands.Cog, name="Music"):
         except TypeError:
             return self.bot.get_partial_messageable(int(channel_id))
 
-    async def _delete_saved_member_panel(self, guild_id: int, member_id: int) -> None:
+    async def _delete_saved_member_panel(
+        self, guild_id: int, member_id: int, *, garder_message: bool = False
+    ) -> None:
         await ensure_music_settings_schema(self.bot)
         row = await self.bot.db.fetchone(
             "SELECT channel_id,message_id FROM sentrix_music_member_panels "
             "WHERE guild_id=? AND user_id=?",
             (int(guild_id), int(member_id)),
         )
-        if row is not None:
+        if row is not None and not garder_message:
             channel_id = int(row["channel_id"])
             message_id = int(row["message_id"])
             deleted = False
@@ -1594,6 +1659,12 @@ class Music(commands.Cog, name="Music"):
         if pending is not None and not pending.done():
             pending.cancel()
         if key in self._join_panel_messages:
+            return
+
+        # Un lecteur est déjà affiché dans ce salon : on le réutilise.
+        partage = self._lecteur_du_salon(member.guild.id, channel.id)
+        if partage is not None:
+            self._join_panel_messages[key] = partage
             return
 
         # Nettoie un ancien message laissé par un redémarrage/failover avant d'en
@@ -1676,7 +1747,18 @@ class Music(commands.Cog, name="Music"):
                 return
 
             message = self._join_panel_messages.pop(key, None)
+            # Le lecteur est partagé : tant qu'un membre reste dans le vocal, il reste.
+            reste_du_monde = bool(
+                channel is not None
+                and any(not getattr(m, "bot", False) for m in getattr(channel, "members", ()))
+            )
+            if reste_du_monde:
+                await self._delete_saved_member_panel(guild_id, member_id, garder_message=True)
+                return
             if message is not None:
+                cle = (int(guild_id), int(configured_channel_id))
+                if self._lecteurs_par_salon().get(cle) is message:
+                    self._lecteurs_par_salon().pop(cle, None)
                 try:
                     await message.delete()
                 except (discord.NotFound, discord.Forbidden, discord.HTTPException):
@@ -1809,6 +1891,12 @@ class Music(commands.Cog, name="Music"):
     @commands.hybrid_group(name="music", description="Commandes musique de SentriX.")
     async def music(self, ctx: commands.Context):
         if ctx.invoked_subcommand is None:
+            # 04/11/2026 : « +music saif » affichait le lecteur et ignorait « saif ».
+            # Un mot qui n'est pas une sous-commande = une recherche à jouer.
+            recherche = _recherche_apres_groupe(ctx)
+            if recherche:
+                await self._resolve_and_queue(ctx, recherche)
+                return
             await self._show_player(ctx, self.get_queue(ctx.guild.id))
 
     @music.command(name="play", description="Jouer un titre (nom, artiste, ou lien YouTube/Spotify/Deezer/SoundCloud).")
@@ -2035,4 +2123,7 @@ class Music(commands.Cog, name="Music"):
 
 
 async def setup(bot: commands.Bot):
+    from utils.opus_loader import assurer_opus
+
+    assurer_opus()  # dit dès le démarrage si la voix ne pourra pas jouer
     await bot.add_cog(Music(bot))

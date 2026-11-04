@@ -3,6 +3,8 @@
    des sous-sections. « Plus d'outils » regroupe ce qui sert rarement. */
 const NAV_GLOBAL = [
   ['Mon espace', [['profile', 'Mon profil'], ['servers', 'Mes serveurs'], ['preferences', 'Préférences']]],
+  // Propriétaire du bot seulement (state.developer) : filtré dans renderNav.
+  ['Propriétaire', [['botservers', 'Serveurs du bot']]],
 ];
 const NAV_SERVER = [
   ['Accueil', [['overview', 'Vue d’ensemble']]],
@@ -22,7 +24,7 @@ const NAV = NAV_SERVER;
    anciennes interfaces dont toutes les fonctions ne sont pas encore reprises ici. */
 const TOOL_GROUPS = [
   ['Outils', [['invites', 'Invitations & webhooks']]],
-  ['Développeur', [['advanced', 'Centre avancé']]],
+  ['Développeur', [['botservers', 'Serveurs du bot'], ['advanced', 'Centre avancé']]],
 ];
 const TOOLS = TOOL_GROUPS.flatMap(([, items]) => items);
 
@@ -44,6 +46,7 @@ const META = {
   notifications: ['Notifications', 'Annonce les nouvelles vidéos et lives dans un salon.'],
   automation: ['Automatisation', 'Réactions automatiques et autres règles.'],
   settings: ['Paramètres', 'Préfixe, salons système et maintenance.'],
+  botservers: ['Serveurs du bot', 'Tous les serveurs où SentriX est : rejoindre ou retirer le bot.'],
   access: ['Commandes & accès', 'Commandes désactivées, gestionnaires et accès au dashboard.'],
   embeds: ['Envoyer un embed', 'Composez un message et envoyez-le dans un salon.'],
   ai: ['Intelligence artificielle', 'Assistant SentriX sur ce serveur.'],
@@ -88,7 +91,7 @@ function renderNav() {
   const nav = $('navigation');
   const globalMode = !state.guildId || !state.guild;
   const activeNav = globalMode ? NAV_GLOBAL : NAV_SERVER;
-  let html = activeNav.map(([group, items]) => `<div class="nav-group">${esc(group)}</div>` + items.map(([p, l]) => navButton(p, l)).join('')).join('');
+  let html = activeNav.filter(([group]) => group !== 'Propriétaire' || state.developer).map(([group, items]) => `<div class="nav-group">${esc(group)}</div>` + items.map(([p, l]) => navButton(p, l)).join('')).join('');
   if (!globalMode) {
     html += TOOL_GROUPS.map(([g, items]) => {
       if (g === 'Développeur' && !state.developer) return '';
@@ -201,7 +204,7 @@ function paletteItems(q = '') {
   const items = [];
   const globalMode = !state.guildId || !state.guild;
   const activeNav = globalMode ? NAV_GLOBAL : NAV_SERVER;
-  for (const [group, pages] of activeNav) for (const [p, l] of pages) items.push({ page: p, label: l, group, keywords: PALETTE_KEYWORDS[p] || '' });
+  for (const [group, pages] of activeNav) if (group !== 'Propriétaire' || state.developer) for (const [p, l] of pages) items.push({ page: p, label: l, group, keywords: PALETTE_KEYWORDS[p] || '' });
   if (!globalMode) {
     for (const [g, pages] of TOOL_GROUPS) {
       if (g === 'Développeur' && !state.developer) continue;

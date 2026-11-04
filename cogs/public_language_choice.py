@@ -50,6 +50,20 @@ def install(bot: commands.Bot) -> None:
         async def choose(interaction: discord.Interaction, language: str):
             if interaction.guild is None or not isinstance(interaction.user, discord.Member):
                 return
+            # 04/11/2026 : n'importe quel membre pouvait passer TOUT le serveur en
+            # anglais d'un clic (« le serveur est en FR mais le bot répond en
+            # anglais »). Le choix est réservé au propriétaire et aux administrateurs.
+            perms = interaction.user.guild_permissions
+            if not (
+                interaction.user.id == interaction.guild.owner_id
+                or perms.administrator
+                or perms.manage_guild
+            ):
+                return await interaction.response.send_message(
+                    "Seuls les administrateurs peuvent choisir la langue du serveur. "
+                    "/ Only administrators can choose the server language.",
+                    ephemeral=True,
+                )
 
             await language_runtime.set_language(self.bot, interaction.guild.id, language)
             if language == language_runtime.LANG_EN:
@@ -78,4 +92,4 @@ def install(bot: commands.Bot) -> None:
     view_cls.__init__ = public_init
     view_cls._sentrix_public_choice = True
     _INSTALLED = True
-    logger.info("Choix initial de langue accessible à tous les membres.")
+    logger.info("Choix initial de langue : visible par tous, modifiable par les administrateurs.")

@@ -76,45 +76,105 @@ def _restaurer(texte: str, gardes: list[str]) -> str | None:
     return texte
 
 
-async def _traduire_ligne(ligne: str) -> str:
-    global _coupe_jusqua
-    if ligne in _cache:
-        _cache.move_to_end(ligne)
-        return _cache[ligne]
-    if time.monotonic() < _coupe_jusqua:
-        return ligne
-    from services import translation as tr
-
-    masque, gardes = _masquer(ligne)
-    try:
-        resultat = await tr.translate(masque, "en", source="fr")
-    except tr.TranslationError as exc:
-        if exc.code == "unavailable":
-            _coupe_jusqua = time.monotonic() + COUPURE_SECONDES
-            logger.warning("Traduction anglaise indisponible : passe coupée %ss.", int(COUPURE_SECONDES))
-        return ligne
-    except Exception:  # noqa: BLE001
-        logger.debug("Ligne non traduite.", exc_info=True)
-        return ligne
-    traduit = _restaurer(unicodedata.normalize("NFC", resultat.text), gardes)
-    if not traduit:
-        return ligne
+def _memoriser(ligne: str, traduit: str) -> None:
     _cache[ligne] = traduit
     if len(_cache) > _CACHE_MAX:
         _cache.popitem(last=False)
-    return traduit
+
+
+async def _appel(texte: str) -> str | None:
+    """Un appel au service ; None si refusé (et coupure après une vraie panne)."""
+    global _coupe_jusqua
+    from services import translation as tr
+
+    async with _verrou():
+        try:
+            resultat = await tr.translate(texte, "en", source="fr")
+        except tr.TranslationError as exc:
+            if exc.code == "unavailable":
+                _coupe_jusqua = time.monotonic() + COUPURE_SECONDES
+                logger.warning("Traduction anglaise indisponible : passe coupée %ss.", int(COUPURE_SECONDES))
+            return None
+        except Exception:  # noqa: BLE001
+            logger.debug("Texte non traduit.", exc_info=True)
+            return None
+    return unicodedata.normalize("NFC", resultat.text)
+
+
+_semaphore: asyncio.Semaphore | None = None
+
+
+def _verrou() -> asyncio.Semaphore:
+    # Google refuse au-delà de 5 requêtes/s (TooManyRequests vu en production le
+    # 03/11/2026) : deux appels à la fois au plus, tous messages confondus.
+    global _semaphore
+    if _semaphore is None:
+        _semaphore = asyncio.Semaphore(2)
+    return _semaphore
+
+
+async def _traduire_lot(lignes: list[str]) -> None:
+    """Traduit des lignes en UN appel par paquet (au lieu d'un appel par ligne).
+
+    Les lignes sont jointes par des retours à la ligne ; si le service rend un
+    autre nombre de lignes, chaque ligne du paquet est retraduite seule.
+    """
+    a_faire = [l for l in dict.fromkeys(lignes) if l not in _cache]
+    if not a_faire or time.monotonic() < _coupe_jusqua:
+        return
+    from services import translation as tr
+
+    paquets: list[list[str]] = [[]]
+    taille = 0
+    for ligne in a_faire:
+        if paquets[-1] and taille + len(ligne) + 1 > tr.MAX_LENGTH - 200:
+            paquets.append([])
+            taille = 0
+        paquets[-1].append(ligne)
+        taille += len(ligne) + 1
+    for paquet in paquets:
+        masques = [_masquer(l) for l in paquet]
+        sortie = await _appel("\n".join(m for m, _ in masques))
+        if sortie is None:
+            return
+        morceaux = sortie.split("\n")
+        if len(morceaux) != len(paquet):
+            morceaux = []
+            for masque, _ in masques:
+                seul = await _appel(masque)
+                if seul is None:
+                    return
+                morceaux.append(seul)
+        for ligne, (_, gardes), traduit in zip(paquet, masques, morceaux):
+            restaure = _restaurer(traduit.strip() if ligne == ligne.strip() else traduit, gardes)
+            if restaure:
+                _memoriser(ligne, restaure)
+
+
+def _lignes_francaises(textes) -> list[str]:
+    lignes: list[str] = []
+    for texte in textes:
+        if texte and est_francais(texte):
+            lignes.extend(l for l in str(texte).split("\n") if l.strip() and est_francais(l))
+    return lignes
+
+
+def _depuis_cache(texte: str) -> str:
+    if not texte:
+        return texte
+    lignes = str(texte).split("\n")
+    for ligne in lignes:
+        if ligne in _cache:
+            _cache.move_to_end(ligne)
+    return "\n".join(_cache.get(l, l) for l in lignes)
 
 
 async def traduire_texte(texte: str) -> str:
     """Traduit les lignes françaises d'un texte, laisse les autres intactes."""
     if not texte or not est_francais(texte):
         return texte
-    lignes = str(texte).split("\n")
-    a_traduire = sorted({l for l in lignes if l.strip() and est_francais(l)})
-    if not a_traduire:
-        return texte
-    traductions = dict(zip(a_traduire, await asyncio.gather(*(_traduire_ligne(l) for l in a_traduire))))
-    return "\n".join(traductions.get(l, l) for l in lignes)
+    await _traduire_lot(_lignes_francaises([texte]))
+    return _depuis_cache(texte)
 
 
 # --------------------------------------------------------------------------- charge utile
@@ -153,7 +213,12 @@ def _textes_embed(embed: Any) -> list[tuple[Any, str]]:
 
 
 async def traduire_charge(content: str | None, embeds: list, vue: Any) -> str | None:
-    """Traduit sur place embeds et vue, renvoie le contenu traduit. Budget borné."""
+    """Traduit sur place embeds et vue, renvoie le contenu traduit. Budget borné.
+
+    Tout le message part en un seul appel. Si le budget est dépassé, le message
+    part tel quel MAIS la traduction continue en fond et remplit le cache : le
+    même texte sortira en anglais dès la fois suivante.
+    """
     # Coupé dans le simulateur et les tests (résultats déterministes, pas de réseau).
     if os.environ.get("SENTRIX_TRADUCTION_AUTO", "1") == "0":
         return content
@@ -163,36 +228,43 @@ async def traduire_charge(content: str | None, embeds: list, vue: Any) -> str | 
     if vue is not None:
         cibles.extend(_textes_vue(vue))
     textes = [str(getattr(objet, attr) or "") for objet, attr in cibles]
-    if not any(est_francais(t) for t in [content or "", *textes]):
+    champs = [
+        (embed, index, field)
+        for embed in embeds or ()
+        for index, field in enumerate(list(getattr(embed, "fields", ()) or ()))
+    ]
+    tous = [content or "", *textes, *(f.name for _, _, f in champs), *(f.value for _, _, f in champs)]
+    lignes = _lignes_francaises(tous)
+    if not lignes:
         return content
-
-    async def tout():
-        nouveau = await traduire_texte(content) if content else content
-        resultats = await asyncio.gather(*(traduire_texte(t) for t in textes))
-        return nouveau, resultats
-
-    try:
-        nouveau, resultats = await asyncio.wait_for(tout(), BUDGET_SECONDES)
-    except asyncio.TimeoutError:
-        logger.info("Traduction anglaise trop lente : message envoyé tel quel.")
-        return content
-    for (objet, attr), avant, apres in zip(cibles, textes, resultats):
+    if any(l not in _cache for l in lignes):
+        tache = asyncio.ensure_future(_traduire_lot(lignes))
+        _en_fond.add(tache)
+        tache.add_done_callback(_en_fond.discard)
+        try:
+            await asyncio.wait_for(asyncio.shield(tache), BUDGET_SECONDES)
+        except asyncio.TimeoutError:
+            logger.info("Traduction anglaise trop lente : message envoyé tel quel, traduction gardée pour la suite.")
+            return content
+    for (objet, attr), avant in zip(cibles, textes):
+        apres = _depuis_cache(avant)
         if apres != avant:
             try:
                 setattr(objet, attr, apres)
             except Exception:  # noqa: BLE001 — attribut en lecture seule
                 pass
-    for embed in embeds or ():
-        for index, field in enumerate(list(getattr(embed, "fields", ()) or ())):
-            nom, valeur = field.name, field.value
-            if est_francais(nom) or est_francais(valeur):
-                try:
-                    nom2 = await asyncio.wait_for(traduire_texte(nom), BUDGET_SECONDES)
-                    valeur2 = await asyncio.wait_for(traduire_texte(valeur), BUDGET_SECONDES)
-                    embed.set_field_at(index, name=nom2, value=valeur2, inline=field.inline)
-                except Exception:  # noqa: BLE001
-                    pass
-    return nouveau
+    for embed, index, field in champs:
+        nom, valeur = _depuis_cache(field.name), _depuis_cache(field.value)
+        if (nom, valeur) != (field.name, field.value):
+            try:
+                embed.set_field_at(index, name=nom, value=valeur, inline=field.inline)
+            except Exception:  # noqa: BLE001
+                pass
+    return _depuis_cache(content) if content else content
+
+
+#: Traductions poursuivies après l'envoi (référence gardée : sinon le GC les coupe).
+_en_fond: set = set()
 
 
 __all__ = ["est_francais", "traduire_charge", "traduire_texte"]

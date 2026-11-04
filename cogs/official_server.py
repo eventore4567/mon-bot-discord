@@ -17,6 +17,8 @@ from typing import Any
 import discord
 from discord.ext import commands
 
+import config
+
 from utils import helpers
 from utils import sentrix_panels as panels
 from . import server_builder
@@ -24,7 +26,7 @@ from . import server_builder
 
 logger = logging.getLogger("bot.official-server")
 
-OFFICIAL_INVITE = "https://discord.gg/5P5Bqjqu5t"
+OFFICIAL_INVITE = config.OFFICIAL_SERVER_URL
 OFFICIAL_GUILD_SETTING = "sentrix_official_guild_id"
 RELEASE_GUILD_SETTING = "sentrix_release_announce_guild_id"
 RELEASE_CHANNEL_SETTING = "sentrix_release_announce_channel_id"

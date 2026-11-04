@@ -779,6 +779,7 @@ class Ai(commands.Cog, name="Ai"):
         self,
         user_id: int | None,
         author_name: str | None = None,
+        guild_id: int | None = None,
     ) -> str:
         instructions, self._creator_cache = await build_system_instructions(
             self.bot,
@@ -786,6 +787,20 @@ class Ai(commands.Cog, name="Ai"):
             author_name=author_name,
             creator_cache=self._creator_cache,
         )
+        # 03/11/2026 : serveur réglé en anglais -> l'IA répond en anglais (elle
+        # répondait « Hello tomioka, ça va ? » à « sentrix hello »).
+        if guild_id is not None:
+            try:
+                from cogs.language_runtime import get_language
+
+                if await get_language(self.bot, guild_id) == "en":
+                    instructions += (
+                        "\n\nLANGUE : ce serveur Discord est réglé en ANGLAIS. Réponds toujours "
+                        "entièrement en anglais, même si le message est écrit en français, sauf "
+                        "si l'utilisateur demande explicitement une autre langue."
+                    )
+            except Exception:  # noqa: BLE001 — la langue est un plus, pas une condition
+                logger.debug("Langue du serveur illisible pour l'IA.", exc_info=True)
         return instructions
 
     # ---------------------------------------------------------------- APPELS IA LEGACY (compat.)
@@ -808,7 +823,7 @@ class Ai(commands.Cog, name="Ai"):
 
         model_key = ai_service.pick_model(prompt if isinstance(prompt, str) else "")
         reasoning_effort = ai_service.pick_reasoning_effort(model_key, "medium")
-        instructions = await self._build_system_instructions(user_id, author_name)
+        instructions = await self._build_system_instructions(user_id, author_name, guild_id)
         # Les wrappers historiques n'acceptent pas "attachments". Le listener
         # fournit donc la sélection validée via le contexte de CETTE requête.
         if image_urls is None:
@@ -855,7 +870,7 @@ class Ai(commands.Cog, name="Ai"):
         """Comme ask_ai, mais demande aussi à l'IA un indice de confiance (1-10)."""
         model_key = ai_service.pick_model(prompt)
         reasoning_effort = ai_service.pick_reasoning_effort(model_key, "medium")
-        instructions = await self._build_system_instructions(user_id)
+        instructions = await self._build_system_instructions(user_id, guild_id=guild_id)
         instructions += (
             "\n\nTermine TOUJOURS ta réponse par une dernière ligne exactement au format "
             "'CONFIANCE: X/10' (X = ton indice de confiance dans l'exactitude de ta réponse, entre 1 et 10)."
@@ -2064,7 +2079,10 @@ class Ai(commands.Cog, name="Ai"):
         member = None
         if spec.target_kind == "member":
             target_text = action.slots.get("target")
-            if target_text == "__recent__":
+            if target_text == "__self__":
+                # « donne-moi un rôle » : la personne qui écrit.
+                resolution = ai_actions.MemberResolution(member=message.author)
+            elif target_text == "__recent__":
                 recent = self._recent_target(message)
                 resolution = ai_actions.MemberResolution(
                     member=recent,
@@ -2934,18 +2952,18 @@ class Ai(commands.Cog, name="Ai"):
                     ai_service.get_conversation_history(
                         self.bot, guild_id, channel_id, user_id, settings["memory_minutes"]
                     ),
-                    self._build_system_instructions(user_id, author_name),
+                    self._build_system_instructions(user_id, author_name, guild_id),
                 )
                 _, previous_response_id = memory
             else:
                 used_today, instructions = await asyncio.gather(
                     ai_service.get_daily_usage(self.bot, guild_id, user_id),
-                    self._build_system_instructions(user_id, author_name),
+                    self._build_system_instructions(user_id, author_name, guild_id),
                 )
             if used_today >= settings["daily_limit"]:
                 return {"ok": False, "error": f"📅 Limite quotidienne atteinte ({settings['daily_limit']} demandes/jour). Réessaie demain."}
         else:
-            instructions = await self._build_system_instructions(user_id, author_name)
+            instructions = await self._build_system_instructions(user_id, author_name, guild_id)
 
         model_key = ai_service.pick_model(question, forced_advanced=forced_advanced)
         if settings["default_model"] == ai_service.MODEL_LUNA and not forced_advanced:

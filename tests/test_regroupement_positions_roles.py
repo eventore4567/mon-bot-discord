@@ -72,20 +72,28 @@ async def _rafale(mouvements: list[tuple[int, int, int]]):
 
 
 async def _vingt_deplacements_donnent_un_seul_log():
-    mouvements = [(1000 + i, i, i + 1) for i in range(20)]
+    # Un rôle descendu de 20 crans décale d'un cran les 20 rôles traversés.
+    mouvements = [(1000 + i, i, i + 1) for i in range(20)] + [(2000, 21, 1)]
     envois, audit = await _rafale(mouvements)
 
-    assert len(envois) == 1, f"une rafale de 20 rôles doit produire 1 log, pas {len(envois)}"
+    assert len(envois) == 1, f"une rafale de 21 rôles doit produire 1 log, pas {len(envois)}"
     assert audit.await_count == 1, "une seule lecture d'audit log pour toute la rafale"
 
     champs = {f.name: f.value for f in envois[0]["panel"].fields}
-    assert "Rôles concernés" in champs
-    assert "**20**" in champs["Rôles concernés"]
-    # Aucun déplacement n'est perdu.
-    # 8 rôles détaillés max : une rafale de 29 ne doit pas remplir tout le salon.
-    assert len(champs["Positions modifiées"].splitlines()) <= 9
-    assert "12 autres rôles" in champs["Positions modifiées"]
-    assert "un réarrangement" in champs["Rôles concernés"]
+    # 04/11/2026 : seulement le rôle réellement déplacé, plus de liste « … et N autres ».
+    assert "21 → 1" in champs["Rôle"] and "descendu de 20" in champs["Rôle"]
+    assert champs["Autres rôles"] == "20 décalé(s) d'un cran"
+    assert "autres rôles." not in " ".join(champs.values())
+
+
+async def _decalage_seul_sans_log():
+    # Tout décalé d'un cran : effet d'un rôle créé/supprimé, déjà journalisé ailleurs.
+    envois, _ = await _rafale([(1000 + i, i, i + 1) for i in range(20)])
+    assert envois == []
+
+
+def test_un_simple_decalage_ne_produit_aucun_log():
+    asyncio.run(_decalage_seul_sans_log())
 
 
 def test_une_rafale_de_vingt_roles_ne_produit_qu_un_log():
@@ -97,8 +105,8 @@ async def _un_seul_deplacement_garde_le_format_historique():
     assert len(envois) == 1
     panel = envois[0]["panel"]
     champs = {f.name: f.value for f in panel.fields}
-    assert "Rôle" in champs and "Position modifiée" in champs
-    assert "3 → 9" in champs["Position modifiée"]
+    assert "Rôle" in champs
+    assert "3 → 9" in champs["Rôle"] and "monté de 6" in champs["Rôle"]
 
 
 def test_un_deplacement_isole_conserve_le_format_detaille():

@@ -11,16 +11,20 @@ import re
 import discord
 
 
+# 04/11/2026 (« une bonne carte avec des emojis rouges, comme Raid Protect ») :
+# bord coloré selon la gravité et pastille de couleur devant le membre.
+_ROUGE, _ORANGE, _JAUNE, _VERT = 0xED4245, 0xE67E22, 0xF1C40F, 0x57F287
 _ACTIONS: dict[str, tuple[str, int]] = {
-    "ban": ("🔨 Bannissement effectué", 0xAB6B6B),
-    "tempban": ("⏳ Bannissement temporaire effectué", 0xAB6B6B),
-    "hackban": ("🔨 Bannissement par identifiant", 0xAB6B6B),
-    "kick": ("🚪 Expulsion effectuée", 0x6D86AD),
-    "mute": ("🔇 Timeout appliqué", 0xB58A60),
-    "unmute": ("🔊 Timeout retiré", 0x6D9F89),
-    "warn": ("⚠️ Avertissement enregistré", 0xB58A60),
-    "unban": ("🔓 Bannissement levé", 0x6D9F89),
+    "ban": ("🔨 Bannissement effectué", _ROUGE),
+    "tempban": ("⏳ Bannissement temporaire effectué", _ROUGE),
+    "hackban": ("🔨 Bannissement par identifiant", _ROUGE),
+    "kick": ("🚪 Expulsion effectuée", _ORANGE),
+    "mute": ("🔇 Timeout appliqué", _JAUNE),
+    "unmute": ("🔊 Timeout retiré", _VERT),
+    "warn": ("⚠️ Avertissement enregistré", _ORANGE),
+    "unban": ("🔓 Bannissement levé", _VERT),
 }
+_PASTILLES = {_ROUGE: "🔴", _ORANGE: "🟠", _JAUNE: "🟡", _VERT: "🟢"}
 
 _SNOWFLAKE = re.compile(r"^[0-9]{17,22}$")
 
@@ -49,10 +53,10 @@ def build_sanction_confirmation(
     A failed DB write must NEVER turn a real Discord sanction into a false
     error. The response says so and still links to any available history.
     """
-    title, _colour = _ACTIONS.get(action, ("🛡️ Action de modération effectuée", 0x76849B))
+    title, colour = _ACTIONS.get(action, ("🛡️ Action de modération effectuée", 0x5865F2))
+    pastille = _PASTILLES.get(colour, "🔵")
     view = discord.ui.LayoutView(timeout=None)
-    # Pas de liseré coloré sur le flanc ; la bande fine des autres commandes en tête.
-    card = discord.ui.Container()
+    card = discord.ui.Container(accent_colour=discord.Colour(colour))
     from utils import sentrix_panels as _panels
 
     if _panels.poser_bandeau(card, "moderation"):
@@ -74,7 +78,7 @@ def build_sanction_confirmation(
         "-# ID : " + chr(96) + str(target_id) + chr(96)
         if target_id is not None else "-# Compte Discord"
     )
-    top = f"**{title}**\n{display_name} · {mention}\n{id_info}"
+    top = f"### {title}\n{pastille} {display_name} · {mention}\n{id_info}"
     avatar_url = getattr(getattr(target, "display_avatar", None), "url", None)
     if avatar_url:
         card.add_item(discord.ui.Section(
@@ -96,10 +100,10 @@ def build_sanction_confirmation(
     ))
     note_parts = []
     if actor is not None and getattr(actor, "id", None):
-        note_parts.append(f"Par <@{actor.id}>")
+        note_parts.append(f"🛡️ Par <@{actor.id}>")
     note_parts.append(
-        f"Dossier #{case_number}" if case_number is not None
-        else "Dossier non enregistré"
+        f"📁 Dossier #{case_number}" if case_number is not None
+        else "📁 Dossier non enregistré"
     )
     card.add_item(discord.ui.TextDisplay("-# " + " · ".join(note_parts)))
     if guild_id is not None and _valid_id(guild_id) and _valid_id(target_id):

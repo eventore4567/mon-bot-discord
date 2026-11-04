@@ -17,6 +17,16 @@ from discord.ext import commands
 from utils import checks
 from utils.security_member_bypass import can_bypass_message_filters
 
+
+async def _admins_soumis(bot, guild_id: int) -> bool:
+    """Mode strict du propriétaire (cogs/automod.py) : les admins sont filtrés aussi."""
+    get_cog = getattr(bot, "get_cog", None)
+    verifier = getattr(get_cog("Automod") if callable(get_cog) else None, "admins_soumis", None)
+    try:
+        return bool(verifier and await verifier(guild_id))
+    except Exception:  # noqa: BLE001
+        return False
+
 logger = logging.getLogger("bot.security.owner-final")
 
 _OWNER_ONLY_QUALIFIED = (
@@ -73,7 +83,7 @@ def _patch_antigif(bot: commands.Bot) -> None:
     async def owner_safe_antigif(_self, message):
         if message.guild is not None and (
             message.author.id == message.guild.owner_id
-            or can_bypass_message_filters(message.author)
+            or (can_bypass_message_filters(message.author) and not await _admins_soumis(bot, message.guild.id))
         ):
             return None
         return await current(message)
