@@ -6,6 +6,9 @@ on:
       - 'cogs/automod_center_v118.py'
       - 'cogs/setup_control_center.py'
       - 'tests/test_automod_center_v118.py'
+      - 'tests/test_invite_feed_order_v119.py'
+      - 'cogs/invites.py'
+      - 'cogs/invite_tracker_runtime.py'
       - '.github/workflows/automod-center-v118.yml'
   workflow_dispatch:
 
@@ -20,8 +23,8 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
       - name: Compile changed source
-        run: python -m py_compile cogs/automod_center_v118.py cogs/setup_control_center.py
+        run: python -m py_compile cogs/automod_center_v118.py cogs/setup_control_center.py cogs/invites.py cogs/invite_tracker_runtime.py
       - name: Run AutoMod panel tests
         env:
           DISCORD_TOKEN: "ci-placeholder-not-a-real-token"
-        run: python -m pytest -q tests/test_automod_center_v118.py
+        run: python -m pytest -q tests/test_automod_center_v118.py tests/test_invite_feed_order_v119.py
