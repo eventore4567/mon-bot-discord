@@ -41,9 +41,10 @@ async def main() -> int:
     v71 = sys.modules["cogs.security_verification_v71"]
     await v71.ensure_schema(bot)
     await bot.db.execute(
-        "INSERT INTO honeypot_verification (guild_id, enabled, trap_channel_id, unverified_role_id, sanction, created_at) "
-        "VALUES (?,1,?,?,'kick',?) ON CONFLICT(guild_id) DO UPDATE SET enabled=1, trap_channel_id=excluded.trap_channel_id, "
-        "unverified_role_id=excluded.unverified_role_id", (h.GID, h.CID, NON_VERIFIE, int(time.time())))
+        "INSERT INTO honeypot_verification (guild_id, enabled, trap_channel_id, unverified_role_id, verified_role_id, sanction, created_at) "
+        "VALUES (?,1,?,?,?,'kick',?) ON CONFLICT(guild_id) DO UPDATE SET enabled=1, trap_channel_id=excluded.trap_channel_id, "
+        "unverified_role_id=excluded.unverified_role_id, verified_role_id=excluded.verified_role_id",
+        (h.GID, h.CID, NON_VERIFIE, h.MEMBER_ROLE_ID, int(time.time())))
     await v71.settings(bot, h.GID)
     await bot.db.execute("UPDATE sentrix_security_v71 SET honeypot_enabled=1, honeypot_action='kick', "
                          "honeypot_delete_message=1 WHERE guild_id=?", (h.GID,))
@@ -66,8 +67,14 @@ async def main() -> int:
               f"compte non vérifié, {nom} : message supprimé et compte sanctionné", str(actes))
 
     actes = await poster(100000000000000504, (h.MEMBER_ROLE_ID,), "salut")
-    check(not any("/members/" in p for _m, p in actes), "un membre ordinaire n'est jamais sanctionné par le piège",
+    check(not any("/members/" in p for _m, p in actes), "un membre vérifié n'est jamais sanctionné par le piège",
           str(actes))
+
+    # 04/11/2026 : un membre ordinaire (ni staff, ni vérifié, sans le rôle « non
+    # vérifié ») qui écrit dans le salon piège est pris lui aussi.
+    actes = await poster(100000000000000505, (), "salut")
+    check(any(p.endswith("/members/100000000000000505") for _m, p in actes),
+          "un membre ordinaire non vérifié qui écrit dans le piège est sanctionné", str(actes))
 
     failed = [r for r in RESULTS if not r[0]]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} étapes réussies.")
