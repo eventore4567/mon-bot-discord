@@ -59,6 +59,21 @@ def test_new_onboarding_prioritizes_english():
 def test_language_picker_keeps_both_choices_available():
     from cogs import public_language_choice
     source = Path(public_language_choice.__file__).read_text(encoding="utf-8")
-    assert 'value=language_runtime.LANG_FR' not in source or 'language_runtime.LANG_FR' in source
+    assert '"sentrix:language:fr"' in source
+    assert '"sentrix:language:en"' in source
     assert '"fr"' in Path("cogs/language_runtime.py").read_text(encoding="utf-8")
     assert '"en"' in Path("cogs/language_runtime.py").read_text(encoding="utf-8")
+
+def test_components_v2_text_display_supports_localization():
+    import discord
+    display = discord.ui.TextDisplay("Bonjour")
+    display.content = "Hello"
+    assert display.content == "Hello"
+
+
+def test_actual_help_v79_localizes_both_prefix_and_slash():
+    from cogs import help_complete_v79
+    source = Path(help_complete_v79.__file__).read_text(encoding="utf-8")
+    assert "lang.cached_language(self.bot, guild_id)" in source
+    assert "SentriX Help Center" in source
+    assert "def localize(item):" in source
