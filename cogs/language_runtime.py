@@ -30,7 +30,7 @@ logger = logging.getLogger("bot.language-runtime")
 
 LANG_FR = "fr"
 LANG_EN = "en"
-DEFAULT_LANGUAGE = LANG_FR
+DEFAULT_LANGUAGE = LANG_EN
 _VALID_LANGUAGES = {LANG_FR, LANG_EN}
 
 # Commandes dont une traduction automatique mot-a-mot serait peu naturelle.
@@ -370,7 +370,7 @@ def _category_text(category, language: str) -> tuple[str, str]:
             "embeds": "Embeds, announcements and appearance.", "stats": "Bot statistics and diagnostics.",
             "owner": "Global owner-only bot management.", "other": "Other active commands.",
         }
-        summary = generic.get(getattr(category, "key", "other"), 'Activez SentriX commands.')
+        summary = generic.get(getattr(category, "key", "other"), 'SentriX commands and tools.')
     return name, summary
 
 
@@ -381,7 +381,7 @@ async def _ensure_table(bot: commands.Bot) -> None:
         """
         CREATE TABLE IF NOT EXISTS guild_language_settings (
             guild_id INTEGER PRIMARY KEY,
-            language TEXT NOT NULL DEFAULT 'fr',
+            language TEXT NOT NULL DEFAULT 'en',
             updated_at INTEGER NOT NULL DEFAULT 0
         )
         """
