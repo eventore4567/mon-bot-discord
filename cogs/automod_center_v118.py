@@ -352,7 +352,7 @@ class AutoModLogsView(PrivatePanel):
                 category = str(row["filter_name"] or "AutoMod")[:50]
                 entries.append(
                     f"**{category}**  ·  <t:{int(row['timestamp'])}:R>\n"
-                    f"{user}  ·  **{action}**\n-# {discord.utils.escape_markdown(reason)}"
+                    f"{user}  ·  **{action}**\n-# {discord.utils.escape_mentions(discord.utils.escape_markdown(reason))}"
                 )
             box.add_item(discord.ui.TextDisplay("\n\n".join(entries)))
         else:
