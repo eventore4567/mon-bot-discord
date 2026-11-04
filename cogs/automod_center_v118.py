@@ -102,7 +102,14 @@ class PrivatePanel(discord.ui.LayoutView):
 
     async def show(self, interaction: discord.Interaction):
         await self.render()
-        await interaction.response.edit_message(content=None, embeds=[], view=self, attachments=[])
+        if interaction.response.is_done():
+            await interaction.edit_original_response(
+                content=None, embeds=[], view=self, attachments=[]
+            )
+        else:
+            await interaction.response.edit_message(
+                content=None, embeds=[], view=self, attachments=[]
+            )
 
     async def open(self, interaction: discord.Interaction):
         await self.render()
@@ -148,7 +155,7 @@ class AutoModCenterView(PrivatePanel):
                     ),
                     accessory=button,
                 ))
-                if index < len(groups) - 1:
+                if index == 1:
                     box.add_item(discord.ui.Separator())
             async def open_logs(interaction):
                 await AutoModLogsView(self.bot, self.guild, self.author_id).open(interaction)
@@ -226,10 +233,11 @@ class AutoModCenterView(PrivatePanel):
                     self._confirm_nuke_off = True
                     return await self.show(interaction)
                 try:
+                    await interaction.response.defer()
                     await self.bot.db.set_automod(self.guild.id, "antinuke", int(not active))
                 except Exception:
                     logger.exception("Unable to change Anti-Nuke guild=%s", self.guild.id)
-                    return await interaction.response.send_message(
+                    return await interaction.followup.send(
                         "Anti-Nuke could not be updated.", ephemeral=True
                     )
                 self._confirm_nuke_off = False
@@ -269,13 +277,14 @@ class AutoModCenterView(PrivatePanel):
             async def change(interaction):
                 selected = set(select.values)
                 try:
+                    await interaction.response.defer()
                     for field in fields:
                         new_value = int(field in selected)
                         if new_value != int(bool(_value(current, field))):
                             await self.bot.db.set_automod(self.guild.id, field, new_value)
                 except Exception:
                     logger.exception("Failed to save AutoMod protections for guild=%s", self.guild.id)
-                    return await interaction.response.send_message(
+                    return await interaction.followup.send(
                         "Unable to save the protection settings.", ephemeral=True
                     )
                 await self.show(interaction)
@@ -350,6 +359,7 @@ class AutoModLogsView(PrivatePanel):
                     "Use a private staff-only channel for security logs.", ephemeral=True
                 )
             try:
+                await interaction.response.defer()
                 for key in LOG_CATEGORIES:
                     await log_service.set_log_config(
                         self.bot, self.guild.id, key,
@@ -357,7 +367,7 @@ class AutoModLogsView(PrivatePanel):
                     )
             except Exception:
                 logger.exception("Failed to configure security log channels guild=%s", self.guild.id)
-                return await interaction.response.send_message("Unable to save the log channel.", ephemeral=True)
+                return await interaction.followup.send("Unable to save the log channel.", ephemeral=True)
             await self.show(interaction)
         channel_select.callback = set_channel
         box.add_item(discord.ui.ActionRow(channel_select))
@@ -378,6 +388,7 @@ class AutoModLogsView(PrivatePanel):
                     "Choose a log channel before enabling a log type.", ephemeral=True
                 )
             try:
+                await interaction.response.defer()
                 for key in LOG_CATEGORIES:
                     conf = routes[key]
                     if bool(conf["enabled"]) != (key in selected):
@@ -387,7 +398,7 @@ class AutoModLogsView(PrivatePanel):
                         )
             except Exception:
                 logger.exception("Failed to toggle security logs guild=%s", self.guild.id)
-                return await interaction.response.send_message("Unable to save log settings.", ephemeral=True)
+                return await interaction.followup.send("Unable to save log settings.", ephemeral=True)
             await self.show(interaction)
         toggle.callback = set_enabled
         box.add_item(discord.ui.ActionRow(toggle))
