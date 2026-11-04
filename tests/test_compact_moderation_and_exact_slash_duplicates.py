@@ -59,9 +59,9 @@ def test_kick_card_displays_native_discord_mention_small_id_and_reason():
     assert "Dossier #23" in body
     assert "**répété**" not in body  # untrusted reason escaped
     assert "Spam" in body
+    # 04/11/2026 : plus de bouton « Historique » sous la carte de sanction.
     row = [x for x in card.children if isinstance(x, discord.ui.ActionRow)]
-    assert len(row) == 1
-    assert row[0].children[0].item.label == "Historique"
+    assert row == []
 
 
 def test_kick_card_when_case_db_fails_never_claims_case_persisted():

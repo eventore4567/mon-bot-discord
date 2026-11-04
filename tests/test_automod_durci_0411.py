@@ -63,8 +63,12 @@ def test_pings_repetes_sur_plusieurs_messages():
 
 
 class _Base:
-    def __init__(self):
+    def __init__(self, deja=None):
         self.actives = []
+        self.deja = dict(deja or {})
+
+    async def get_automod(self, guild_id):
+        return self.deja
 
     async def set_automod(self, guild_id, champ, valeur):
         self.actives.append(champ)
@@ -80,8 +84,10 @@ def test_aucun_filtre_n_est_active_d_office_a_l_arrivee():
         synchro.append(guild.id)
 
     cog._sync_native_suite = sync
+    cog.automod_cache = {}
     asyncio.run(cog.on_guild_join(SimpleNamespace(id=1)))
-    assert cog.bot.db.actives == []
+    # Aucun filtre de messages ; seulement la sécurité qui ne touche à aucun message.
+    assert sorted(cog.bot.db.actives) == ["antinuke", "antiraid", "escalation"]
     assert synchro == [1]
     assert not hasattr(am, "PROTECTIONS_DE_BASE")
 
@@ -94,3 +100,16 @@ def test_la_langue_du_serveur_est_reservee_au_staff():
     for fichier in ("cogs/public_language_choice.py", "cogs/guild_arrival.py"):
         source = (ROOT / fichier).read_text(encoding="utf-8")
         assert "Seuls les administrateurs peuvent choisir la langue du serveur" in source, fichier
+
+
+def test_un_serveur_deja_regle_garde_ses_choix_a_l_arrivee():
+    cog = am.AutoMod.__new__(am.AutoMod)
+    cog.bot = SimpleNamespace(db=_Base(deja={"antispam": 1, "antinuke": 0}))
+    cog.automod_cache = {}
+
+    async def sync(guild):
+        return None
+
+    cog._sync_native_suite = sync
+    asyncio.run(cog.on_guild_join(SimpleNamespace(id=1)))
+    assert cog.bot.db.actives == []

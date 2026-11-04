@@ -82,8 +82,8 @@ async def main() -> int:
            for b in _buttons({"components": (js or {}).get("components", [])})]
     warn = next((i for i in ids if i.startswith(f"sx:suite:automod:warn:{h.SECOND_ID}:SX-")), "")
     ref = warn.rsplit(":", 1)[-1] if warn else "?"
-    check(warn and any(":history:" in i for i in ids) and any(":timeout:" in i for i in ids),
-          "la carte AutoMod propose Historique, Avertir et Exclure 10 min", str(ids))
+    check(warn and not any(":history:" in i for i in ids) and any(":timeout:" in i for i in ids),
+          "la carte AutoMod propose Avertir et Exclure 10 min (sans Historique)", str(ids))
     # La référence de l'incident reste dans les boutons (custom_id) et la trace,
     # plus dans le texte (PR #503).
     check(ref.startswith("SX-") and f"Réf. {ref}" not in shown,

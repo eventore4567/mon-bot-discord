@@ -863,6 +863,10 @@ TOGGLE_FIELDS = [
     "escalation",
 ]
 
+#: Allumées à l'arrivée sur un serveur qui n'a encore rien réglé. Aucun filtre de
+#: messages : seulement ce qui protège le serveur sans toucher aux conversations.
+SECURITE_DE_BASE = ("antinuke", "antiraid", "escalation")
+
 
 # Protections qui inspectent un message et permettent le bypass par rôle
 # OU par membre individuel. Un salon strict reprend toujours la priorité
@@ -1844,11 +1848,31 @@ class AutoMod(commands.Cog, name="Automod"):
 
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild) -> None:
-        # 04/11/2026 : aucun filtre n'est allumé d'office à l'arrivée du bot
-        # (« enlève les automod déjà activés ») : chaque serveur choisit les siens
-        # dans /setup, ou tout d'un coup avec /security strict.
+        # 04/11/2026 : aucun FILTRE de messages n'est allumé d'office à l'arrivée
+        # du bot (« enlève les automod déjà activés ») : chaque serveur choisit les
+        # siens dans /setup, ou tout d'un coup avec /security strict. En revanche
+        # l'anti-nuke, l'anti-raid et l'escalade des sanctions ne gênent aucun
+        # message : sans eux, un compte qui supprimait tout le serveur n'était ni
+        # sanctionné ni annulé (test du 04/11, anti-nuke éteint).
+        try:
+            await self.activer_securite_de_base(guild.id)
+        except Exception:  # noqa: BLE001 — l'arrivée du bot ne doit jamais échouer
+            logger.warning("Sécurité de base non activée guild=%s", guild.id, exc_info=True)
         # Serveur neuf : réconcilie toutes les protections natives utiles.
         await self._sync_native_suite(guild)
+
+    async def activer_securite_de_base(self, guild_id: int) -> bool:
+        """Allume SECURITE_DE_BASE si le serveur n'a encore rien réglé. Vrai si fait."""
+        conf = await self.bot.db.get_automod(guild_id)
+        if conf is not None and any(
+            int(conf[champ] or 0) for champ in TOGGLE_FIELDS if champ in conf.keys()
+        ):
+            return False
+        for champ in SECURITE_DE_BASE:
+            await self.bot.db.set_automod(guild_id, champ, 1)
+        self.automod_cache.pop(guild_id, None)
+        logger.info("Sécurité de base activée pour le serveur %s.", guild_id)
+        return True
 
     async def log_action(
         self,
@@ -4248,11 +4272,14 @@ class AutoMod(commands.Cog, name="Automod"):
         # Démarrer le timeout avant d'attendre suppression, SQL ou logs.
         # L'incident est déjà publié : les messages concurrents restent idempotents.
         mention_action = None
-        if filter_name == "antimention":
+        # 04/11/2026 : un lien d'arnaque était seulement supprimé (sanction
+        # uniquement via l'escalade, éteinte par défaut). Il est sanctionné
+        # tout de suite, comme les pings en masse.
+        if filter_name in ("antimention", "antiscam"):
             try:
                 mention_action = await self._spam_timeout(message.guild, message.author, reason)
             except Exception:
-                logger.exception("Timeout anti-mentions impossible guild=%s user=%s", message.guild.id, message.author.id)
+                logger.exception("Timeout %s impossible guild=%s user=%s", filter_name, message.guild.id, message.author.id)
         await finish_deletion()
         if deletion.done() and not deletion.cancelled() and deletion.exception() is None:
             incident.deleted_ok = bool(deletion.result())
@@ -4305,6 +4332,11 @@ class AutoMod(commands.Cog, name="Automod"):
                 spam_duration = SPAM_TIMEOUT_SECONDS
                 incident.duration_s = SPAM_TIMEOUT_SECONDS
                 incident.action_label = "🔇 Mute anti-mentions" if mention_action else "⚠️ Mute anti-mentions non appliqué"
+            elif filter_name == "antiscam":
+                action = mention_action or "mute_failed"
+                spam_duration = SPAM_TIMEOUT_SECONDS
+                incident.duration_s = SPAM_TIMEOUT_SECONDS
+                incident.action_label = "🔇 Mute anti-arnaque" if mention_action else "⚠️ Mute anti-arnaque non appliqué"
             elif filter_name in SPAM_FILTERS:
                 action, spam_stage, spam_duration, spam_public_text = await self._spam_progressive_action(
                     message.guild,

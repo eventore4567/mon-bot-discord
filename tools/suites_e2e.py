@@ -57,10 +57,12 @@ async def main() -> int:
     await asyncio.wait_for(h.run_prefix(bot, guild, f"+warn <@{h.SECOND_ID}> spam", **ADMIN), 15)
     await h.settle(idle=0.4, maximum=3)
     ids = ids_in(since, h.CID)
-    history = next((i for i in ids if ":history:" in i), None)
     timeout = next((i for i in ids if ":timeout:" in i), None)
-    check(history is not None and timeout is not None and f":{h.SECOND_ID}:SX-" in timeout,
-          "+warn : boutons Historique et Exclure 10 min, liés au membre et à la référence", str(ids))
+    # 04/11/2026 : plus de bouton « Historique » sous les sanctions.
+    check(not any(":history:" in i for i in ids) and timeout is not None and f":{h.SECOND_ID}:SX-" in timeout,
+          "+warn : bouton Exclure 10 min (sans Historique), lié au membre et à la référence", str(ids))
+    # Un ancien message déjà publié garde son bouton Historique : il doit marcher.
+    history = (timeout or "").replace(":timeout:", ":history:")
 
     # 2 — Un simple membre clique « Exclure 10 min » : même refus que s'il avait tapé la commande.
     since = await click(bot, timeout or "", h.next_id(), "membre")
@@ -105,7 +107,7 @@ async def main() -> int:
     check(any(m == "DELETE" and p == f"/guilds/{h.GID}/bans/{h.SECOND_ID}" for m, p, _ in h.CALLS[since:]),
           "« Débannir » lève réellement le bannissement")
 
-    # 4 — Historique : le dossier du membre, en privé.
+    # 4 — Historique (bouton d'un ancien message) : le dossier du membre, en privé.
     since = await click(bot, history or "", h.next_id(), "admin")
     await h.settle(idle=0.4, maximum=3)
     shown = h.visible_text(h.CALLS[since:])

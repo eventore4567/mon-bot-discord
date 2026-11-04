@@ -648,7 +648,7 @@ class SecurityVerificationRuntimeV71:
         verified_id = _get(conf, "verified_role_id")
         if verified_id and any(role.id == int(verified_id) for role in member.roles):
             return "membre déjà vérifié"
-        return "n'a pas le rôle « non vérifié » (le piège ne vise que les comptes en attente)"
+        return "aucune exemption"
 
     def _tracer_ignore(self, message: discord.Message, conf: Any, raison: str) -> None:
         cle = (message.guild.id, message.author.id)
@@ -673,10 +673,10 @@ class SecurityVerificationRuntimeV71:
         verified_id = _get(conf, "verified_role_id")
         if verified_id and any(role.id == int(verified_id) for role in member.roles):
             return True
-        unverified_id = _get(conf, "unverified_role_id")
-        # Le piège ne vise que les comptes explicitement placés en attente.
-        if unverified_id and not any(role.id == int(unverified_id) for role in member.roles):
-            return True
+        # 04/11/2026 : le piège ne visait que les comptes portant le rôle « non
+        # vérifié » ; un membre ordinaire (ni staff, ni vérifié) écrivait dans le
+        # salon piège sans aucune sanction. Tout membre non staff et non vérifié
+        # qui écrit ici est désormais pris.
         return False
 
     async def on_message(self, message: discord.Message) -> None:

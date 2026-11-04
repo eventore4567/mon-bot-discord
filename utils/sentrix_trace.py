@@ -611,6 +611,12 @@ def suites_view(command_name: str, target_id: int, ref: str, *, english: bool = 
     actions = SUITES.get(command_name)
     if not actions:
         return None
+    # 04/11/2026 : plus de bouton « Historique » sous les sanctions (demande
+    # répétée) ; seuls les gestes d'action restent. Les anciens boutons déjà
+    # publiés fonctionnent toujours via suite_command.
+    actions = tuple(a for a in actions if a[0] != "history")
+    if not actions:
+        return None
     labels = SUITE_LABELS["en" if english else "fr"]
     view = discord.ui.View(timeout=None)
     for key, _command, _template in actions:

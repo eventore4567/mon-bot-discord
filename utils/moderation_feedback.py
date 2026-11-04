@@ -106,11 +106,8 @@ def build_sanction_confirmation(
         else "📁 Dossier non enregistré"
     )
     card.add_item(discord.ui.TextDisplay("-# " + " · ".join(note_parts)))
-    if guild_id is not None and _valid_id(guild_id) and _valid_id(target_id):
-        from cogs.log_history_center import PremiumLogAction
-        card.add_item(discord.ui.ActionRow(
-            PremiumLogAction("history", int(guild_id), int(target_id)),
-        ))
+    # 04/11/2026 : plus de bouton « Historique » sous la carte de sanction
+    # (demande répétée) ; le dossier reste consultable avec /moderation sanctions.
     view.add_item(card)
     return view
 
