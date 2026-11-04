@@ -18,7 +18,7 @@ GROUPS = (
     ("raid", "Anti-Raid", "Join raids, suspicious bots and new accounts.",
      ("antiraid", "antibot", "antiaccount")),
     ("spam", "Anti-Spam", "Flood, links, invites, pings and message spam.",
-     ("antispam", "antilink", "antilink_strict", "antiinvite",
+     ("antispam", "antilink", "antiinvite",
       "antimention", "anticaps", "antiemoji")),
     ("server", "Server Guard", "Protect critical channels, roles and permissions.",
      ("antinuke",)),
@@ -242,7 +242,11 @@ class AutoModLogsView(PrivatePanel):
             channel_types=[discord.ChannelType.text],
         )
         async def set_channel(interaction):
-            channel = channel_select.values[0]
+            channel = self.guild.get_channel(channel_select.values[0].id)
+            if not isinstance(channel, discord.TextChannel):
+                return await interaction.response.send_message(
+                    "Choose an existing text channel.", ephemeral=True
+                )
             ok, reason = log_service.validate_channel(self.guild, channel.id, needs_file=True)
             if not ok:
                 return await interaction.response.send_message(
@@ -340,15 +344,17 @@ class AutoModLogsView(PrivatePanel):
             f"{total} recorded action(s) · Page {page_num}/{page_count}",
         )
         if rows:
+            entries = []
             for row in rows:
                 user = f"<@{row['user_id']}>" if row["user_id"] else "Unknown member"
                 reason = str(row["reason"] or "No reason supplied").replace("\n", " ")[:220]
                 action = str(row["action"] or "Detected")[:50]
                 category = str(row["filter_name"] or "AutoMod")[:50]
-                box.add_item(discord.ui.TextDisplay(
+                entries.append(
                     f"**{category}**  ·  <t:{int(row['timestamp'])}:R>\n"
                     f"{user}  ·  **{action}**\n-# {discord.utils.escape_markdown(reason)}"
-                ))
+                )
+            box.add_item(discord.ui.TextDisplay("\n\n".join(entries)))
         else:
             box.add_item(discord.ui.TextDisplay("No matching AutoMod actions yet."))
         filter_select = discord.ui.Select(
