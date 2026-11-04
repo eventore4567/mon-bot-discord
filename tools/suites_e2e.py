@@ -68,7 +68,7 @@ async def main() -> int:
     since = await click(bot, timeout or "", h.next_id(), "membre")
     await h.settle(idle=0.4, maximum=3)
     check(not timeouts(since, h.SECOND_ID), "un membre qui clique n'exclut personne")
-    check("accès" in h.visible_text(h.CALLS[since:]), "il reçoit le refus de permission", h.visible_text(h.CALLS[since:])[:160])
+    check("accès" in h.visible_text(h.CALLS[since:]).lower(), "il reçoit le refus de permission", h.visible_text(h.CALLS[since:])[:160])
 
     # 3 — L'administrateur clique : l'exclusion part, tracée comme un geste par bouton.
     since = await click(bot, timeout or "", h.next_id(), "admin")

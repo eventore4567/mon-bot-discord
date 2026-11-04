@@ -96,7 +96,7 @@ async def main() -> int:
 
     clicked = await click(bot, warn, h.next_id(), "membre")
     await h.settle(idle=0.4, maximum=3)
-    check(not await warns() and "accès" in h.visible_text(h.CALLS[clicked:]),
+    check(not await warns() and "accès" in h.visible_text(h.CALLS[clicked:]).lower(),
           "un simple membre qui clique « Avertir » est refusé, aucun avertissement", h.visible_text(h.CALLS[clicked:])[:160])
     clicked = await click(bot, warn, h.next_id(), "moderateur")
     await h.settle(idle=0.6, maximum=4)

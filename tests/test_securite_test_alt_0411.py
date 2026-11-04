@@ -68,3 +68,14 @@ def test_plus_de_bouton_historique_sous_les_sanctions():
     assert sentrix_trace.suites_view("kick", 42, "SX-1") is None
     # Les anciens boutons publiés restent utilisables.
     assert sentrix_trace.suite_command("mute", "history", 42, "SX-1") == ("modhistory", "<@42>")
+
+
+def test_un_refus_de_permission_est_une_carte_rouge():
+    from utils import sentrix_panels as panels
+    from utils.access_matrix import DENIAL_HEADER
+
+    carte = panels.carte_refus(f"{DENIAL_HEADER}\n\n**Permission Discord requise :** Bannir des membres.")
+    assert carte.titre == "🔒 Accès refusé"
+    assert carte.kind == "danger"
+    assert DENIAL_HEADER not in str(carte.sous_titre)
+    assert "Bannir des membres" in str(carte.sous_titre)
