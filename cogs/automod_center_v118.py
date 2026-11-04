@@ -164,7 +164,7 @@ class AutoModCenterView(PrivatePanel):
             active = bool(_value(current, "antinuke"))
             box = self._container(
                 "Anti-Nuke",
-                ("**Enabled**" if active else "**Disabled**") +
+                ("**Configured ON**" if active else "**Configured OFF**") +
                 " · Critical server protection",
             )
             missing = []
@@ -179,7 +179,7 @@ class AutoModCenterView(PrivatePanel):
                     missing.append(label)
             box.add_item(discord.ui.TextDisplay(
                 "**Protection status**\n"
-                + ("Active — monitors sensitive server changes." if active
+                + ("Enabled in SentriX configuration." if active
                    else "Inactive — no Anti-Nuke enforcement.")
                 + ("\n**Missing bot permissions:** " + ", ".join(missing)
                    if missing else "\n**Permissions:** available")
@@ -208,9 +208,16 @@ class AutoModCenterView(PrivatePanel):
                 )
             except Exception:
                 incident = None
+                incident_lookup_failed = True
+            else:
+                incident_lookup_failed = False
             if incident:
                 box.add_item(discord.ui.TextDisplay(
                     f"**Last incident:** <t:{int(incident['created_at'])}:R>"
+                ))
+            elif incident_lookup_failed:
+                box.add_item(discord.ui.TextDisplay(
+                    "**Incident history:** unavailable in this runtime"
                 ))
             else:
                 box.add_item(discord.ui.TextDisplay(
