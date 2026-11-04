@@ -863,13 +863,6 @@ TOGGLE_FIELDS = [
     "escalation",
 ]
 
-#: Allumées à l'arrivée sur un serveur qui n'a encore aucun filtre (04/11/2026).
-#: Pas l'anti-liens ni l'anti-bot : ils bloquent des usages légitimes tant que
-#: le serveur n'a pas choisi ses liens et ses bots autorisés.
-PROTECTIONS_DE_BASE = (
-    "antispam", "antimention", "anticaps", "antiinvite", "antiscam", "antiinsult",
-    "antiraid", "antinuke", "escalation",
-)
 
 # Protections qui inspectent un message et permettent le bypass par rôle
 # OU par membre individuel. Un salon strict reprend toujours la priorité
@@ -1851,29 +1844,11 @@ class AutoMod(commands.Cog, name="Automod"):
 
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild) -> None:
-        # 04/11/2026 : un serveur neuf n'avait AUCUN filtre actif (tout à 0 par
-        # défaut) — spam, pings et majuscules passaient sans rien. Protections de
-        # base allumées à l'arrivée, seulement si personne n'a encore rien réglé.
-        try:
-            await self.activer_protections_de_base(guild.id)
-        except Exception:  # noqa: BLE001 — l'arrivée du bot ne doit jamais échouer
-            logger.warning("Protections de base non activées guild=%s", guild.id, exc_info=True)
+        # 04/11/2026 : aucun filtre n'est allumé d'office à l'arrivée du bot
+        # (« enlève les automod déjà activés ») : chaque serveur choisit les siens
+        # dans /setup, ou tout d'un coup avec /security strict.
         # Serveur neuf : réconcilie toutes les protections natives utiles.
         await self._sync_native_suite(guild)
-
-    async def activer_protections_de_base(self, guild_id: int) -> bool:
-        """Allume PROTECTIONS_DE_BASE si aucun filtre n'est encore actif. Vrai si fait."""
-        conf = await self.bot.db.get_automod(guild_id)
-        deja = conf is not None and any(
-            int(conf[champ] or 0) for champ in TOGGLE_FIELDS if champ in conf.keys()
-        )
-        if deja:
-            return False
-        for champ in PROTECTIONS_DE_BASE:
-            await self.bot.db.set_automod(guild_id, champ, 1)
-        self.automod_cache.pop(guild_id, None)
-        logger.info("Protections de base activées pour le serveur %s.", guild_id)
-        return True
 
     async def log_action(
         self,
