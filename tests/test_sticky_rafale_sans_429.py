@@ -87,3 +87,25 @@ def test_une_rafale_ne_republie_le_sticky_qu_une_fois(monkeypatch):
     assert channel.lectures == 0
     assert db.row["message_id"] == 1001 and db.row["counter"] == 0
     assert cog._sticky_pending == {}
+
+
+def test_un_spam_continu_republie_au_plus_une_fois_par_intervalle(monkeypatch):
+    # Un salon toujours actif garde son sticky visible, sans un appel par message.
+    monkeypatch.setattr(sentrix_plus, "STICKY_REPOST_DELAY_SECONDS", 0.05)
+    db = _Db()
+    cog = SentriXPlus.__new__(SentriXPlus)
+    cog.bot = SimpleNamespace(db=db)
+    cog._no_sticky = {}
+    cog._sticky_locks = {}
+    cog._sticky_pending = {}
+    channel = _Channel()
+
+    async def scenario():
+        for numero in range(40):  # ~0,4 s de spam sans pause
+            await SentriXPlus.on_message(cog, _message(channel, numero))
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.2)
+
+    asyncio.run(scenario())
+    assert 2 <= channel.envois <= 10
+    assert channel.envois < 40

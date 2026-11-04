@@ -18,8 +18,9 @@ from utils import sentrix_panels as panels
 from discord.ext import commands, tasks
 
 logger = logging.getLogger("bot.sentrix-plus")
-# Délai de silence avant de republier un sticky : une rafale de messages ne
-# provoque qu'une seule republication.
+# Intervalle minimal entre deux republications d'un même sticky : une rafale de
+# messages ne provoque qu'une republication par intervalle, et un salon toujours
+# actif garde son sticky visible (attendre le silence ne le republierait jamais).
 STICKY_REPOST_DELAY_SECONDS = 3.0
 
 STAR_EMOJI = "⭐"
@@ -877,7 +878,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
         # 04/11/2026 : une rafale de messages (spam, conversation rapide) relisait,
         # supprimait et republiait le sticky À CHAQUE message — plus de 10 000
         # réponses 429 de Discord en production. La republication est maintenant
-        # regroupée : une seule par rafale, après un court silence.
+        # limitée : au plus une toutes les STICKY_REPOST_DELAY_SECONDS par salon.
         en_attente = self._sticky_pending.get(channel_id)
         if en_attente is not None and not en_attente.done():
             return
