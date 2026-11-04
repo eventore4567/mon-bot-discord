@@ -34,7 +34,8 @@ _CRITICAL_CONTRACTS: dict[str, tuple[str, ...]] = {
     "withdraw": ("montant",),
     "balance": ("membre",),
     "rps": ("choix",),
-    "mute": ("membre", "duree", "raison"),
+    # 04/11/2026 : /mute expose « notifier » (MP facultatif), comme /warn.
+    "mute": ("membre", "duree", "raison", "notifier"),
     "tempban": ("membre", "duree", "raison"),
     # 30/10/2026 : le choix de purge des messages est désormais interactif.
     # /ban expose envoyer_mp pour le MP facultatif. Synchronisé avec
