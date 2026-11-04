@@ -5,7 +5,7 @@ les commandes préfixées, puis elle affichait séparément un compteur slash. U
 slash sans équivalent + n'apparaissait donc jamais dans les catégories.
 
 V79 construit un catalogue unifié à partir de :
-- toutes les commandes préfixées enregistrées, y compris celles marquées hidden ;
+- les commandes préfixées réellement visibles dans le catalogue (les commandes hidden restent internes) ;
 - toutes les commandes slash chat-input finales, y compris les sous-commandes de groupes.
 
 Les commandes qui existent en + et / sont fusionnées sur une seule fiche. Les commandes
@@ -24,6 +24,7 @@ from discord.ext import commands
 
 from utils import embeds
 from utils import sentrix_panels as panels
+from utils.log_banners import nom_fichier
 from utils.command_permissions import (
     ADMIN_COGS,
     COMMAND_PERMISSION_FALLBACKS,
@@ -41,6 +42,7 @@ logger = logging.getLogger("bot.help-complete-v79")
 RUNTIME_MARKER = "Help Complete Catalog V79"
 HOME_PAGE_SIZE = 6
 LIST_PAGE_SIZE = 6
+HELP_BANNER_FAMILY = "config"
 
 
 @dataclass
@@ -100,6 +102,16 @@ def _category_from_name(cog_name: str, invocation: str) -> str:
     return "administration"
 
 
+def _prefix_hidden(command: commands.Command) -> bool:
+    """Respecte le masquage d'une commande ou de l'un de ses groupes parents."""
+    current = command
+    while current is not None:
+        if bool(getattr(current, "hidden", False)):
+            return True
+        current = getattr(current, "parent", None)
+    return False
+
+
 def _walk_slash(bot: commands.Bot):
     """Retourne uniquement les commandes chat-input réellement invocables."""
     def walk(node, parent: str = ""):
@@ -118,9 +130,11 @@ def _walk_slash(bot: commands.Bot):
 def _catalog(bot: commands.Bot) -> list[HelpEntry]:
     entries: dict[str, HelpEntry] = {}
 
-    # Ne pas filtrer command.hidden : l'utilisateur a demandé que toutes les commandes
-    # réellement enregistrées restent consultables, y compris les commandes admin/owner.
+    # Le catalogue final respecte la politique command_catalog_cleanup : une commande
+    # hidden reste disponible techniquement mais ne doit pas réapparaître dans /help.
     for command in bot.walk_commands():
+        if _prefix_hidden(command):
+            continue
         name = command.qualified_name.strip()
         key = _normalise(name)
         if not key:
@@ -132,8 +146,14 @@ def _catalog(bot: commands.Bot) -> list[HelpEntry]:
             prefix_command=command,
         )
 
+    slash_mapping = {}
+    slash_mapping.update(getattr(bot, "_sentrix_v95_slash_mapping", {}) or {})
+    slash_mapping.update(getattr(bot, "_sentrix_v110_direct_mapping", {}) or {})
+
     for slash_name, slash_command in _walk_slash(bot):
-        key = _normalise(slash_name)
+        mapping = slash_mapping.get(f"/{slash_name}", {}) or {}
+        original_name = str(mapping.get("original") or "").strip()
+        key = _normalise(original_name or slash_name)
         if not key:
             continue
         entry = entries.get(key)
@@ -357,6 +377,20 @@ class SentriXHelpV79(discord.ui.LayoutView):
         self.return_index = 0
         self.return_query: str | None = None
 
+    def fichiers(self) -> list[discord.File]:
+        """Bannière transparente ultra-fine, identique au moteur des logs."""
+        if self.mode == "closed":
+            return []
+        fichier = panels.fichier_de_famille(HELP_BANNER_FAMILY)
+        return [fichier] if fichier is not None else []
+
+    def _container(self) -> discord.ui.Container:
+        container = discord.ui.Container(accent_colour=setup_v73.ACCENT)
+        galerie = discord.ui.MediaGallery()
+        galerie.add_item(media=f"attachment://{nom_fichier(HELP_BANNER_FAMILY)}")
+        container.add_item(galerie)
+        return container
+
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if int(interaction.user.id) == self.author_id:
             return True
@@ -424,7 +458,7 @@ class SentriXHelpV79(discord.ui.LayoutView):
 
     async def _edit(self, interaction: discord.Interaction) -> None:
         self.rebuild()
-        await interaction.edit_original_response(content=None, embed=None, attachments=[], view=self)
+        await panels.editer(interaction, self)
 
     def rebuild(self) -> None:
         self.clear_items()
@@ -455,13 +489,13 @@ class SentriXHelpV79(discord.ui.LayoutView):
         start = self.home_index * HOME_PAGE_SIZE
         page_keys = keys[start:start + HOME_PAGE_SIZE]
 
-        container = discord.ui.Container(accent_colour=setup_v73.ACCENT)
+        container = self._container()
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
                     "# Centre d'aide SentriX\n"
-                    "Le catalogue affiche maintenant **toutes les commandes enregistrées** : commandes `+`, commandes `/`, "
-                    "sous-commandes slash et commandes administratives.\n\n"
+                    "Le catalogue affiche uniquement la **surface utile et visible** de SentriX : commandes `+`, commandes `/` "
+                    "et commandes staff conservées. Les commandes internes ou masquées n'encombrent plus l'aide.\n\n"
                     f"**{len(entries)} commandes uniques** · **{prefix_count} en +** · **{slash_count} en /**"
                     + (f" · **{slash_only} uniquement en /**" if slash_only else "")
                     + f"\nCatégories : page **{self.home_index + 1}/{pages}**"
@@ -532,7 +566,7 @@ class SentriXHelpV79(discord.ui.LayoutView):
             subtitle = description
         elif self.mode == "all":
             title = "📚 Toutes les commandes"
-            subtitle = "Catalogue complet des commandes `+` et `/` enregistrées dans SentriX."
+            subtitle = "Catalogue des commandes `+` et `/` visibles dans SentriX."
         else:
             title = "🔎 Recherche"
             subtitle = f"Résultats pour **{self.query or ''}**"
@@ -540,7 +574,7 @@ class SentriXHelpV79(discord.ui.LayoutView):
         pages = _chunks(self.rows)
         self.index = min(max(self.index, 0), len(pages) - 1)
         chunk = pages[self.index]
-        container = discord.ui.Container(accent_colour=setup_v73.ACCENT)
+        container = self._container()
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -621,7 +655,7 @@ class SentriXHelpV79(discord.ui.LayoutView):
         if prefix_usage:
             usage_lines.append(f"`{prefix_usage}`")
 
-        container = discord.ui.Container(accent_colour=setup_v73.ACCENT)
+        container = self._container()
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(f"# {_title(entry, self.prefix)}\n{_description(entry)}"),
@@ -692,10 +726,10 @@ async def _send_help_v79(self, target, query: str | None = None):
     await view.prepare()
 
     if isinstance(target, commands.Context):
-        return await target.send(content=None, embed=None, view=view)
+        return await panels.envoyer(target, view)
     if target.response.is_done():
-        return await target.followup.send(content=None, embed=None, view=view)
-    return await target.response.send_message(content=None, embed=None, view=view)
+        return await panels.envoyer(target.followup, view)
+    return await panels.envoyer(target.response, view)
 
 
 def install(bot: commands.Bot) -> None:
@@ -712,7 +746,7 @@ def install(bot: commands.Bot) -> None:
 
     bot._sentrix_help_complete_v79 = True
     logger.info(
-        "%s installé : +help et /help listent désormais toutes les commandes + et /, y compris slash-only.",
+        "%s installé : +help et /help listent la surface utile/visible, y compris les slash-only publics.",
         RUNTIME_MARKER,
     )
 

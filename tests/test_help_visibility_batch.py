@@ -1,12 +1,10 @@
-"""Audit du 2026-09-09 sur les familles tickets/logs/notifications/server/économie/
-niveaux/emoji : une trentaine de commandes réelles, sans remplaçant fonctionnel,
-étaient masquées de `+help` par le filet générique d'`apply_surface()` — ni fusionnées
-dans `/setup` (contrairement à leurs voisines `logsetup`/`create-logs`/`automod-status`),
-ni classées nulle part. Un membre ou un staff qui ne connaissait pas déjà le nom exact
-d'une de ces commandes n'avait aucun moyen de la découvrir.
+"""Contrat de visibilité des commandes avancées dans +help.
 
-Corrigé en les ajoutant à `HELP_VISIBLE_EXTRA_COMMANDS`, sans toucher au budget slash
-(aucune n'est ajoutée à `NORMAL_DIRECT_COMMANDS`)."""
+La surface publique a été volontairement réduite : les alias retirés, commandes
+fusionnées et actions déjà accessibles sous des groupes slash ne doivent plus être
+réaffichés juste pour satisfaire un ancien inventaire. Ce test verrouille uniquement
+les commandes avancées qui restent volontairement découvrables en préfixe.
+"""
 from __future__ import annotations
 
 import unittest
@@ -14,24 +12,38 @@ import unittest
 from cogs.command_catalog_cleanup import (
     ADMIN_DIRECT_COMMANDS,
     HELP_VISIBLE_EXTRA_COMMANDS,
+    LOW_VALUE_HIDDEN_COMMANDS,
     NORMAL_DIRECT_COMMANDS,
+    PURE_DUPLICATE_COMMANDS,
 )
 
 
 class HelpVisibilityBatchTests(unittest.TestCase):
-    def test_commandes_precedemment_orphelines_sont_desormais_listees(self):
+    def test_commandes_avancees_volontairement_visibles_restent_listees(self):
         expected = {
+            "ticketsetup", "logsetup",
             "notifs-ping", "notifs-list", "notifs-remove",
-            "logs", "logevent", "logsearch",
-            "server-audit", "server-health", "server-growth", "server-managed",
-            "economy", "rob", "buy", "sell", "gamble", "deposit", "withdraw",
-            "give-money", "reset-economy", "shoppanel", "shoprole", "shop", "weekly",
-            "set-bio", "rep", "reputation", "repleaderboard", "rephistory",
+            "logevent", "logsearch",
+            "rob", "buy", "sell", "gamble", "deposit", "withdraw",
+            "rep", "reputation", "repleaderboard",
             "voice-time", "level-roles",
             "addemoji", "deleteemoji", "emoji-list",
         }
         missing = expected - HELP_VISIBLE_EXTRA_COMMANDS
         self.assertEqual(missing, set(), f"toujours absentes : {missing}")
+        self.assertNotIn("shop", HELP_VISIBLE_EXTRA_COMMANDS)
+        self.assertNotIn("weekly", HELP_VISIBLE_EXTRA_COMMANDS)
+        self.assertNotIn("set-bio", HELP_VISIBLE_EXTRA_COMMANDS)
+        self.assertNotIn("rephistory", HELP_VISIBLE_EXTRA_COMMANDS)
+        self.assertNotIn("economy", HELP_VISIBLE_EXTRA_COMMANDS)
+        self.assertNotIn("logs", HELP_VISIBLE_EXTRA_COMMANDS)
+        for name in (
+            "server-audit", "server-health", "server-growth", "server-managed",
+            "give-money", "reset-economy", "shoppanel", "shoprole",
+        ):
+            self.assertNotIn(name, HELP_VISIBLE_EXTRA_COMMANDS)
+        self.assertNotIn("setmodrole", NORMAL_DIRECT_COMMANDS)
+        self.assertIn("setmodrole", LOW_VALUE_HIDDEN_COMMANDS)
 
     def test_aucune_de_ces_commandes_ne_consomme_le_budget_slash(self):
         """Non-régression : ce lot d'orphelines reste +help uniquement.
@@ -39,6 +51,10 @@ class HelpVisibilityBatchTests(unittest.TestCase):
         commande directe, donc elle est testée avec NORMAL_DIRECT_COMMANDS ailleurs."""
         overlap = HELP_VISIBLE_EXTRA_COMMANDS & NORMAL_DIRECT_COMMANDS
         self.assertEqual(overlap, set())
+
+    def test_les_doublons_confirmes_ne_sont_jamais_visibles(self):
+        visible = NORMAL_DIRECT_COMMANDS | HELP_VISIBLE_EXTRA_COMMANDS | ADMIN_DIRECT_COMMANDS
+        self.assertEqual(PURE_DUPLICATE_COMMANDS & visible, set())
 
     def test_aucun_chevauchement_avec_admin_direct_commands(self):
         """Un nom ne doit apparaître que dans un seul ensemble de visibilité (même

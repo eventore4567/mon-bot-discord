@@ -184,7 +184,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         switch_states = await setup_ui.module_switch_states(self.bot, self.guild.id)
         actifs = sum(1 for etat in switch_states.values() if etat == "enabled")
 
-        container = discord.ui.Container(accent_colour=v73.ACCENT)
+        container = self._container()
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -277,7 +277,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         )
         problems = sum("CORRIGER" in states.get(key, "") for key in CATEGORY_ORDER)
 
-        container = discord.ui.Container(accent_colour=v73.ACCENT)
+        container = self._container()
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -419,7 +419,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             style=discord.ButtonStyle.success if enabled else discord.ButtonStyle.secondary,
             disabled=True,
         )
-        container = discord.ui.Container(accent_colour=v73.ACCENT)
+        container = self._container()
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -469,7 +469,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             else discord.ButtonStyle.secondary
         )
         status = discord.ui.Button(label=status_label, style=status_style, disabled=True)
-        container = discord.ui.Container(accent_colour=v73.ACCENT)
+        container = self._container()
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -595,7 +595,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             disabled=True,
         )
 
-        container = discord.ui.Container(accent_colour=v73.ACCENT)
+        container = self._container()
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -778,10 +778,10 @@ async def _send_setup_v74(self, target):
     await view.prepare()
 
     if isinstance(target, commands.Context):
-        return await target.send(view=view)
+        return await panels.envoyer(target, view)
     if target.response.is_done():
-        return await target.followup.send(view=view)
-    return await target.response.send_message(view=view)
+        return await panels.envoyer(target.followup, view, ephemere=True)
+    return await panels.envoyer(target.response, view, ephemere=True)
 
 
 def install(bot: commands.Bot) -> None:

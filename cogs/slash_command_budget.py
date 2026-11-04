@@ -10,11 +10,18 @@ from discord.ext import commands
 
 logger = logging.getLogger("bot.slash-budget")
 GLOBAL_CHAT_INPUT_BUDGET = 100
+# Cible produit : SentriX ne doit plus remplir les 100 emplacements juste parce
+# qu'ils existent. Musique, économie et informations secondaires sont regroupées,
+# avec une petite marge au-dessus des racines réellement obligatoires.
+PUBLIC_CHAT_INPUT_TARGET = 60
 
-# Discord limite les commandes chat-input globales à 100 racines. Les quatre entrées
-# proof ci-dessous doivent rester disponibles même quand le catalogue historique remplit
-# déjà le budget.
-PROOF_SLASH_PREFERRED = frozenset({"proof", "proofsetup", "proofexample", "proofstatus"})
+# Discord limite les commandes chat-input globales à 100 racines. Les trois entrées
+# proof ci-dessous restent prioritaires dans la surface publique compacte.
+PROOF_SLASH_PREFERRED = frozenset({"proof", "proofsetup", "proofstatus"})
+PROOF_SLASH_HIDDEN_HELPERS = frozenset({
+    "proofexample", "proofexample-remove", "proofexamples", "proofreset",
+})
+LOW_VALUE_LEGACY_ROOTS = frozenset({"owner", "more"})
 
 
 def _v110_public_root_names() -> set[str]:
@@ -35,6 +42,30 @@ def _v110_public_root_names() -> set[str]:
         if str(root_name).strip()
     )
     return roots
+
+
+def _v110_source_names() -> set[str]:
+    """Noms historiques remplacés par la surface V110 finale.
+
+    Les sources regroupées (/daily -> /economy daily) et les alias renommés
+    (/nickname -> /setnick) ne doivent plus survivre comme racines slash séparées.
+    """
+    try:
+        import sentrix_command_surface_v110 as surface
+    except (ImportError, ModuleNotFoundError):
+        return set()
+
+    names = {
+        str(name).casefold().strip()
+        for name in getattr(surface, "STANDARD_GROUPED_SLASH", {})
+        if str(name).strip()
+    }
+    for source_name, public_name in getattr(surface, "STANDARD_DIRECT_SLASH", {}).items():
+        source = str(source_name).casefold().strip()
+        public = str(public_name).casefold().strip()
+        if source and source != public:
+            names.add(source)
+    return names
 
 
 def _canonical_group_root_names() -> set[str]:
@@ -61,6 +92,7 @@ def _canonical_group_root_names() -> set[str]:
         if str(name).strip()
     )
     roots.update({"giveaway", "invites", "notifications"})
+    roots.difference_update(LOW_VALUE_LEGACY_ROOTS)
     return roots
 
 
@@ -75,20 +107,30 @@ def _required_names() -> set[str]:
 
 
 def _preferred_names() -> set[str]:
-    """Tier 2 : anciennes racines utiles, conservées seulement après le tier 1."""
-    from .command_catalog_cleanup import NORMAL_DIRECT_COMMANDS
+    """Tier 2 : anciennes racines utiles, sans les doublons déjà groupés/renommés."""
+    from .command_catalog_cleanup import GAME_COMMANDS, NORMAL_DIRECT_COMMANDS
 
-    return _required_names() | set(NORMAL_DIRECT_COMMANDS)
+    legacy = set(NORMAL_DIRECT_COMMANDS)
+    legacy.difference_update(_v110_source_names())
+    legacy.difference_update(GAME_COMMANDS)
+    return _required_names() | legacy
 
 
 def _excluded_names() -> set[str]:
-    from .command_catalog_cleanup import ADMIN_DIRECT_COMMANDS, MERGED_COMMANDS
+    from .command_catalog_cleanup import GAME_COMMANDS, INTERNAL_MAINTENANCE_COMMANDS, MERGED_COMMANDS
 
-    # MERGED_COMMANDS décrit la visibilité historique des commandes préfixées. V110 peut
-    # réutiliser l'un de ces noms comme racine slash standard (ex. /queue, /resume,
-    # /profile, /shop, /weekly). Ces racines sont intentionnelles et ne doivent donc pas
-    # être bloquées par le filtre legacy du budget.
-    legacy_excluded = set(ADMIN_DIRECT_COMMANDS) | set(MERGED_COMMANDS)
+    # MERGED_COMMANDS décrit la visibilité historique des commandes préfixées.
+    # Certaines familles sont désormais regroupées sous une racine V110 (/music,
+    # /economy, /info, /level, /role). On retire donc les anciens noms historiques,
+    # puis on réautorise uniquement les vraies racines publiques finales de V110.
+    legacy_excluded = (
+        set(INTERNAL_MAINTENANCE_COMMANDS)
+        | set(MERGED_COMMANDS)
+        | set(PROOF_SLASH_HIDDEN_HELPERS)
+        | set(LOW_VALUE_LEGACY_ROOTS)
+        | set(GAME_COMMANDS)
+        | _v110_source_names()
+    )
     return legacy_excluded - _v110_public_root_names()
 
 
@@ -116,10 +158,10 @@ def finalize(bot: commands.Bot) -> None:
     preferred = _preferred_names()
     excluded = _excluded_names()
 
-    if len(required) > GLOBAL_CHAT_INPUT_BUDGET:
+    if len(required) > PUBLIC_CHAT_INPUT_TARGET:
         raise RuntimeError(
-            f"Budget slash incohérent : {len(required)} racines obligatoires pour "
-            f"{GLOBAL_CHAT_INPUT_BUDGET} places."
+            f"Surface slash incohérente : {len(required)} racines obligatoires pour "
+            f"une cible publique de {PUBLIC_CHAT_INPUT_TARGET}."
         )
 
     for item in list(_global_roots(tree)):
@@ -128,7 +170,7 @@ def finalize(bot: commands.Bot) -> None:
             _remove_root(tree, name)
 
     roots = _global_roots(tree)
-    if len(roots) <= GLOBAL_CHAT_INPUT_BUDGET:
+    if len(roots) <= PUBLIC_CHAT_INPUT_TARGET:
         return
 
     # Ordre déterministe par priorité, tout en conservant l'ordre de construction du tree
@@ -137,11 +179,11 @@ def finalize(bot: commands.Bot) -> None:
     for tier in (required, preferred):
         for item in roots:
             name = str(getattr(item, "name", "") or "").casefold()
-            if name in tier and len(keep) < GLOBAL_CHAT_INPUT_BUDGET:
+            if name in tier and len(keep) < PUBLIC_CHAT_INPUT_TARGET:
                 keep.add(name)
     for item in roots:
         name = str(getattr(item, "name", "") or "").casefold()
-        if name not in keep and len(keep) < GLOBAL_CHAT_INPUT_BUDGET:
+        if name not in keep and len(keep) < PUBLIC_CHAT_INPUT_TARGET:
             keep.add(name)
 
     for item in list(roots):
@@ -201,7 +243,7 @@ def install(bot: commands.Bot) -> None:
                 (item for item in roots if str(getattr(item, "name", "")).casefold() == name),
                 None,
             )
-            if existing is None and len(roots) >= GLOBAL_CHAT_INPUT_BUDGET:
+            if existing is None and len(roots) >= PUBLIC_CHAT_INPUT_TARGET:
                 required = _required_names()
                 preferred = _preferred_names()
 
@@ -240,7 +282,8 @@ def install(bot: commands.Bot) -> None:
     tree.add_command = MethodType(budgeted_add, tree)
     finalize(bot)
     logger.info(
-        "Budget slash SentriX actif : maximum %s racines, tier1=%s, proof=%s, V110=%s.",
+        "Budget slash SentriX actif : cible publique=%s, limite Discord=%s, tier1=%s, proof=%s, V110=%s.",
+        PUBLIC_CHAT_INPUT_TARGET,
         GLOBAL_CHAT_INPUT_BUDGET,
         len(_required_names()),
         ",".join(sorted(PROOF_SLASH_PREFERRED)),

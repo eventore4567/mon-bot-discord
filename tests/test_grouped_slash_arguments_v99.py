@@ -9,6 +9,18 @@ import sentrix_grouped_slash_fix as fix
 import sentrix_v95_runtime as v95
 
 
+def test_mutating_staff_slash_actions_use_private_response():
+    async def callback(ctx):
+        return None
+
+    for name in ("ban", "kick", "mute", "warn", "clear", "massrole", "giverole"):
+        command = commands.Command(callback, name=name)
+        assert fix._private_slash_response(command) is True
+
+    public = commands.Command(callback, name="userinfo")
+    assert fix._private_slash_response(public) is False
+
+
 def test_keyword_only_text_is_forwarded_as_keyword_argument():
     async def callback(ctx, langue: str, *, texte: str):
         return None

@@ -19,7 +19,7 @@ import logging
 import traceback
 
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 import config
 from database.db import Database, PRIMARY_CREATOR_ID
@@ -33,7 +33,7 @@ from utils.checks import (
 )
 from utils import access_matrix
 from utils import log_hygiene
-from services.usage_presence import usage_presence_text
+from services.usage_presence import rotating_presence_text
 from web.dashboard import start_dashboard
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -384,12 +384,33 @@ class BotAllInOne(commands.Bot):
         )
         self.prefix_cache: dict[int, str] = {}
         self.blacklist_cache: dict[int, str] = {}
+        self._usage_presence_index = 0
 
     async def refresh_usage_presence(self) -> None:
-        """Publie le compteur d'utilisation dans le statut natif du bot."""
-        text = usage_presence_text(self.guilds)
+        """Affiche les chiffres réels dans le statut actuellement sélectionné."""
+        text = rotating_presence_text(self.guilds, self._usage_presence_index)
         await self.change_presence(activity=discord.CustomActivity(name=text))
         logger.info("Statut Discord actualisé : %s", text)
+
+    @tasks.loop(seconds=30)
+    async def rotate_usage_presence(self) -> None:
+        """Alterne le statut d'origine entre français et anglais toutes les 30 secondes."""
+        self._usage_presence_index = (self._usage_presence_index + 1) % 2
+        try:
+            await self.refresh_usage_presence()
+        except Exception:
+            logger.exception("Actualisation périodique du statut Discord impossible")
+
+    @rotate_usage_presence.before_loop
+    async def _before_rotate_usage_presence(self) -> None:
+        await self.wait_until_ready()
+        # on_ready publie déjà le premier statut ; attendre le prochain créneau.
+        await asyncio.sleep(30)
+
+    async def close(self) -> None:
+        if self.rotate_usage_presence.is_running():
+            self.rotate_usage_presence.cancel()
+        await super().close()
 
     def _prune_redundant_commands(self) -> list[str]:
         removed_names: list[str] = []
@@ -725,6 +746,8 @@ class BotAllInOne(commands.Bot):
                 logger.warning("Vérification de persistance (on_ready) impossible :\n" + traceback.format_exc())
 
         await self.refresh_usage_presence()
+        if not self.rotate_usage_presence.is_running():
+            self.rotate_usage_presence.start()
         embeds.set_footer_icon(self.user.display_avatar.url)
 
         saved_footer = await self.db.get_setting("footer_text")

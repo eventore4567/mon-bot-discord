@@ -59,51 +59,61 @@ STANDARD_DIRECT_SLASH: dict[str, str] = {
     "avatar": "avatar",
     "userinfo": "userinfo",
     "translate": "translate",
-    "timestamp": "timestamp",
     "serverinfo": "serverinfo",
-    "channelinfo": "channelinfo",
-    "membercount": "membercount",
 
     # Niveaux — /level et /leaderboard sont des conventions répandues.
     "level": "level",
     "leaderboard-levels": "leaderboard",
-    "set-xp": "setxp",
-    "add-xp": "addxp",
 
-    # Économie — garder les noms évidents, sans préfixe /economy inutile.
+    # Économie — /balance reste direct ; le reste est regroupé sous /economy.
     "balance": "balance",
-    "daily": "daily",
-    "weekly": "weekly",
-    "work": "work",
-    "rob": "rob",
-    "pay": "pay",
-    "shop": "shop",
-    "inventory": "inventory",
-    "gamble": "gamble",
-    "deposit": "deposit",
-    "withdraw": "withdraw",
 
-    # Musique — vocabulaire commun aux bots musique majeurs.
-    # +play reste la commande préfixée historique ; les autres restent aussi accessibles
-    # via +music <action> côté préfixe.
+    # Musique — /play reste direct. Les contrôles secondaires sont regroupés
+    # sous /music pour éviter onze racines slash séparées.
     "play": "play",
-    "music pause": "pause",
-    "music resume": "resume",
-    "music skip": "skip",
-    "music stop": "stop",
-    "music queue": "queue",
-    "music nowplaying": "nowplaying",
-    "music volume": "volume",
-    "music shuffle": "shuffle",
-    "music join": "join",
-    "music leave": "leave",
-    "music seek": "seek",
 }
 
 # Les rôles sont plus lisibles sous un petit groupe /role que sous des chemins profonds.
 STANDARD_GROUPED_SLASH: dict[str, tuple[str, str]] = {
     "giverole": ("role", "give"),
     "removerole": ("role", "remove"),
+    # Distribution globale : /role mass action:add role:@Rôle
+    # conserve la logique de +massrole add/del sans consommer une nouvelle racine slash.
+    "massrole": ("role", "mass"),
+
+    # Contrôles musique : une seule racine /music au lieu de onze commandes plates.
+    "music pause": ("music", "pause"),
+    "music resume": ("music", "resume"),
+    "music skip": ("music", "skip"),
+    "music stop": ("music", "stop"),
+    "music queue": ("music", "queue"),
+    "music nowplaying": ("music", "nowplaying"),
+    "music volume": ("music", "volume"),
+    "music shuffle": ("music", "shuffle"),
+    "music join": ("music", "join"),
+    "music leave": ("music", "leave"),
+    "music seek": ("music", "seek"),
+
+    # Économie : une seule racine /economy pour les actions membres courantes.
+    "daily": ("economy", "daily"),
+    "weekly": ("economy", "weekly"),
+    "work": ("economy", "work"),
+    "rob": ("economy", "rob"),
+    "pay": ("economy", "pay"),
+    "shop": ("economy", "shop"),
+    "inventory": ("economy", "inventory"),
+    "gamble": ("economy", "gamble"),
+    "deposit": ("economy", "deposit"),
+    "withdraw": ("economy", "withdraw"),
+
+    # Informations secondaires : regroupées sous /info pour garder le menu court.
+    "timestamp": ("info", "timestamp"),
+    "channelinfo": ("info", "channel"),
+    "membercount": ("info", "members"),
+
+    # Administration XP : regroupée sous /level, sans racines setxp/addxp séparées.
+    "set-xp": ("level", "setxp"),
+    "add-xp": ("level", "addxp"),
 }
 
 # /play est fourni par la commande top-level `play`, qui appelle déjà le même moteur que
@@ -254,6 +264,7 @@ def _install_standard_slash_surface(bot) -> tuple[int, list[str]]:
         installed += 1
 
     groups: dict[str, app_commands.Group] = {}
+    created_groups: set[str] = set()
     for source_name, (root_name, leaf_name) in STANDARD_GROUPED_SLASH.items():
         command = _find_command(bot, source_name)
         if command is None:
@@ -261,10 +272,30 @@ def _install_standard_slash_surface(bot) -> tuple[int, list[str]]:
             continue
         root = groups.get(root_name)
         if root is None:
-            root = app_commands.Group(
-                name=v95._safe_name(root_name),
-                description=("Gestion courante des rôles du serveur." if root_name == "role" else f"Commandes {root_name} de SentriX.")[:100],
-            )
+            existing_root = tree.get_command(v95._safe_name(root_name))
+            if isinstance(existing_root, app_commands.Group):
+                # V95/V98 peut déjà avoir construit /role, /music, /economy, etc.
+                # On complète ce groupe au lieu de l'écraser et de perdre ses autres
+                # sous-commandes historiques.
+                root = existing_root
+            else:
+                root = app_commands.Group(
+                    name=v95._safe_name(root_name),
+                    description=(
+                        "Gestion courante des rôles du serveur."
+                        if root_name == "role"
+                        else "Lecture audio, file d'attente et contrôles musique."
+                        if root_name == "music"
+                        else "Solde, récompenses, banque, boutique et économie."
+                        if root_name == "economy"
+                        else "Informations serveur, salons, membres et horodatages."
+                        if root_name == "info"
+                        else "Niveaux, XP, classements et administration XP."
+                        if root_name == "level"
+                        else f"Commandes {root_name} de SentriX."
+                    )[:100],
+                )
+                created_groups.add(root.name)
             groups[root_name] = root
         callback, native = v95._make_callback(bot, command)
         slash = app_commands.Command(
@@ -272,7 +303,7 @@ def _install_standard_slash_surface(bot) -> tuple[int, list[str]]:
             description=v95._description(command),
             callback=callback,
         )
-        root.add_command(slash)
+        root.add_command(slash, override=True)
         direct_report[f"/{root.name} {slash.name}"] = {
             "original": str(command.qualified_name),
             "native_options": bool(native),
@@ -280,7 +311,8 @@ def _install_standard_slash_surface(bot) -> tuple[int, list[str]]:
         installed += 1
 
     for group in groups.values():
-        tree.add_command(group, override=True)
+        if group.name in created_groups:
+            tree.add_command(group, override=True)
 
     roots = list(tree.get_commands(guild=None, type=discord.AppCommandType.chat_input))
     if len(roots) > v95.MAX_ROOT_COMMANDS:

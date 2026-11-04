@@ -580,7 +580,7 @@ class StatsConfigView(discord.ui.View):
         fake_settings = dict(self.pending)
         fake_settings.pop("_xp_channel_disabled", None)
         embed = await self.cog.build_stats_embed(self.guild, member, settings_override=fake_settings)
-        await interaction.response.send_message(content="👁️ Aperçu (non enregistré) :", embed=embed, ephemeral=True)
+        await panels.envoyer(interaction.response, panels.depuis_embed(embed, sous_titre="Aperçu — non enregistré"), ephemere=True)
 
     async def _save(self, interaction: discord.Interaction):
         to_save = dict(self.pending)
@@ -644,7 +644,7 @@ class _LevelRepairConfirmView(discord.ui.View):
         self.confirmed = True
         for item in self.children:
             item.disabled = True
-        await interaction.response.edit_message(view=self)
+        await panels.editer(interaction.response, panels.depuis_embed(embeds.info("Réparation confirmée — application en cours…")))
         self.stop()
 
     @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
@@ -652,7 +652,7 @@ class _LevelRepairConfirmView(discord.ui.View):
         self.confirmed = False
         for item in self.children:
             item.disabled = True
-        await interaction.response.edit_message(embed=embeds.info("Réparation annulée — aucune donnée modifiée."), view=self)
+        await panels.editer(interaction.response, panels.depuis_embed(embeds.info("Réparation annulée — aucune donnée modifiée.")))
         self.stop()
 
 
