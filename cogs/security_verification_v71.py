@@ -435,6 +435,36 @@ class V71SettingToggle(discord.ui.Button):
         await self.owner.refresh(interaction)
 
 
+async def _mp_piege(message: discord.Message, action: str, cfg) -> None:
+    """MP au membre pris par le piège. Au mieux : ne bloque jamais la sanction."""
+    try:
+        await _envoyer_mp_piege(message, action, cfg)
+    except Exception:  # noqa: BLE001
+        logger.debug("MP honeypot non envoyé", exc_info=True)
+
+
+async def _envoyer_mp_piege(message: discord.Message, action: str, cfg) -> None:
+    from services import moderation as moderation_service
+
+    guild = message.guild
+    nom = getattr(guild, "name", None) or "ce serveur"
+    textes = {
+        "softban": f"Vous avez été expulsé de {nom} (softban).",
+        "kick": f"Vous avez été expulsé de {nom}.",
+        "ban": f"Vous avez été banni de {nom}.",
+        "mute": f"Vous avez été rendu muet sur {nom} pendant {cfg.get('honeypot_mute_minutes', 10)} minutes.",
+    }
+    titre = textes.get(action)
+    if titre is None:
+        return
+    texte = (
+        f"{titre}\nRaison : message envoyé dans un salon piège (anti-piratage). "
+        "Si votre compte a été piraté, changez votre mot de passe Discord."
+    )
+    lien = await moderation_service._lien_retour(guild) if action in ("softban", "kick") else None
+    await moderation_service._send_dm_card(message.author, texte, rejoindre_url=lien)
+
+
 def _security_main_controls(view) -> None:
     view.add_item(SecurityToggleButton(view))
     view.add_item(SecurityNavButton(view, "Honeypot", "honeypot"))
@@ -748,6 +778,9 @@ class SecurityVerificationRuntimeV71:
         action = cfg["honeypot_action"]
         reason = "SentriX V71 : message envoyé dans le honeypot stay-muted"
         applied = action
+        # 05/11/2026 : le membre pris reçoit un MP qui explique ce qui s'est passé
+        # (avant la sanction : après un ban ou un kick, il n'est plus joignable).
+        await _mp_piege(message, action, cfg)
         try:
             if action == "softban":
                 await message.guild.ban(message.author, reason=reason, delete_message_seconds=0)
