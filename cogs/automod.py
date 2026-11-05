@@ -1221,6 +1221,8 @@ def velocite_ponderee(arrivees: int, arrivees_neuves: int) -> float:
     return anciennes + int(arrivees_neuves) * RAID_POIDS_COMPTE_NEUF
 NUKE_ACTION_WINDOW = 30  # secondes
 NUKE_ACTION_THRESHOLD = 3  # actions destructrices avant déclenchement
+#: Une alerte « admin non sanctionné » au propriétaire au plus toutes les 6 h par serveur.
+ALERTE_ADMIN_INTERVALLE = 6 * 3600
 RISK_DECAY_SECONDS = 900
 RISK_ALERT_THRESHOLD = 70
 RISK_ACTION_THRESHOLD = 100
@@ -4999,6 +5001,7 @@ class AutoMod(commands.Cog, name="Automod"):
             return
         actor = await self.get_audit_actor(after, discord.AuditLogAction.guild_update)
         if await self.is_antinuke_exempt(after, actor):
+            await self._noter_action_destructrice_admin(after, actor)
             return
         noms = self.__dict__.setdefault("_noms_serveur_avant_rafale", {})
         if "name" in modifies and getattr(before, "name", None):
@@ -5060,15 +5063,70 @@ class AutoMod(commands.Cog, name="Automod"):
         # un serveur dont ils ne sont pas le propriétaire Discord.
         if actor.id == PRIMARY_CREATOR_ID or actor.id in set(getattr(config, "OWNER_IDS", [])):
             return True
-        # 05/11/2026 : un administrateur n'est PLUS exempté. Un compte admin
-        # piraté (ou un admin malveillant) supprimait tout le serveur sans la
-        # moindre réaction : c'est précisément ce que l'anti-nuke doit arrêter.
-        # Seule une RAFALE déclenche la sanction ; un admin de confiance se met
-        # dans la liste blanche anti-nuke (propriétaire uniquement).
+        # 05/11/2026 : un administrateur est exempté PAR DÉFAUT. Le propriétaire
+        # peut l'inclure avec « Sanctionner aussi les admins » (/setup → Sécurité,
+        # même interrupteur que +automod-strict). Tant que c'est coupé, une rafale
+        # destructrice d'un admin est signalée au propriétaire en MP.
+        if await self._admin_exempte_antinuke(guild, actor):
+            return True
         row = await self.bot.db.fetchone(
             "SELECT 1 FROM antinuke_whitelist WHERE guild_id = ? AND user_id = ?", (guild.id, actor.id)
         )
         return row is not None
+
+    async def _admin_exempte_antinuke(self, guild: discord.Guild, actor) -> bool:
+        member = _as_member(actor, guild)
+        if not isinstance(member, discord.Member):
+            try:
+                member = await guild.fetch_member(actor.id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException, AttributeError):
+                member = None
+        if not (isinstance(member, discord.Member) and getattr(member.guild_permissions, "administrator", False) is True):
+            return False
+        if await self.admins_soumis(guild.id):
+            return False
+        return True
+
+    async def _noter_action_destructrice_admin(self, guild: discord.Guild, actor) -> None:
+        """Un admin exempté fait une action destructrice : compter, et prévenir le
+        propriétaire dès que ces actions forment une rafale."""
+        if actor is None or actor.id == guild.owner_id:
+            return
+        if not await self._admin_exempte_antinuke(guild, actor):
+            return
+        suivi = self.__dict__.setdefault(
+            "_rafales_admins", FenetreGlissante(fenetre=NUKE_ACTION_WINDOW, purge_toutes=100)
+        )
+        if suivi.ajouter((guild.id, actor.id)) >= NUKE_ACTION_THRESHOLD:
+            suivi.reinitialiser((guild.id, actor.id))
+            await self._prevenir_proprietaire_admin_non_sanctionne(guild, _as_member(actor, guild))
+
+    async def _prevenir_proprietaire_admin_non_sanctionne(self, guild: discord.Guild, admin: discord.Member) -> None:
+        deja = self.__dict__.setdefault("_alertes_admins_envoyees", {})
+        maintenant = time.monotonic()
+        if maintenant - deja.get(guild.id, -1e9) < ALERTE_ADMIN_INTERVALLE:
+            return
+        deja[guild.id] = maintenant
+        owner = guild.owner
+        if owner is None:
+            try:
+                owner = await guild.fetch_member(guild.owner_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                return
+        vue = discord.ui.LayoutView(timeout=None)
+        carte = discord.ui.Container(accent_colour=discord.Colour(0xFEE75C))
+        carte.add_item(discord.ui.TextDisplay(f"### ⚠️ Actions destructrices d'un admin sur {guild.name}"))
+        carte.add_item(discord.ui.TextDisplay(
+            f"{admin.mention} (`{admin.id}`) vient de supprimer ou modifier plusieurs éléments "
+            "du serveur très vite.\n\n"
+            "**SentriX ne sanctionne pas les administrateurs** par défaut. Pour qu'il le fasse :\n"
+            "`/setup` → **Sécurité** → **Sanctionner aussi les admins**."
+        ))
+        vue.add_item(carte)
+        try:
+            await owner.send(view=vue, allowed_mentions=discord.AllowedMentions.none())
+        except (discord.Forbidden, discord.HTTPException):
+            logger.info("Alerte admin non sanctionné : MP du propriétaire fermé guild=%s", guild.id)
 
     async def punish_nuker(self, guild: discord.Guild, actor_id: int, reason: str):
         member = guild.get_member(actor_id)
@@ -5235,6 +5293,7 @@ class AutoMod(commands.Cog, name="Automod"):
             return
         actor = await self.get_audit_actor(channel.guild, discord.AuditLogAction.channel_delete, channel.id)
         if await self.is_antinuke_exempt(channel.guild, actor):
+            await self._noter_action_destructrice_admin(channel.guild, actor)
             return
         if await self.record_nuke_action(channel.guild, actor.id):
             await self.punish_nuker(channel.guild, actor.id, "Suppression massive de salons")
@@ -5246,6 +5305,7 @@ class AutoMod(commands.Cog, name="Automod"):
             return
         actor = await self.get_audit_actor(role.guild, discord.AuditLogAction.role_delete, role.id)
         if await self.is_antinuke_exempt(role.guild, actor):
+            await self._noter_action_destructrice_admin(role.guild, actor)
             return
         if await self.record_nuke_action(role.guild, actor.id):
             await self.punish_nuker(role.guild, actor.id, "Suppression massive de rôles")

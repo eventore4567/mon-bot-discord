@@ -380,6 +380,14 @@ class V73AiLimitsModal(discord.ui.Modal, title="Limites de l’IA"):
         await self.shell.refresh(interaction)
 
 
+def peut_configurer(user, guild) -> bool:
+    """Propriétaire, administrateur ou « Gérer le serveur » : peut modifier /setup."""
+    if guild is not None and int(getattr(user, "id", 0) or 0) == int(getattr(guild, "owner_id", 0) or 0):
+        return True
+    perms = getattr(user, "guild_permissions", None)
+    return bool(perms is not None and (getattr(perms, "administrator", False) or getattr(perms, "manage_guild", False)))
+
+
 class SentriXSetupV73(discord.ui.LayoutView):
     """Façade Components V2 au-dessus du Setup final V72."""
 
@@ -406,6 +414,18 @@ class SentriXSetupV73(discord.ui.LayoutView):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if int(interaction.user.id) != self.author_id:
             await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Ce panneau appartient à une autre personne.')), ephemere=True)
+            return False
+        # 05/11/2026 : /setup s'ouvre pour tout le monde (consultation) ; chaque
+        # clic qui configurerait quelque chose exige la permission du staff.
+        if not peut_configurer(interaction.user, self.guild):
+            await panels.envoyer(
+                interaction.response,
+                panels.carte_refus(
+                    "Vous pouvez consulter la configuration, mais pas la modifier.\n\n"
+                    "**Permission Discord requise :** Administrateur ou Gérer le serveur."
+                ),
+                ephemere=True,
+            )
             return False
         return True
 

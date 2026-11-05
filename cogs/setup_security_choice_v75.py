@@ -564,7 +564,41 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
         )
 
     diagnostic.callback = diagnostic_automod
-    container.add_item(discord.ui.ActionRow(exceptions, diagnostic))
+
+    # 05/11/2026 : « Sanctionner aussi les admins » (propriétaire uniquement).
+    # Même interrupteur que +automod-strict : filtres ET anti-nuke. Coupé par
+    # défaut ; une rafale destructrice d'un admin est alors signalée en MP.
+    automod_cog = self.bot.get_cog("Automod")
+    admins_inclus = False
+    if automod_cog is not None and hasattr(automod_cog, "admins_soumis"):
+        try:
+            admins_inclus = bool(await automod_cog.admins_soumis(self.guild.id))
+        except Exception:
+            logger.debug("Lecture « sanctionner les admins » impossible.", exc_info=True)
+    admins_bouton = discord.ui.Button(
+        label=f"Sanctionner aussi les admins : {'OUI' if admins_inclus else 'NON'}",
+        style=discord.ButtonStyle.danger if admins_inclus else discord.ButtonStyle.secondary,
+    )
+
+    async def basculer_admins(interaction: discord.Interaction):
+        if interaction.user.id != self.guild.owner_id:
+            await panels.envoyer(
+                interaction.response,
+                panels.carte_refus(
+                    "Seul le **propriétaire du serveur** peut décider si SentriX sanctionne les administrateurs."
+                ),
+                ephemere=True,
+            )
+            return
+        if automod_cog is None or not hasattr(automod_cog, "definir_admins_soumis"):
+            return
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        await automod_cog.definir_admins_soumis(self.guild.id, not admins_inclus, interaction.user.id)
+        await self.refresh(interaction)
+
+    admins_bouton.callback = basculer_admins
+    container.add_item(discord.ui.ActionRow(exceptions, diagnostic, admins_bouton))
 
     # Accès direct à CHAQUE règle, inspiré des écrans de réglages par filtre :
     # état réel et configuration explicite. Ce menu ne coche rien et n'active

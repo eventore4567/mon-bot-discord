@@ -1097,6 +1097,13 @@ async def evaluate(bot, *, command_name: Any, author: Any, guild: Any) -> Access
     if explicit is True:
         return AccessDecision(True, policy=f"setup:{source}:allow")
 
+    # 05/11/2026 : tout membre peut OUVRIR /setup pour consulter la
+    # configuration. Modifier un réglage reste réservé au staff : c'est le
+    # panneau lui-même qui refuse chaque clic d'un membre sans permission
+    # (cogs/setup_components_v73.SentriXSetupV73.interaction_check).
+    if name == "setup":
+        return AccessDecision(True, policy="setup:lecture-seule")
+
     # (7) propriétaire du serveur Discord
     if _is_guild_owner(author, guild):
         return AccessDecision(True, policy="guild-owner")

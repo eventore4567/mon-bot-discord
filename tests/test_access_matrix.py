@@ -218,8 +218,15 @@ class MemberTests(unittest.TestCase):
 
     def test_member_gets_no_moderation_or_admin_command(self):
         b = FakeBackend()
-        for cmd in ("ban", "kick", "mute", "clear", "setup", "antiraid", "dm"):
+        for cmd in ("ban", "kick", "mute", "clear", "antiraid", "dm"):
             self.assertFalse(decide(b, member(), cmd).allowed, cmd)
+
+    def test_member_can_open_setup_read_only(self):
+        # 05/11/2026 : /setup s'ouvre pour tous ; modifier exige le staff
+        # (refus au clic dans le panneau, tests/test_setup_ouvert_a_tous.py).
+        d = decide(FakeBackend(), member(), "setup")
+        self.assertTrue(d.allowed)
+        self.assertEqual(d.policy, "setup:lecture-seule")
 
     def test_denial_always_carries_the_standard_header(self):
         d = decide(FakeBackend(), member(), "ban")
