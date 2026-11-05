@@ -5150,6 +5150,12 @@ class AutoMod(commands.Cog, name="Automod"):
         ))
         vue.add_item(carte)
         try:
+            from utils import sentrix_emojis
+
+            sentrix_emojis.appliquer_a_la_vue(vue)
+        except Exception:  # noqa: BLE001 — habillage seulement
+            pass
+        try:
             await owner.send(view=vue, allowed_mentions=discord.AllowedMentions.none())
         except (discord.Forbidden, discord.HTTPException):
             logger.info("Alerte admin non sanctionné : MP du propriétaire fermé guild=%s", guild.id)

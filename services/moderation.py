@@ -609,6 +609,13 @@ def _carte_mp(text: str, rejoindre_url: str | None = None) -> discord.ui.LayoutV
             discord.ui.Button(label="Rejoindre le serveur", style=discord.ButtonStyle.link, url=rejoindre_url)
         ))
     vue.add_item(carte)
+    # Émojis SentriX animés à la place des émojis Unicode, comme partout ailleurs.
+    try:
+        from utils import sentrix_emojis
+
+        sentrix_emojis.appliquer_a_la_vue(vue)
+    except Exception:  # noqa: BLE001 — l'icône est un habillage, jamais bloquant
+        pass
     return vue
 
 

@@ -488,6 +488,14 @@ async def _raw_prefix_send(
     une référence de support doit rester le temps d'être lue.
     """
     raw_send = policy._unwrap(discord.abc.Messageable.send)
+    # Envoi brut : la conversion en émojis SentriX animés de panels.envoyer
+    # n'a pas lieu ici, on la fait donc nous-mêmes.
+    try:
+        from utils import sentrix_emojis
+
+        sentrix_emojis.appliquer_a_la_vue(panneau)
+    except Exception:  # noqa: BLE001 — habillage seulement
+        pass
     kwargs = {"view": panneau, "allowed_mentions": _ALLOWED, "delete_after": supprimer_apres}
     fichiers = panneau.fichiers()
     if fichiers:
