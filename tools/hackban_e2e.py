@@ -42,7 +42,7 @@ async def main() -> int:
             "SELECT action, moderator_id, reason FROM sanctions WHERE guild_id = ? AND user_id = ?", (h.GID, uid))]
 
     shown, bans = await run(f"+hackban {ABSENT} raid connu", MEMBER)
-    check(not bans and "accès" in shown, "un simple membre est refusé (même décision que +ban)", shown[:160])
+    check(not bans and "accès" in shown.lower(), "un simple membre est refusé (même décision que +ban)", shown[:160])
 
     shown, bans = await run(f"+hackban {h.TARGET_ID} spam", MOD)
     # Le texte cite la route « / » depuis le 28/10/2026 (retrait du « + » le 30/11).

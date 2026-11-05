@@ -178,8 +178,9 @@ def test_le_bouton_persistant_est_traduit_lui_aussi():
     # Un DynamicItem enveloppe son bouton dans `.item` : son propre `label` vaut
     # None, donc le parcours ne le voyait pas et « Historique » restait français
     # au milieu d'une carte anglaise.
-    assert _labels(_carte()) == ["Historique"]
-    assert _labels(lr.translate_view_in_place(_carte())) == ["History"]
+    # 04/11/2026 : la carte n'a plus de bouton « Historique » du tout.
+    assert _labels(_carte()) == []
+    assert _labels(lr.translate_view_in_place(_carte())) == []
 
 
 def test_chaque_type_de_sanction_se_traduit_entierement():
@@ -248,5 +249,5 @@ def test_un_seul_bouton_dhistorique_sur_la_carte():
         return trouves
 
     ids = {str(getattr(b, "custom_id", "") or "") for b in boutons(conteneur)}
-    assert ids, "le bouton persistant doit être visible de la garde"
-    assert any(":history:" in i for i in ids), f"historique non détecté : {ids}"
+    # 04/11/2026 : aucun bouton d'historique, ni simple ni en double.
+    assert not any(":history:" in i for i in ids), f"historique encore présent : {ids}"

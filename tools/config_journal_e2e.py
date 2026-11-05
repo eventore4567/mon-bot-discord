@@ -95,7 +95,7 @@ async def main() -> int:
     # 5 — Un membre ne peut pas annuler.
     since = await click(bot, f"sx:undo:{welcome_entry['id']}", h.next_id(), "membre")
     conf = await db.get_guild_config(h.GID)
-    check(conf["welcome_channel"] == h.LOGCID and "accès" in h.visible_text(h.CALLS[since:]),
+    check(conf["welcome_channel"] == h.LOGCID and "accès" in h.visible_text(h.CALLS[since:]).lower(),
           "membre : annulation refusée, réglage intact", h.visible_text(h.CALLS[since:])[:120])
 
     # 6 — L'administrateur annule : valeur d'avant remise, annulation journalisée et loguée.

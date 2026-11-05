@@ -31,7 +31,8 @@ CRITICAL_CONTRACTS = {
     # envoyer_mp est le paramètre slash explicite du bannissement.
     "ban": ("membre", "raison", "envoyer_mp"),
     "kick": ("membre", "raison"),
-    "mute": ("membre", "duree", "raison"),
+    # 04/11/2026 : /mute expose « notifier » (MP facultatif), comme /warn.
+    "mute": ("membre", "duree", "raison", "notifier"),
     "tempban": ("membre", "duree", "raison"),
 }
 

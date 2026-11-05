@@ -166,22 +166,11 @@ async def evaluate_interaction_access(
 async def _send_interaction_denial(
     interaction: discord.Interaction, decision: AccessDecision
 ) -> None:
-    embed = discord.Embed(
-        title="SentriX — Permission insuffisante",
-        description=decision.message,
-        colour=discord.Colour(0xED4245),
-    )
-    embed.set_footer(text="SentriX • Permissions identiques en + et /")
-    kwargs = {
-        "embed": embed,
-        "ephemeral": True,
-        "allowed_mentions": discord.AllowedMentions.none(),
-    }
+    # Carte rouge privée, la même que pour les commandes « + ».
+    from utils import sentrix_panels as panels
+
     try:
-        if interaction.response.is_done():
-            await interaction.followup.send(**kwargs)
-        else:
-            await interaction.response.send_message(**kwargs)
+        await panels.envoyer(interaction, panels.carte_refus(decision.message), ephemere=True)
     except (discord.Forbidden, discord.HTTPException, discord.InteractionResponded):
         logger.debug("Impossible d'envoyer le refus slash.", exc_info=True)
 

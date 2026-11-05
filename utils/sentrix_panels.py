@@ -1905,6 +1905,23 @@ def kwargs_edition_reponse_differee(kwargs: dict[str, Any]) -> dict[str, Any]:
     return charge
 
 
+def carte_refus(message: str) -> "Panneau":
+    """Refus de permission en carte rouge compacte (04/11/2026 : « le message
+    libre est moche »). Le titre remplace l'en-tête « Vous n'avez pas accès à
+    cette commande. » ; le détail (permission requise) devient le corps."""
+    from utils.access_matrix import DENIAL_HEADER
+
+    texte = str(message or "").strip()
+    if texte.startswith(DENIAL_HEADER):
+        texte = texte[len(DENIAL_HEADER):].strip()
+    return Panneau(
+        titre="🔒 Accès refusé",
+        sous_titre=texte or "Vous n'avez pas la permission d'utiliser cette commande.",
+        kind="danger",
+        banniere=False,
+    )
+
+
 async def texte_court(
     destination: Any,
     message: str,

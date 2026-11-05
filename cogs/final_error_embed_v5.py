@@ -185,6 +185,15 @@ def _texte_discord(exc: discord.HTTPException) -> str:
     return f"Discord a refusé la requête{f' : {texte}' if texte else ''}."
 
 
+def _est_refus_de_permission(base: BaseException, texte: str) -> bool:
+    """Un refus de permission s'affiche en carte rouge, pas en ligne de texte."""
+    from utils.access_matrix import DENIAL_HEADER
+
+    if isinstance(base, commands.MissingPermissions):
+        return True
+    return str(texte or "").startswith(DENIAL_HEADER)
+
+
 def _texte_erreur_prefix(ctx: commands.Context, error: commands.CommandError) -> str | None:
     """Une erreur SIMPLE (syntaxe, permission, refus Discord…) = UNE phrase.
 
@@ -672,6 +681,10 @@ def install(bot: commands.Bot) -> None:
             except Exception:
                 logger.debug("Explication du refus impossible.", exc_info=True)
         try:
+            if texte is not None and _est_refus_de_permission(base, texte):
+                ctx._sentrix_error_finalized = True
+                await _raw_prefix_send(ctx, panels.carte_refus(texte), supprimer_apres=_DUREE_AFFICHAGE)
+                return
             if texte is not None:
                 ctx._sentrix_error_finalized = True
                 await _texte_prefix_send(ctx, texte, supprimer_apres=_DUREE_AFFICHAGE)

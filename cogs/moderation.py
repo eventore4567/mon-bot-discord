@@ -1189,11 +1189,17 @@ class Moderation(commands.Cog):
         return discord.utils.get(guild.roles, name="Muet")
 
     @commands.hybrid_command(name="mute", description="Rendre muet un membre (timeout Discord natif).")
-    @app_commands.describe(membre="Membre du serveur à timeout (peu importe le salon)", duree="Durée (ex: 10m, 1h)", raison="La raison")
+    @app_commands.describe(
+        membre="Membre du serveur à timeout (peu importe le salon)", duree="Durée (ex: 10m, 1h)", raison="La raison",
+        notifier="Envoyer un message privé au membre ? (true/false)",
+    )
     # AUTORISATION -> utils/access_matrix.py (matrice unique).
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("moderate_members",), target="member_moderation")
-    async def mute(self, ctx: commands.Context, membre: discord.Member, duree: str = "10m", *, raison: str = "Aucune raison fournie"):
+    async def mute(
+        self, ctx: commands.Context, membre: discord.Member, duree: str = "10m", *,
+        raison: str = "Aucune raison fournie", notifier: bool = True,
+    ):
         """Core V2, Phase 2 (docs/core-v2-plan.md) : troisième commande de
         sanction migrée. Forme différente de ban()/kick() (durée à valider, MP
         après l'exécution) — voir services/moderation.py::mute()."""
@@ -1204,7 +1210,8 @@ class Moderation(commands.Cog):
             return await self._reply(ctx, "Cette sanction vient déjà d'être lancée sur ce membre.", ephemere=True)
         await self._ack(ctx)
 
-        template = await self._get_sanction_dm_template(ctx.guild.id, "mute")
+        # 04/11/2026 : option « notifier » (comme /warn) : false = aucun MP.
+        template = await self._get_sanction_dm_template(ctx.guild.id, "mute") if notifier else None
 
         def render_dm_text(seconds: int) -> str | None:
             if template is None:
@@ -1249,11 +1256,17 @@ class Moderation(commands.Cog):
             await journal
 
     @commands.hybrid_command(name="unmute", description="Retirer le mute (timeout) d'un membre.", with_app_command=False)
-    @app_commands.describe(membre="Le membre à démuter", raison="La raison")
+    @app_commands.describe(
+        membre="Le membre à démuter", raison="La raison",
+        notifier="Envoyer un message privé au membre ? (true/false)",
+    )
     # AUTORISATION -> utils/access_matrix.py (matrice unique).
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("moderate_members",), target="member_moderation")
-    async def unmute(self, ctx: commands.Context, membre: discord.Member, *, raison: str = "Aucune raison fournie"):
+    async def unmute(
+        self, ctx: commands.Context, membre: discord.Member, *,
+        raison: str = "Aucune raison fournie", notifier: bool = True,
+    ):
         """Core V2, Phase 2 (docs/core-v2-plan.md) : quatrième commande de
         sanction migrée — voir services/moderation.py::unmute()."""
         raison = clean_reason(raison)
@@ -1261,7 +1274,7 @@ class Moderation(commands.Cog):
             return await self._reply(ctx, "Cette action vient déjà d'être lancée sur ce membre.", ephemere=True)
         await self._ack(ctx)
 
-        template = await self._get_sanction_dm_template(ctx.guild.id, "unmute")
+        template = await self._get_sanction_dm_template(ctx.guild.id, "unmute") if notifier else None
         dm_text = None
         if template is not None:
             dm_text = self._render_sanction_dm_text(
