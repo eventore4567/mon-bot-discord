@@ -827,10 +827,8 @@ class Ai(commands.Cog, name="Ai"):
         instructions = await self._build_system_instructions(user_id, author_name, guild_id)
         # 06/11/2026 : en conversation (mention, réponse, /sentrix), SentriX lit le
         # salon et parle comme un membre du serveur (utils/ai_conversation.py).
-        from utils import ai_conversation
-        contexte_salon = ai_conversation.CONTEXTE_SALON.get()
-        if contexte_salon is not None:
-            instructions += "\n\n" + ai_conversation.consigne_avec_contexte(contexte_salon)
+        # (La consigne de conversation est ajoutée au niveau de ai_service.generate
+        # par cogs/ai_context_v9.py : elle couvre aussi les chemins de secours.)
         # Les wrappers historiques n'acceptent pas "attachments". Le listener
         # fournit donc la sélection validée via le contexte de CETTE requête.
         if image_urls is None:

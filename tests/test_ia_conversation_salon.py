@@ -116,47 +116,41 @@ def test_la_consigne_parle_comme_un_membre_et_se_protege():
     assert consigne.endswith("Freeze : yo")
 
 
-def test_ask_ai_ajoute_la_conversation_seulement_en_conversation():
-    from cogs.ai import Ai
-    from utils import ai_service
+def test_la_consigne_s_ajoute_une_fois_et_raccourcit_le_bavardage():
+    instructions, question = conv.preparer_instructions("BASE", "mdr", "Freeze : yo")
+    assert question == "mdr"
+    assert instructions.startswith("BASE\n\nRÉPONSE COURTE OBLIGATOIRE")
+    assert "MODE CONVERSATION DISCORD" in instructions and instructions.endswith("Freeze : yo")
+    deja, _ = conv.preparer_instructions(instructions, "mdr", "Freeze : yo")
+    assert deja == instructions                      # jamais deux fois
 
-    envoye = {}
+    serieux, _ = conv.preparer_instructions(
+        "BASE", "explique moi comment configurer les logs du serveur stp", "",
+    )
+    assert "RÉPONSE COURTE OBLIGATOIRE" not in serieux
+    assert "MODE CONVERSATION DISCORD" in serieux
 
-    async def generate(payload, **kwargs):
-        envoye["instructions"] = kwargs["instructions"]
-        return SimpleNamespace(ok=True, text="ah mb", error=None)
 
-    async def settings(_bot, _gid):
-        return {"enabled": True, "allowed_channels": []}
+def test_le_wrapper_generate_applique_la_conversation_sur_tous_les_chemins():
+    # Les secours (ai_reply_recovery, ai_api_hotfix) appellent ai_service.generate
+    # directement : la consigne doit donc vivre dans le wrapper, pas dans ask_ai.
+    from pathlib import Path
 
-    cog = Ai.__new__(Ai)
-    cog.bot = SimpleNamespace()
+    source = (Path(__file__).resolve().parents[1] / "cogs" / "ai_context_v9.py").read_text(encoding="utf-8")
+    assert "ai_conversation.preparer_instructions(" in source
+    assert "ai_conversation.nettoyer_reponse(texte, question)" in source
 
-    async def instructions(*_a, **_k):
-        return "BASE"
 
-    cog._build_system_instructions = instructions
-    original = ai_service.generate
-    original_settings = ai_service.get_settings
-    ai_service.generate = generate
-    ai_service.get_settings = settings
-    try:
-        async def en_conversation():
-            jeton = conv.CONTEXTE_SALON.set("Freeze : yo")
-            try:
-                return await cog.ask_ai("which dc ?", guild_id=1, channel_id=2, command="sentrix-passif")
-            finally:
-                conv.CONTEXTE_SALON.reset(jeton)
+def test_les_mots_d_un_autre_alphabet_glisses_par_erreur_sont_retires():
+    assert conv.nettoyer_reponse("Je vois l'emoji dreamteam. 马会", "😂") == "Je vois l'emoji dreamteam."
+    assert conv.nettoyer_reponse("ah mb 😭", "bruh") == "ah mb 😭"
+    assert conv.nettoyer_reponse("你好", "你好吗") == "你好"     # la personne écrit en chinois
 
-        assert asyncio.run(en_conversation()) == "ah mb"
-        assert "MODE CONVERSATION DISCORD" in envoye["instructions"]
-        assert envoye["instructions"].endswith("Freeze : yo")
 
-        asyncio.run(cog.ask_ai("résume ce texte", guild_id=1, channel_id=2, command="summarize"))
-        assert "MODE CONVERSATION DISCORD" not in envoye["instructions"]
-    finally:
-        ai_service.generate = original
-        ai_service.get_settings = original_settings
+def test_la_consigne_garde_la_securite_mais_refuse_court():
+    assert "UNE phrase" in conv.CONSIGNE_CONVERSATION
+    assert "tu refuses quand même" in conv.CONSIGNE_CONVERSATION
+    assert "Ne décris pas l'emoji" in conv.CONSIGNE_CONVERSATION
 
 
 def test_repondre_a_une_reponse_de_l_ia_sans_ping_la_relance():

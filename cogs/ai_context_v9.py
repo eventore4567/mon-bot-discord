@@ -225,6 +225,18 @@ def install(bot: commands.Bot) -> None:
             return await current(*args, **kwargs)
 
         context = await build_server_context(bot, kwargs.get("guild_id"), kwargs.get("channel_id"))
+        # 06/11/2026 : en conversation (mention, réponse, /sentrix), le ton d'un membre
+        # du serveur et la conversation récente — sur TOUS les chemins (y compris les
+        # secours qui appellent ai_service.generate directement).
+        from utils import ai_conversation
+        contexte_salon = ai_conversation.CONTEXTE_SALON.get()
+        question = ""
+        if contexte_salon is not None:
+            kwargs["instructions"], question = ai_conversation.preparer_instructions(
+                kwargs.get("instructions", ai_service.SYSTEM_PROMPT),
+                args[0] if args else kwargs.get("prompt", ""),
+                contexte_salon,
+            )
         try:
             reel = contexte_discord_reel(
                 bot, kwargs.get("guild_id"), kwargs.get("channel_id"), kwargs.get("user_id"),
@@ -244,7 +256,15 @@ def install(bot: commands.Bot) -> None:
                 "Il ne contient aucun secret et ne remplace jamais les faits donnés par l'utilisateur.]\n"
                 f"{context}"
             )
-        return await current(*args, **kwargs)
+        resultat = await current(*args, **kwargs)
+        if contexte_salon is not None:
+            texte = getattr(resultat, "text", None)
+            if isinstance(texte, str) and texte:
+                try:
+                    resultat.text = ai_conversation.nettoyer_reponse(texte, question)
+                except Exception:  # noqa: BLE001 — résultat immuable : on le rend tel quel
+                    pass
+        return resultat
 
     generate_with_context._sentrix_ai_context_v9 = True
     ai_service.generate = generate_with_context
