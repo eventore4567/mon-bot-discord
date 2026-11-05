@@ -288,7 +288,7 @@ async def _run_sanction_pipeline(
         if not dm_text:
             return False
         try:
-            await target.send(dm_text, allowed_mentions=discord.AllowedMentions.none())
+            await _send_dm_card(target, dm_text)
             return True
         except discord.HTTPException:
             return False
@@ -458,7 +458,7 @@ async def mute(
     dm_text = render_dm_text(seconds) if render_dm_text else None
     if dm_text:
         try:
-            await target.send(dm_text, allowed_mentions=discord.AllowedMentions.none())
+            await _send_dm_card(target, dm_text)
             dm_sent = True
         except discord.HTTPException:
             dm_sent = False
@@ -520,7 +520,7 @@ async def tempban(
     dm_text = render_dm_text(seconds) if render_dm_text else None
     if dm_text:
         try:
-            await target.send(dm_text, allowed_mentions=discord.AllowedMentions.none())
+            await _send_dm_card(target, dm_text)
             dm_sent = True
         except discord.HTTPException:
             dm_sent = False
@@ -584,11 +584,43 @@ async def _apply_warn_role(
     )
 
 
+_MOTS_LEVEE = ("retiré", "retire", "levé", "leve", "débanni", "plus muet", "lifted", "removed")
+
+
+def _carte_mp(text: str) -> discord.ui.LayoutView:
+    """MP de sanction en petite carte colorée (05/11/2026 : « le MP est moche »).
+
+    Première ligne en titre, le reste en corps. Vert pour une levée de sanction,
+    rouge pour une sanction.
+    """
+    lignes = str(text).strip().splitlines() or [""]
+    titre, corps = lignes[0].strip(), "\n".join(lignes[1:]).strip()
+    levee = any(mot in titre.casefold() for mot in _MOTS_LEVEE)
+    vue = discord.ui.LayoutView(timeout=None)
+    carte = discord.ui.Container(accent_colour=discord.Colour(0x57F287 if levee else 0xED4245))
+    carte.add_item(discord.ui.TextDisplay(f"### {'✅' if levee else '🛑'} {titre}"[:3900]))
+    if corps:
+        carte.add_item(discord.ui.Separator())
+        carte.add_item(discord.ui.TextDisplay(corps[:3900]))
+    vue.add_item(carte)
+    return vue
+
+
+async def _send_dm_card(target: discord.abc.User, text: str) -> None:
+    """Envoie le MP en carte ; si Discord refuse la carte (hors MP fermé), en texte."""
+    try:
+        await target.send(view=_carte_mp(text), allowed_mentions=discord.AllowedMentions.none())
+    except discord.Forbidden:
+        raise
+    except (discord.HTTPException, TypeError, ValueError):
+        await target.send(text, allowed_mentions=discord.AllowedMentions.none())
+
+
 async def _send_dm_best_effort(target: discord.abc.User, text: str | None) -> bool:
     if not text:
         return False
     try:
-        await target.send(text, allowed_mentions=discord.AllowedMentions.none())
+        await _send_dm_card(target, text)
         return True
     except discord.HTTPException:
         return False
