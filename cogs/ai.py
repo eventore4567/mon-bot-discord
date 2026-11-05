@@ -36,6 +36,7 @@ dans les logs serveur (logger "bot.ai").
 
 import asyncio
 import contextvars
+from types import SimpleNamespace
 import copy
 import io
 import json
@@ -824,6 +825,12 @@ class Ai(commands.Cog, name="Ai"):
         model_key = ai_service.pick_model(prompt if isinstance(prompt, str) else "")
         reasoning_effort = ai_service.pick_reasoning_effort(model_key, "medium")
         instructions = await self._build_system_instructions(user_id, author_name, guild_id)
+        # 06/11/2026 : en conversation (mention, réponse, /sentrix), SentriX lit le
+        # salon et parle comme un membre du serveur (utils/ai_conversation.py).
+        from utils import ai_conversation
+        contexte_salon = ai_conversation.CONTEXTE_SALON.get()
+        if contexte_salon is not None:
+            instructions += "\n\n" + ai_conversation.consigne_avec_contexte(contexte_salon)
         # Les wrappers historiques n'acceptent pas "attachments". Le listener
         # fournit donc la sélection validée via le contexte de CETTE requête.
         if image_urls is None:
@@ -983,8 +990,19 @@ class Ai(commands.Cog, name="Ai"):
         # en préfixe, pour ne jamais laisser l'utilisateur face à un silence total pendant
         # que l'IA réfléchit (voir REQUEST_TIMEOUT_SECONDS dans ai_service.py : la réponse
         # arrive toujours, au pire sous forme d'erreur claire, rapidement ou sous forme d'erreur claire).
-        async with ctx.typing():
-            await self.send_sentrix_reply(ctx, ctx.author, question)
+        from utils import ai_conversation
+        jeton_salon = ai_conversation.CONTEXTE_SALON.set("")
+        try:
+            async with ctx.typing():
+                ancre = ctx.message if ctx.interaction is None else SimpleNamespace(
+                    channel=ctx.channel, reference=None,
+                )
+                ai_conversation.CONTEXTE_SALON.set(await ai_conversation.transcription_recente(
+                    ancre, getattr(self.bot.user, "id", None),
+                ))
+                await self.send_sentrix_reply(ctx, ctx.author, question)
+        finally:
+            ai_conversation.CONTEXTE_SALON.reset(jeton_salon)
 
     @staticmethod
     def _normalize_request(text: str) -> str:
@@ -2626,7 +2644,17 @@ class Ai(commands.Cog, name="Ai"):
                     "Référence Discord non récupérable pour une capture, message=%s",
                     getattr(message, "id", None),
                 )
-        if not mentioned and not name_trigger and not (
+        # 06/11/2026 : répondre à une réponse de SentriX continue la conversation,
+        # même avec le ping de réponse désactivé. Seulement sur ses messages texte
+        # (ses réponses IA) : répondre à un panneau ou à un log ne le déclenche pas.
+        reponse_a_l_ia = (
+            reply_to_bot
+            and isinstance(referenced, discord.Message)
+            and bool((referenced.content or "").strip())
+            and not referenced.embeds
+            and not getattr(referenced, "components", None)
+        )
+        if not mentioned and not name_trigger and not reponse_a_l_ia and not (
             image_attachments and (pending or reply_to_bot)
         ):
             return
@@ -2709,13 +2737,19 @@ class Ai(commands.Cog, name="Ai"):
         # L'image validée circule uniquement dans le contexte de cette tâche.
         images = await _images_from_discord_attachments(attachments)
         token = _PASSIVE_IMAGE_CONTEXT.set(tuple(images))
+        from utils import ai_conversation
+        jeton_salon = ai_conversation.CONTEXTE_SALON.set("")
         try:
             async with message.channel.typing():
+                ai_conversation.CONTEXTE_SALON.set(
+                    await ai_conversation.transcription_recente(message, bot_id)
+                )
                 await self.send_sentrix_reply(
                     message.channel, message.author, question,
                     reply_to=message,
                 )
         finally:
+            ai_conversation.CONTEXTE_SALON.reset(jeton_salon)
             _PASSIVE_IMAGE_CONTEXT.reset(token)
 
     @commands.hybrid_command(name="ask", description="Poser une question à l'IA.")
