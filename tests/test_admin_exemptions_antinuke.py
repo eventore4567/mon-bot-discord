@@ -140,3 +140,35 @@ def test_un_admin_avec_un_role_exempte_reste_protege_meme_en_mode_strict():
     cog.get_exempt_roles_cached = AsyncMock(return_value={700})
     assert _exempt(cog, guild, admin) is True
     assert _exempt(cog, guild, autre) is False
+
+
+def test_everyone_d_un_admin_une_fois_rien_trois_fois_sanction():
+    # 06/11/2026 : « un admin @everyone une seule fois, fait rien ; s'il ping 3 fois, sanctionne ».
+    admin = _membre(60, administrateur=True)
+    cog, guild = _contexte(admin)
+    cog._repondre_abus_privilegie = AsyncMock(return_value="derank")
+    supprimes = []
+
+    def message(n):
+        async def delete():
+            supprimes.append(n)
+        return SimpleNamespace(id=n, guild=guild, author=admin, delete=delete)
+
+    async def scenario():
+        for n in (1, 2):
+            await cog._everyone_d_un_admin(message(n))
+        assert supprimes == [] and cog._repondre_abus_privilegie.await_count == 0
+        await cog._everyone_d_un_admin(message(3))
+
+    asyncio.run(scenario())
+    assert supprimes == [3]
+    args = cog._repondre_abus_privilegie.await_args.args
+    assert args[1] is admin and args[3] == automod_module.ABUS_PRIVILEGIE_SEUIL
+
+
+def test_everyone_d_un_admin_passe_par_le_garde_dedie():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "cogs" / "automod.py").read_text(encoding="utf-8")
+    assert "return await self._everyone_d_un_admin(message)" in source
+    assert automod_module.ADMIN_EVERYONE_SEUIL == 3

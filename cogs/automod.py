@@ -581,6 +581,11 @@ SPAM_GRACE_APRES_AVERTISSEMENT = 20.0
 #: @everyone ou 5 personnes différentes dans UN message : signature de raid,
 #: mute immédiat. Les pings répétés, eux, suivent avertissement puis mute.
 MOTIF_MENTION_MASSIVE = "Mention massive détectée."
+#: 06/11/2026 : un admin qui fait @everyone / @here UNE fois, rien ne se passe.
+#: Au 3e en 10 minutes : message supprimé, rôles à risque retirés (Discord
+#: interdit de muter un administrateur), propriétaire prévenu.
+ADMIN_EVERYONE_SEUIL = 3
+ADMIN_EVERYONE_FENETRE = 600
 # 05/11/2026 : des mutes jusqu'à 24 h « abusent ». Paliers courts : 5 min,
 # 10 min, 30 min, 1 h, puis 2 h au maximum.
 SPAM_MUTE_DURATIONS_SECONDS = (300, 600, 1800, 3600, 7200)
@@ -3663,6 +3668,10 @@ class AutoMod(commands.Cog, name="Automod"):
             getattr(message, "mention_everyone", False) is True
             or len({u.id for u in message.mentions} | {r.id for r in message.role_mentions}) >= 5
         ) and await self.security_filter_applies_to(message, "antimention"):
+            if getattr(message, "mention_everyone", False) is True and _is_discord_administrator(
+                _as_member(message.author, message.guild)
+            ):
+                return await self._everyone_d_un_admin(message)
             return await self._delete_and_warn(message, MOTIF_MENTION_MASSIVE, "antimention")
 
         # 04/11/2026 (« j'ai ping un mec 5 fois, aucun anti-ping ») : les mentions
@@ -3976,6 +3985,29 @@ class AutoMod(commands.Cog, name="Automod"):
                     pass
             return "Mentions répétées (ping spam)."
         return None
+
+    async def _everyone_d_un_admin(self, message) -> None:
+        """@everyone / @here d'un administrateur : toléré, sauf s'il insiste."""
+        suivi = self.__dict__.get("_everyone_admins")
+        if suivi is None:
+            suivi = self.__dict__["_everyone_admins"] = FenetreGlissante(
+                fenetre=ADMIN_EVERYONE_FENETRE, purge_toutes=200,
+            )
+        cle = (message.guild.id, message.author.id)
+        if suivi.ajouter(cle, message.id) < ADMIN_EVERYONE_SEUIL:
+            return  # une ou deux fois : rien du tout
+        suivi.reinitialiser(cle)
+        try:
+            await message.delete()
+        except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+            pass
+        membre = _as_member(message.author, message.guild)
+        if isinstance(membre, discord.Member):
+            await self._repondre_abus_privilegie(
+                message.guild, membre,
+                f"{ADMIN_EVERYONE_SEUIL} @everyone/@here en {ADMIN_EVERYONE_FENETRE // 60} minutes",
+                ABUS_PRIVILEGIE_SEUIL,
+            )
 
     @staticmethod
     async def _supprimer_pings_precedents(anciens) -> None:
