@@ -493,42 +493,14 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
         self._followup_tasks[key] = asyncio.create_task(runner())
 
     async def start_human_verification(self, interaction: discord.Interaction):
-        """Legacy compatibility: every old Discord button now opens the web verifier."""
-        if interaction.guild is None:
-            embed = discord.Embed(
-                title="SentriX — Vérification",
-                description="Cette vérification fonctionne uniquement dans un serveur.",
-                colour=discord.Colour.red(),
-            )
-            return await panels.envoyer(
-                interaction.response,
-                panels.depuis_embed(embed),
-                ephemere=True,
-            )
+        """06/11/2026 : la vérification se fait DANS Discord, plus sur le site.
 
-        from web.public_verification_v120 import verification_url
+        Un test privé (cogs/verification_discord.py), puis les mêmes contrôles que
+        le site, sans connexion ni autorisation du compte Discord.
+        """
+        from .verification_discord import demarrer
 
-        embed = discord.Embed(
-            title="Vérification web SentriX",
-            description=(
-                "Le challenge ne se fait plus dans Discord. "
-                "Ouvrez le site SentriX pour continuer."
-            ),
-            colour=discord.Colour.blurple(),
-        )
-        return await panels.envoyer(
-            interaction.response,
-            panels.depuis_embed(
-                embed,
-                boutons=(
-                    panels.Bouton(
-                        libelle="Se vérifier sur SentriX",
-                        url=verification_url(interaction.guild.id),
-                    ),
-                ),
-            ),
-            ephemere=True,
-        )
+        return await demarrer(interaction)
 
     async def evaluate_member(
         self,
@@ -618,7 +590,8 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
         """
         tokens = (
             ("vérification web sentrix", "sentrix web verification",
-             "se vérifier sur sentrix", "verify on sentrix")
+             "se vérifier sur sentrix", "verify on sentrix",
+             "vérification sentrix", "sentrix verification")
             if kind == "verify" else
             ("honeypot sentrix", "ne pas envoyer de message dans ce salon",
              "stay-muted")
@@ -1097,7 +1070,8 @@ def _patch_setup_display(bot: commands.Bot) -> None:
                 "en **8 familles pondérées** et calcule un score sur **20**. "
                 "Cette analyse ne donne jamais directement le rôle final. "
                 "Pour accéder au serveur, le membre termine ensuite le "
-                "**portail web SentriX** (règlement, OAuth Discord et CAPTCHA)."
+                "**test dans Discord** (règlement et choix d'un émoji), sans site ni "
+                "connexion au compte."
             )
             for index in reversed(range(len(embed.fields))):
                 name = str(embed.fields[index].name or "").casefold()

@@ -75,18 +75,25 @@ _WEB_CLEANUP_MIGRATION = "verification_web_v120_cleanup_1"
 
 
 async def _web_panel(bot: commands.Bot, guild: discord.Guild):
+    """Panneau du salon de vérification.
+
+    06/11/2026 : le bouton n'ouvre plus le site (connexion Discord et « SentriX
+    souhaite accéder à votre compte ») : il lance le test DANS Discord
+    (cogs/verification_discord.py). Le nom est gardé pour les appelants existants.
+    """
     from cogs import language_runtime
-    from web.public_verification_v120 import verification_url
+    from cogs import verification_discord
 
     language = await language_runtime.get_language(bot, guild.id)
     english = language == language_runtime.LANG_EN
     embed = discord.Embed(
-        title="SentriX Web Verification" if english else "Vérification web SentriX",
-        # 05/11/2026 : « fais plus simple » — une phrase, un bouton.
+        title="SentriX Verification" if english else "Vérification SentriX",
         description=(
-            "Click the button below to get access to the server. It takes less than a minute."
+            "Click the button below to get access to the server. It takes a few seconds, "
+            "right here in Discord."
             if english
-            else "Cliquez sur le bouton ci-dessous pour accéder au serveur. Cela prend moins d'une minute."
+            else "Cliquez sur le bouton ci-dessous pour accéder au serveur. Cela prend quelques "
+            "secondes, directement dans Discord."
         ),
         colour=discord.Color.blurple(),
     )
@@ -94,8 +101,10 @@ async def _web_panel(bot: commands.Bot, guild: discord.Guild):
         embed,
         boutons=(
             panels.Bouton(
-                libelle="Verify on SentriX" if english else "Se vérifier sur SentriX",
-                url=verification_url(guild.id),
+                libelle="Verify" if english else "Se vérifier",
+                custom_id=verification_discord.BOUTON_DEMARRER,
+                style=discord.ButtonStyle.success,
+                callback=verification_discord.depuis_le_panneau,
             ),
         ),
     )
@@ -108,7 +117,7 @@ def _trap_embed(verify_channel: discord.TextChannel, sanction: str) -> discord.E
         description=(
             "Ce salon est le honeypot SentriX réservé aux comptes non vérifiés.\n"
             f"Écrire ici peut entraîner un **{sanction_label}**.\n\n"
-            f"Utilisez {verify_channel.mention} pour ouvrir le site de vérification."
+            f"Utilisez {verify_channel.mention} pour vous vérifier."
         ),
         colour=discord.Color.red(),
     )
@@ -282,19 +291,10 @@ class HoneypotVerifyView(discord.ui.View):
                 "Cette vérification doit être ouverte depuis un serveur Discord.",
                 ephemeral=True,
             )
-        from web.public_verification_v120 import verification_url
-        view = discord.ui.View(timeout=60)
-        view.add_item(
-            discord.ui.Button(
-                label="Ouvrir la vérification SentriX",
-                url=verification_url(interaction.guild.id),
-            )
-        )
-        await interaction.response.send_message(
-            "La vérification se fait maintenant sur le site SentriX.",
-            view=view,
-            ephemeral=True,
-        )
+        # 06/11/2026 : la vérification se fait dans Discord, plus sur le site.
+        from cogs import verification_discord
+
+        await verification_discord.depuis_le_panneau(interaction)
 
 
 class HoneypotVerification(commands.Cog, name=_COG_NAME):
@@ -828,25 +828,10 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
         return True, "Vérification renforcée + salon piège désactivés. Les salons ont été conservés."
 
     async def start_human_verification(self, interaction: discord.Interaction):
-        # V120 : aucune étape de vérification ne se déroule plus dans Discord.
-        # Cette méthode reste uniquement pour compatibilité avec d'anciens callbacks.
-        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
-            return await interaction.response.send_message(
-                "Cette vérification fonctionne uniquement dans un serveur.", ephemeral=True
-            )
-        from web.public_verification_v120 import verification_url
-        view = discord.ui.View(timeout=60)
-        view.add_item(
-            discord.ui.Button(
-                label="Se vérifier sur SentriX",
-                url=verification_url(interaction.guild.id),
-            )
-        )
-        return await interaction.response.send_message(
-            "La vérification complète se fait maintenant sur le site SentriX.",
-            view=view,
-            ephemeral=True,
-        )
+        # 06/11/2026 : la vérification se fait entièrement dans Discord.
+        from cogs import verification_discord
+
+        return await verification_discord.demarrer(interaction)
 
 
         member = interaction.user
@@ -976,23 +961,11 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
         typed_math: str,
     ):
         # Les anciens modals persistants peuvent encore être soumis quelques instants après
-        # un déploiement. Ils ne doivent jamais attribuer le rôle : on renvoie vers le web.
+        # un déploiement. Ils n'attribuent jamais le rôle : un nouveau test Discord s'ouvre.
         del token, typed_code, typed_math
-        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
-            return await interaction.response.send_message("Vérification invalide.", ephemeral=True)
-        from web.public_verification_v120 import verification_url
-        view = discord.ui.View(timeout=60)
-        view.add_item(
-            discord.ui.Button(
-                label="Ouvrir la vérification SentriX",
-                url=verification_url(interaction.guild.id),
-            )
-        )
-        return await interaction.response.send_message(
-            "Cette ancienne vérification Discord n'est plus utilisée. Continue sur le site SentriX.",
-            view=view,
-            ephemeral=True,
-        )
+        from cogs import verification_discord
+
+        return await verification_discord.demarrer(interaction)
 
 
         key = (interaction.guild.id, interaction.user.id)
