@@ -1366,6 +1366,25 @@ class Ai(commands.Cog, name="Ai"):
                 await reply("Je n’ai pas réussi à quitter le salon vocal.")
             return True
 
+        if intent == "server.rename":
+            if actor.id != guild.owner_id and not actor.guild_permissions.manage_guild:
+                await reply("Il faut la permission **Gérer le serveur** pour le renommer.")
+                return True
+            if not me.guild_permissions.manage_guild:
+                await reply("Il me manque la permission **Gérer le serveur**.")
+                return True
+            nom = str(action.slots.get("name") or "").strip()[:100]
+            if len(nom) < 2:
+                await reply("Le nom doit faire au moins 2 caractères.")
+                return True
+            ancien = guild.name
+            try:
+                await guild.edit(name=nom, reason=reason)
+                await reply(f"C'est fait : **{ancien}** s'appelle maintenant **{nom}**.")
+            except (discord.Forbidden, discord.HTTPException):
+                await reply("Discord a refusé le renommage du serveur.")
+            return True
+
         if intent == "category.create":
             if not actor.guild_permissions.manage_channels:
                 await reply("Vous n’avez pas la permission **Gérer les salons**.")
@@ -2146,7 +2165,7 @@ class Ai(commands.Cog, name="Ai"):
             await self._ask_for_missing_action_slot(message, action, missing[0], member=member)
             return True
 
-        if action.intent.startswith(("voice.", "channel.", "category.", "role.", "message.", "member.", "embed.", "security.block_link")):
+        if action.intent.startswith(("voice.", "channel.", "category.", "role.", "message.", "member.", "embed.", "security.block_link", "server.rename")):
             handled = await self._execute_native_action(message, action, member=member)
             if handled:
                 self._pending_actions.pop(self._pending_key(message), None)

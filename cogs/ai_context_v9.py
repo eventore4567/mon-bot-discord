@@ -190,7 +190,22 @@ def contexte_discord_reel(bot, guild_id, channel_id, user_id) -> str:
             + (f" · rôle le plus haut : {role_membre}" if role_membre and role_membre != "@everyone" else "")
             + f" · permissions : {statut}"
         )
-    return "\n".join(lignes)[:1800]
+    try:
+        from utils import ai_actions
+
+        savoir_faire = sorted({
+            spec.description for spec in ai_actions.public_catalog()
+            if spec.description and spec.risk in {"low", "medium", "high"}
+        })
+        if savoir_faire:
+            lignes.append(
+                "Ce que tu exécutes toi-même quand on te le demande en message (avec les "
+                "permissions de la personne) : " + " ; ".join(savoir_faire)[:3000]
+                + ". Pour le reste, propose la commande SentriX adaptée, sans prétendre l'avoir fait."
+            )
+    except Exception:  # noqa: BLE001
+        pass
+    return "\n".join(lignes)[:4600]
 
 
 def install(bot: commands.Bot) -> None:

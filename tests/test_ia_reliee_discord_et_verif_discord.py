@@ -172,3 +172,62 @@ def test_le_message_d_erreur_json_est_lu():
     reponse = SimpleNamespace(body=json.dumps({"error": "Règlement requis."}).encode())
     assert verification_discord.message_d_erreur(reponse) == "Règlement requis."
     assert "Réessayez" in verification_discord.message_d_erreur(SimpleNamespace(body=b"oops"))
+
+
+# ---------------------------------------------------------------- l'IA agit
+
+def test_renommer_le_serveur_est_une_action_reconnue():
+    from utils import ai_actions
+
+    for phrase, nom in (
+        ("rename le serveur en « Meta le meilleur »", "Meta le meilleur"),
+        ("renomme le serveur en Team Meta", "Team Meta"),
+        ("change le nom du serveur en Odboug", "Odboug"),
+        ("rename the server to Meta", "Meta"),
+    ):
+        action = ai_actions.local_parse(phrase)
+        assert action is not None and action.intent == "server.rename", phrase
+        assert action.slots == {"name": nom}
+        assert ai_actions.looks_action_request(phrase), phrase
+    assert not ai_actions.looks_action_request("comment renommer le serveur ?")
+    assert ai_actions.local_parse("renomme #general en chat").intent == "channel.rename"
+
+
+def _renommage(actor_perms, *, owner=False, bot_perms=True):
+    from cogs.ai import Ai
+    from utils import ai_actions
+
+    reponses = []
+    guild = SimpleNamespace(
+        name="Ancien", owner_id=5 if owner else 7, edit=AsyncMock(),
+        me=SimpleNamespace(guild_permissions=SimpleNamespace(manage_guild=bot_perms)),
+    )
+    message = SimpleNamespace(
+        guild=guild,
+        author=SimpleNamespace(id=5, guild_permissions=SimpleNamespace(manage_guild=actor_perms)),
+        reply=AsyncMock(side_effect=lambda texte, **_: reponses.append(texte)),
+    )
+    cog = Ai.__new__(Ai)
+    action = ai_actions.ParsedAction("server.rename", {"name": "Meta le meilleur"}, 99, "local")
+    asyncio.run(cog._execute_native_action(message, action))
+    return guild, reponses
+
+
+def test_l_ia_renomme_vraiment_le_serveur_si_on_a_la_permission():
+    guild, reponses = _renommage(True)
+    assert guild.edit.await_args.kwargs["name"] == "Meta le meilleur"
+    assert "**Ancien** s'appelle maintenant **Meta le meilleur**" in reponses[0]
+
+
+def test_sans_gerer_le_serveur_l_ia_refuse():
+    guild, reponses = _renommage(False)
+    guild.edit.assert_not_awaited()
+    assert "Gérer le serveur" in reponses[0]
+    guild, _ = _renommage(False, owner=True)          # le propriétaire peut toujours
+    guild.edit.assert_awaited_once()
+
+
+def test_l_ia_sait_ce_qu_elle_peut_executer():
+    texte = ai_context_v9.contexte_discord_reel(_bot(admin_bot=True), 10, 20, 5)
+    assert "Ce que tu exécutes toi-même" in texte
+    assert "renommer le serveur Discord" in texte
