@@ -585,6 +585,11 @@ MOTIF_MENTION_MASSIVE = "Mention massive détectée."
 #: Au 3e en 10 minutes : message supprimé, rôles à risque retirés (Discord
 #: interdit de muter un administrateur), propriétaire prévenu.
 ADMIN_EVERYONE_SEUIL = 3
+#: 06/11/2026 : « les admins doivent avoir plus de marge que les membres, sinon tout
+#: le monde va retirer SentriX ». Même avec « Sanctionner aussi les admins », seuls
+#: ces filtres les visent ; majuscules, émojis, liens, invitations, insultes et pings
+#: répétés ne les concernent pas. Le spam d'un admin est supprimé avec un simple rappel.
+FILTRES_POUR_ADMINS = frozenset({"antispam", "antimention", "antiscam"})
 ADMIN_EVERYONE_FENETRE = 600
 # 05/11/2026 : des mutes jusqu'à 24 h « abusent ». Paliers courts : 5 min,
 # 10 min, 30 min, 1 h, puis 2 h au maximum.
@@ -2183,8 +2188,11 @@ class AutoMod(commands.Cog, name="Automod"):
         # all-perms. Elle prime sur les salons stricts et les overrides, mais
         # ne désactive AUCUNE protection globale de sécurité du serveur.
         member = _as_member(message.author, message.guild)
-        if _is_discord_administrator(member) and not await self.admins_soumis(message.guild.id):
-            return False
+        if _is_discord_administrator(member):
+            if not await self.admins_soumis(message.guild.id):
+                return False
+            if canonical not in FILTRES_POUR_ADMINS:
+                return False
 
         policy = await self.get_security_filter_policy_cached(message.guild.id, canonical)
         scope_ids = self._message_scope_ids(message)
@@ -2321,6 +2329,9 @@ class AutoMod(commands.Cog, name="Automod"):
         # 04/11/2026 (« j'ai spam plein de fois, no sanction ») : la première rafale
         # ne donnait qu'un rappel, la deuxième un warn ; le mute n'arrivait qu'à la
         # troisième. Le spam est maintenant sanctionné dès la première rafale.
+        if _is_discord_administrator(member):
+            # Un admin n'est jamais sanctionné pour du spam : messages supprimés, rappel.
+            return ("warning_ping", 0, None, "⚠️ doucement sur le spam.")
         cle = (int(guild.id), int(member.id))
         averti = self.__dict__.setdefault("_spam_dernier_avertissement", {})
         depuis = averti.get(cle)
@@ -3668,15 +3679,20 @@ class AutoMod(commands.Cog, name="Automod"):
             getattr(message, "mention_everyone", False) is True
             or len({u.id for u in message.mentions} | {r.id for r in message.role_mentions}) >= 5
         ) and await self.security_filter_applies_to(message, "antimention"):
-            if getattr(message, "mention_everyone", False) is True and _is_discord_administrator(
-                _as_member(message.author, message.guild)
-            ):
-                return await self._everyone_d_un_admin(message)
+            if _is_discord_administrator(_as_member(message.author, message.guild)):
+                # Un admin qui pingue plusieurs personnes ne fait rien de mal ;
+                # seul @everyone/@here répété (3 fois en 10 min) est sanctionné.
+                if getattr(message, "mention_everyone", False) is True:
+                    return await self._everyone_d_un_admin(message)
+                return
             return await self._delete_and_warn(message, MOTIF_MENTION_MASSIVE, "antimention")
 
         # 04/11/2026 (« j'ai ping un mec 5 fois, aucun anti-ping ») : les mentions
         # réparties sur plusieurs messages comptent aussi.
-        if conf.get("antimention") and not getattr(message, "_sentrix_edit", False):
+        if (
+            conf.get("antimention") and not getattr(message, "_sentrix_edit", False)
+            and not _is_discord_administrator(_as_member(message.author, message.guild))
+        ):
             motif_pings = self._pings_repetes(message)
             if motif_pings and await self.security_filter_applies_to(message, "antimention"):
                 return await self._delete_and_warn(message, motif_pings, "antimention")

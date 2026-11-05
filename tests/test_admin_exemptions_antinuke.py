@@ -172,3 +172,26 @@ def test_everyone_d_un_admin_passe_par_le_garde_dedie():
     source = (Path(__file__).resolve().parents[1] / "cogs" / "automod.py").read_text(encoding="utf-8")
     assert "return await self._everyone_d_un_admin(message)" in source
     assert automod_module.ADMIN_EVERYONE_SEUIL == 3
+
+
+def test_les_admins_ont_plus_de_marge_que_les_membres(monkeypatch):
+    # 06/11/2026 : même avec « Sanctionner aussi les admins », seuls spam, @everyone
+    # répété et arnaque les visent ; jamais de sanction pour le spam d'un admin.
+    admin = _membre(61, administrateur=True)
+    cog, guild = _contexte(admin)
+    cog.admins_soumis = AsyncMock(return_value=True)
+    monkeypatch.setattr(automod_module, "_is_discord_administrator", lambda m: m is admin)
+    monkeypatch.setattr(automod_module, "_as_member", lambda m, g: m)
+    cog.get_security_filter_policy_cached = AsyncMock(
+        return_value={"strict_channel_ids": set(), "role_ids": set(), "member_ids": set()}
+    )
+    cog.get_immunity_override_cached = AsyncMock(return_value=None)
+    cog.get_exempt_roles_cached = AsyncMock(return_value=set())
+    cog.get_ignored_channels_cached = AsyncMock(return_value=set())
+    message = SimpleNamespace(author=admin, guild=guild, channel=SimpleNamespace(id=3, parent_id=None))
+
+    for filtre in ("anticaps", "antiemoji", "antilink", "antiinvite", "antiinsult"):
+        assert asyncio.run(cog.security_filter_applies_to(message, filtre)) is False, filtre
+
+    action = asyncio.run(cog._spam_progressive_action(guild, admin, "spam"))
+    assert action == ("warning_ping", 0, None, "⚠️ doucement sur le spam.")
