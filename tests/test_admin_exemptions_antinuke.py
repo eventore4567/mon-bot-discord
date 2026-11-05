@@ -1,9 +1,12 @@
-"""Les administrateurs ne sont plus traités comme des pirates.
+"""Qui l'anti-nuke surveille.
 
-L'anti-nuke n'exemptait que le propriétaire du serveur, SentriX et la liste
-blanche manuelle : un administrateur qui supprimait trois salons était banni.
-Et un auteur de message transmis sans ses permissions (User au lieu de Member)
-faisait passer un administrateur pour un membre ordinaire dans les filtres.
+05/11/2026 : un administrateur n'est plus exempté (test réel : un compte admin
+a supprimé tous les salons sans aucune réaction). Seuls le propriétaire du
+serveur, SentriX, les propriétaires de SentriX et la liste blanche anti-nuke le
+sont. Seule une rafale déclenche la sanction.
+
+Les FILTRES de messages, eux, continuent de reconnaître l'administrateur, y
+compris quand l'auteur est transmis comme simple User.
 """
 from __future__ import annotations
 
@@ -56,23 +59,22 @@ def _exempt(cog, guild, acteur) -> bool:
     return asyncio.run(cog.is_antinuke_exempt(guild, acteur))
 
 
-def test_un_administrateur_n_est_pas_sanctionne_par_l_anti_nuke():
+def test_un_administrateur_est_surveille_par_l_anti_nuke():
     admin = _membre(50, administrateur=True)
     cog, guild = _contexte(admin)
-    assert _exempt(cog, guild, admin) is True
+    assert _exempt(cog, guild, admin) is False
 
 
-def test_un_administrateur_transmis_comme_simple_user_est_reconnu():
+def test_un_administrateur_transmis_comme_simple_user_est_surveille():
     admin = _membre(51, administrateur=True)
     cog, guild = _contexte(admin)
-    assert _exempt(cog, guild, SimpleNamespace(id=51)) is True
+    assert _exempt(cog, guild, SimpleNamespace(id=51)) is False
 
 
-def test_un_administrateur_absent_du_cache_est_recherche_avant_toute_sanction():
+def test_un_administrateur_de_confiance_se_met_en_liste_blanche():
     admin = _membre(56, administrateur=True)
-    cog, guild = _contexte(fetched=(admin,))
-    assert _exempt(cog, guild, SimpleNamespace(id=56)) is True
-    guild.fetch_member.assert_awaited_once_with(56)
+    cog, guild = _contexte(admin, whitelist={56})
+    assert _exempt(cog, guild, admin) is True
 
 
 def test_un_moderateur_sans_administrateur_reste_surveille():
@@ -81,10 +83,11 @@ def test_un_moderateur_sans_administrateur_reste_surveille():
     assert _exempt(cog, guild, moderateur) is False
 
 
-def test_un_bot_administrateur_n_est_pas_sanctionne():
+def test_un_bot_administrateur_est_surveille_lui_aussi():
+    # Un bot malveillant doté de l'accès Administrateur peut nuker un serveur.
     robot = _membre(53, administrateur=True, bot=True)
     cog, guild = _contexte(robot)
-    assert _exempt(cog, guild, robot) is True
+    assert _exempt(cog, guild, robot) is False
 
 
 def test_proprietaire_sentrix_et_liste_blanche_restent_exemptes():

@@ -645,9 +645,6 @@ class SecurityVerificationRuntimeV71:
             return "propriétaire du serveur"
         if member.guild_permissions.administrator or member.guild_permissions.manage_guild:
             return "staff (administrateur / gérer le serveur)"
-        verified_id = _get(conf, "verified_role_id")
-        if verified_id and any(role.id == int(verified_id) for role in member.roles):
-            return "membre déjà vérifié"
         return "aucune exemption"
 
     def _tracer_ignore(self, message: discord.Message, conf: Any, raison: str) -> None:
@@ -670,13 +667,10 @@ class SecurityVerificationRuntimeV71:
             return True
         if member.guild_permissions.administrator or member.guild_permissions.manage_guild:
             return True
-        verified_id = _get(conf, "verified_role_id")
-        if verified_id and any(role.id == int(verified_id) for role in member.roles):
-            return True
-        # 04/11/2026 : le piège ne visait que les comptes portant le rôle « non
-        # vérifié » ; un membre ordinaire (ni staff, ni vérifié) écrivait dans le
-        # salon piège sans aucune sanction. Tout membre non staff et non vérifié
-        # qui écrit ici est désormais pris.
+        # 04/11/2026 : le piège ne visait que les comptes « non vérifié ».
+        # 05/11/2026 : les membres VÉRIFIÉS aussi sont pris (« un compte vérifié
+        # peut se faire pirater s'il clique sur un lien »). Seul le staff
+        # (propriétaire, administrateur, gérer le serveur) est épargné.
         return False
 
     async def on_message(self, message: discord.Message) -> None:
@@ -700,6 +694,13 @@ class SecurityVerificationRuntimeV71:
             # 27/10) : un test fait avec un compte staff, vérifié ou sans le rôle
             # « non vérifié » ne déclenche rien, par conception. La raison est tracée.
             self._tracer_ignore(message, conf, self._raison_bypass(message.author, conf))
+            # 05/11/2026 : personne n'écrit dans le salon piège. Le staff n'est
+            # pas sanctionné, mais son message est supprimé comme les autres.
+            if cfg["honeypot_delete_message"] and not message.author.bot:
+                try:
+                    await message.delete()
+                except (discord.Forbidden, discord.HTTPException):
+                    pass
             return
         # La garde d'immunité du propriétaire bloque déjà le ban, mais le reste
         # du softban (débannissement, journal) partait quand même : 3 erreurs
