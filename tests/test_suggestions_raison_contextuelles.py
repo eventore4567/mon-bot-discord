@@ -89,8 +89,9 @@ def test_lever_une_sanction_ne_propose_pas_de_motif_de_sanction(chemin):
 def test_une_duree_sans_unite_propose_minutes_heures_jours():
     fournisseur = ss.PAR_OPTION["duree"]
     choix = asyncio.run(fournisseur(None, "7"))
-    assert [(c.name, c.value) for c in choix] == [
+    assert [(c.name, c.value) for c in choix][:3] == [
         ("7 minutes", "7m"), ("7 heures", "7h"), ("7 jours", "7j"),
     ]
-    assert [c.value for c in asyncio.run(fournisseur(None, "1"))] == ["1m", "1h", "1j"]
+    un = [c.value for c in asyncio.run(fournisseur(None, "1"))]
+    assert un[:3] == ["1m", "1h", "1j"] and "10m" in un
     assert asyncio.run(fournisseur(None, "1"))[0].name == "1 minute"

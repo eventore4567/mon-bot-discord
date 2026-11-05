@@ -86,7 +86,7 @@ async def _web_panel(bot: commands.Bot, guild: discord.Guild):
         description=(
             "Click the button below to get access to the server. It takes less than a minute."
             if english
-            else "Clique sur le bouton ci-dessous pour accéder au serveur. Ça prend moins d'une minute."
+            else "Cliquez sur le bouton ci-dessous pour accéder au serveur. Cela prend moins d'une minute."
         ),
         colour=discord.Color.blurple(),
     )

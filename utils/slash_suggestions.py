@@ -164,10 +164,17 @@ def _durees(items: list[tuple[str, str]], unites=UNITES_DUREE) -> Provider:
         saisie = str(current or "").strip()
         if saisie.isdigit() and 0 < int(saisie) <= 999:
             n = int(saisie)
-            return [
+            choix = [
                 app_commands.Choice(name=f"{n} {un if n == 1 else plusieurs}", value=f"{n}{code}")
                 for un, plusieurs, code in unites
             ]
+            # Puis les durées courantes qui commencent par ce nombre (« 1 » → 10 minutes…).
+            vus = {c.value for c in choix}
+            for c in _filtrer(saisie, items):
+                if c.value not in vus and len(choix) < MAX_CHOICES:
+                    choix.append(c)
+                    vus.add(c.value)
+            return choix
         return await statique(interaction, current)
 
     return suggest
