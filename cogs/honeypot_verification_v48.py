@@ -82,22 +82,13 @@ async def _web_panel(bot: commands.Bot, guild: discord.Guild):
     english = language == language_runtime.LANG_EN
     embed = discord.Embed(
         title="SentriX Web Verification" if english else "Vérification web SentriX",
+        # 05/11/2026 : « fais plus simple » — une phrase, un bouton.
         description=(
-            "Verification now happens on the secure SentriX website.\n\n"
-            "The site checks your Discord identity, server membership, account age, "
-            "current rules and a human CAPTCHA. Once approved, SentriX unlocks your role "
-            "and sends you a confirmation DM."
+            "Click the button below to get access to the server. It takes less than a minute."
             if english
-            else
-            "La vérification se fait maintenant sur le site sécurisé SentriX.\n\n"
-            "Le site contrôle votre identité Discord, votre appartenance au serveur, "
-            "l'ancienneté du compte, le règlement actuel et un CAPTCHA humain. "
-            "Une fois validé, SentriX débloque votre rôle et vous envoie un MP de confirmation."
+            else "Cliquez sur le bouton ci-dessous pour accéder au serveur. Cela prend moins d'une minute."
         ),
         colour=discord.Color.blurple(),
-    )
-    embed.set_footer(
-        text="SentriX • Web Verification" if english else "SentriX • Vérification web"
     )
     return panels.depuis_embed(
         embed,

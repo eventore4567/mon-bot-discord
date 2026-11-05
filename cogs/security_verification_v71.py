@@ -1090,6 +1090,19 @@ class SecurityVerificationRuntimeV71:
         if not conf:
             return
         cfg = await settings(self.bot, guild.id)
+        # 05/11/2026 : un seul auteur pour les panneaux du portail. Ce rafraîchissement
+        # réécrivait le DERNIER message du bot avec sa « Passerelle de vérification » ;
+        # le moteur V5 ne reconnaissait plus son panneau et en publiait un nouveau à
+        # chaque reconfiguration (« plein de doublons dans les vérifications »).
+        moteur = self.bot.get_cog("HoneypotVerification")
+        if moteur is not None and hasattr(moteur, "refresh_existing_panels"):
+            try:
+                await moteur.refresh_existing_panels(
+                    guild, honeypot_enabled=bool(cfg["honeypot_enabled"]),
+                )
+            except Exception:
+                logger.debug("Panneaux de vérification non rafraîchis guild=%s", guild.id, exc_info=True)
+            return
         verify = guild.get_channel(int(_get(conf, "verify_channel_id", 0))) if _get(conf, "verify_channel_id") else None
         trap = guild.get_channel(int(_get(conf, "trap_channel_id", 0))) if _get(conf, "trap_channel_id") else None
 

@@ -751,7 +751,7 @@ class SentriXSetupV73(discord.ui.LayoutView):
 async def _send_setup_v73(self, target):
     guild = getattr(target, "guild", None)
     member = getattr(target, "author", None) or getattr(target, "user", None)
-    if not await setup_ui._can_setup(self.bot, member, guild):
+    if guild is None or member is None:  # /setup s'ouvre pour tous (lecture seule)
         return await setup_ui._permission_error(target)
 
     view = SentriXSetupV73(self.bot, guild, member.id)

@@ -79,7 +79,10 @@ def test_derniere_couche_invitations_separe_prefix_public_et_slash_prive():
     assert "return await panels.envoyer(target, view, ephemere=False)" in transport
     assert "return await panels.envoyer(target, view, ephemere=True)" in transport
     assert "return await panels.envoyer(target.followup, view, ephemere=True)" in transport
-    assert "await setup_ui._can_setup(self.bot, member, guild)" in transport
+    # 05/11/2026 : /setup s'ouvre pour tous (lecture) ; chaque clic est contrôlé par
+    # SentriXSetupV73.interaction_check (peut_configurer), plus par _can_setup à l'ouverture.
+    assert "await setup_ui._can_setup(self.bot, member, guild)" not in transport
+    assert "if guild is None or member is None" in transport
     assert "PrivateSetupLauncher" not in source
     assert "delete_after=15" not in transport
 

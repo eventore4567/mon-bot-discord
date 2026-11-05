@@ -82,7 +82,7 @@ def test_une_rafale_d_un_admin_exempte_previent_le_proprietaire():
     admin = _membre(57, administrateur=True)
     cog, guild = _contexte(admin)
     cog.admins_soumis = AsyncMock(return_value=False)
-    proprietaire = Mock()
+    proprietaire = Mock(spec=discord.Member)
     proprietaire.send = AsyncMock()
     guild.owner = proprietaire
     guild.name = "Mon serveur"
@@ -127,3 +127,16 @@ def test_les_filtres_de_messages_reconnaissent_l_admin_transmis_comme_user():
     message = SimpleNamespace(author=SimpleNamespace(id=60, bot=False), guild=guild)
     assert asyncio.run(cog.security_filter_applies_to(message, "antiscam")) is False
     assert automod_module._is_discord_administrator(admin) is True
+
+
+def test_un_admin_avec_un_role_exempte_reste_protege_meme_en_mode_strict():
+    # 05/11/2026 : « les bypass doivent marcher aussi pour les admins ».
+    admin = _membre(58, administrateur=True)
+    admin.roles = [SimpleNamespace(id=700)]
+    autre = _membre(59, administrateur=True)
+    autre.roles = [SimpleNamespace(id=701)]
+    cog, guild = _contexte(admin, autre)
+    cog.admins_soumis = AsyncMock(return_value=True)
+    cog.get_exempt_roles_cached = AsyncMock(return_value={700})
+    assert _exempt(cog, guild, admin) is True
+    assert _exempt(cog, guild, autre) is False

@@ -327,10 +327,15 @@ class AutomaticVerification(commands.Cog, name=_COG_NAME):
 
         verify = guild.get_channel(old["verify_channel_id"]) if old and old["verify_channel_id"] else None
         if not isinstance(verify, discord.TextChannel):
-            verify = next((
+            # 05/11/2026 : un salon « verification-auto » déjà présent AILLEURS (restauré par
+            # l'anti-nuke, déplacé à la main) est réutilisé au lieu d'en créer un doublon.
+            existants = [
                 channel for channel in getattr(guild, "text_channels", ())
-                if channel.name == "verification-auto" and channel.category_id == category.id
-            ), None)
+                if channel.name == "verification-auto"
+            ]
+            verify = next((c for c in existants if c.category_id == category.id), None) or next(
+                iter(existants), None
+            )
         if not isinstance(verify, discord.TextChannel):
             verify = await create_channel_safely(
                 "verification-auto", "SentriX : vérification web",
@@ -339,10 +344,15 @@ class AutomaticVerification(commands.Cog, name=_COG_NAME):
         # partie de l'installation que si l'admin choisit explicitement le mode 2.
         trap = guild.get_channel(old["trap_channel_id"]) if old and old["trap_channel_id"] else None
         if honeypot_enabled and not isinstance(trap, discord.TextChannel):
-            trap = next((
+            # 05/11/2026 : un salon « stay-muted » déjà présent AILLEURS (restauré par
+            # l'anti-nuke, déplacé à la main) est réutilisé au lieu d'en créer un doublon.
+            existants = [
                 channel for channel in getattr(guild, "text_channels", ())
-                if channel.name == "stay-muted" and channel.category_id == category.id
-            ), None)
+                if channel.name == "stay-muted"
+            ]
+            trap = next((c for c in existants if c.category_id == category.id), None) or next(
+                iter(existants), None
+            )
         if honeypot_enabled and not isinstance(trap, discord.TextChannel):
             trap = await create_channel_safely("stay-muted", "SentriX : Honeypot activé")
 

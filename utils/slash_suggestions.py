@@ -127,6 +127,13 @@ RAISONS_REPUTATION = [
     "A résolu mon problème", "Très patient", "Bonne ambiance", "Beau geste",
 ]
 
+# 05/11/2026 : /unban, /untimeout, /unwarn LÈVENT une sanction. Leur proposer
+# « Spam » ou « Propos haineux » n'a aucun sens.
+RAISONS_LEVEE = [
+    "Sanction purgée", "Erreur de modération", "Appel accepté", "Bon comportement",
+    "Seconde chance", "Fin anticipée", "Malentendu", "Demande du staff",
+]
+
 RAISONS_INVITATIONS = [
     "Récompense d'événement", "Correction d'un comptage", "Participation au concours",
     "Compensation", "Invitations frauduleuses", "Parrainage",
@@ -143,6 +150,35 @@ DUREES_MODE_LENT = [
     ("30 secondes", "30s"), ("1 minute", "1m"), ("5 minutes", "5m"), ("10 minutes", "10m"),
     ("30 minutes", "30m"), ("1 heure", "1h"), ("6 heures (maximum)", "6h"),
 ]
+
+# Une durée tapée sans unité (« 7 ») : on propose chaque unité possible.
+UNITES_DUREE = (("minute", "minutes", "m"), ("heure", "heures", "h"), ("jour", "jours", "j"))
+UNITES_MODE_LENT = (("seconde", "secondes", "s"), ("minute", "minutes", "m"), ("heure", "heures", "h"))
+
+
+def _durees(items: list[tuple[str, str]], unites=UNITES_DUREE) -> Provider:
+    """Comme _statique, mais « 7 » propose 7 minutes, 7 heures, 7 jours (05/11/2026)."""
+    statique = _statique(items, garder_saisie=True)
+
+    async def suggest(interaction: discord.Interaction, current: str):
+        saisie = str(current or "").strip()
+        if saisie.isdigit() and 0 < int(saisie) <= 999:
+            n = int(saisie)
+            choix = [
+                app_commands.Choice(name=f"{n} {un if n == 1 else plusieurs}", value=f"{n}{code}")
+                for un, plusieurs, code in unites
+            ]
+            # Puis les durées courantes qui commencent par ce nombre (« 1 » → 10 minutes…).
+            vus = {c.value for c in choix}
+            for c in _filtrer(saisie, items):
+                if c.value not in vus and len(choix) < MAX_CHOICES:
+                    choix.append(c)
+                    vus.add(c.value)
+            return choix
+        return await statique(interaction, current)
+
+    return suggest
+
 
 PREFIXES = [("+", "+"), ("!", "!"), ("?", "?"), (".", "."), ("$", "$"), ("-", "-"), (";", ";"), (">", ">")]
 
@@ -285,14 +321,14 @@ PAR_COMMANDE: dict[tuple[str, str], Provider] = {
     ("economy deposit", "montant"): MONTANT_TOUT,
     ("economy withdraw", "montant"): MONTANT_TOUT,
     ("logs trace", "reference"): _vivant("references", _references),
-    ("moderation slowmode", "duree"): _statique(DUREES_MODE_LENT, garder_saisie=True),
+    ("moderation slowmode", "duree"): _durees(DUREES_MODE_LENT, UNITES_MODE_LENT),
     ("logs enable", "evenement"): _evenements_logs,
     ("logs disable", "evenement"): _evenements_logs,
 }
 
 PAR_OPTION: dict[str, Provider] = {
     "ville": _statique([(v, v) for v in VILLES], garder_saisie=True),
-    "duree": _statique(DUREES, garder_saisie=True),
+    "duree": _durees(DUREES),
     "prefixe": _statique(PREFIXES, garder_saisie=True),
     "commande": _commandes,
 }
@@ -307,12 +343,18 @@ PAR_COMMANDE[("embeds rename", "ancien_nom")] = _vivant("embeds", _embeds)
 # reçoit la sienne. Une commande absente de ces listes garde un champ libre
 # sans suggestion, ce qui vaut mieux qu'une suggestion à côté de la plaque.
 _SANCTIONS = (
-    "ban", "unban", "kick", "warn", "timeout", "untimeout",
+    "ban", "kick", "warn", "timeout",
     "moderation hackban", "moderation tempban", "moderation lock",
     "security isolate", "protection block",
 )
 for _chemin in _SANCTIONS:
     PAR_COMMANDE[(_chemin, "raison")] = _statique([(r, r) for r in RAISONS], garder_saisie=True)
+
+for _chemin in ("unban", "untimeout", "unwarn", "moderation unwarn", "moderation unban",
+                "moderation untimeout", "unmute"):
+    PAR_COMMANDE[(_chemin, "raison")] = _statique(
+        [(r, r) for r in RAISONS_LEVEE], garder_saisie=True
+    )
 
 for _chemin in ("afk",):
     PAR_COMMANDE[(_chemin, "raison")] = _statique(
@@ -374,5 +416,5 @@ def enrichir(bot: Any, leaf: Any, source: str, path: str) -> int:
 
 __all__ = [
     "enrichir", "VILLES", "RAISONS", "RAISONS_ABSENCE", "RAISONS_REPUTATION",
-    "RAISONS_INVITATIONS", "DUREES", "PAR_COMMANDE", "PAR_OPTION",
+    "RAISONS_INVITATIONS", "RAISONS_LEVEE", "DUREES", "PAR_COMMANDE", "PAR_OPTION",
 ]
