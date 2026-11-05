@@ -118,23 +118,20 @@ async def _rafale(cog, member, nombre: int):
 
 @pytest.mark.asyncio
 async def test_une_rafale_de_30_messages_produit_une_seule_sanction_un_avertissement_un_log():
-    # 04/11/2026 : le spam est sanctionné dès la première rafale (mute 10 min,
-    # puis 30 min, 1 h…), et la rafale reste UN seul incident.
+    # 05/11/2026 : la première rafale vaut un AVERTISSEMENT (pas de mute), puis
+    # 5 min, 10 min, 30 min… à la récidive ; la rafale reste UN seul incident.
     cog = _cog(conf={"antispam": 1, "escalation": 1})
     member = _member()
     messages, court = await _rafale(cog, member, 30)
 
-    assert member.timeout.await_count == 1
+    assert member.timeout.await_count == 0
     assert court.await_count == 1
     assert cog.log_action.await_count == 1
     # Toute la rafale disparaît, y compris les messages d'avant le déclenchement.
     assert sum(1 for m in messages if m.delete.await_count) == 30
     fields = {f.name: f.value for f in cog.log_action.await_args.args[1].fields}
     assert fields["Messages supprimés"] == "30", fields
-    # Carte complète du 29/10/2026 : « Action » (et non plus « Sanction »).
-    assert "Exclusion temporaire" in fields["Action"], fields
-    assert fields["Durée"].startswith("10 min"), fields
-    assert fields["Niveau anti-spam"] == "3"
+    assert fields["Niveau anti-spam"] == "2"
     note = court.await_args.args[1]
     assert "<@7>" in note and "spam" in note
 
@@ -151,9 +148,9 @@ async def test_la_recidive_de_spam_mute_une_seule_fois():
     assert cog.log_action.await_count == 1
     fields = {f.name: f.value for f in cog.log_action.await_args.args[1].fields}
     assert "Exclusion temporaire" in fields["Action"], fields
-    # Deux rafales déjà comptées : la troisième vaut le palier 5 (mute 1 h).
-    assert fields["Durée"].startswith("1 h"), fields
-    assert fields["Niveau anti-spam"] == "5"
+    # Deux rafales déjà comptées : la troisième vaut le palier 4 (mute 10 min).
+    assert fields["Durée"].startswith("10 min"), fields
+    assert fields["Niveau anti-spam"] == "4"
     assert "mute" in court.await_args.args[1]
 
 

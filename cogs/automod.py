@@ -511,9 +511,10 @@ NATIVE_ANTILINK_REGEX_PATTERNS = (
 # Le compteur est remis à zéro dès qu'une sanction est appliquée (on ne cumule pas
 # plusieurs sanctions pour la même série d'infractions).
 ESCALATION_WINDOW = 3600  # fenêtre glissante d'une heure
+# 05/11/2026 : « ban que pour le nuke » — l'AutoMod n'expulse et ne bannit plus
+# personne : les récidives finissent en mute. Le ban reste à l'anti-nuke.
 ESCALATION_RULES = [  # (seuil d'infractions atteint, action) — évalué du plus haut au plus bas
-    (7, "ban"),
-    (5, "kick"),
+    (6, "mute"),
     (3, "mute"),
 ]
 MUTE_ESCALATION_SECONDS = 600  # 10 minutes
@@ -571,10 +572,13 @@ SPAM_NOTICE_GROUP_WINDOW_SECONDS = 6.0
 SPAM_NOTICE_GROUP_DELAY_SECONDS = 1.0
 SPAM_NOTICE_MAX_MENTIONS = 10
 SPAM_ESCALATION_RESET_SECONDS = 86400
-SPAM_MUTE_DURATIONS_SECONDS = (600, 1800, 3600, 10800, 21600, 43200, 86400)
+# 05/11/2026 : des mutes jusqu'à 24 h « abusent ». Paliers courts : 5 min,
+# 10 min, 30 min, 1 h, puis 2 h au maximum.
+SPAM_MUTE_DURATIONS_SECONDS = (300, 600, 1800, 3600, 7200)
 SPAM_TIMEOUT_SECONDS = SPAM_MUTE_DURATIONS_SECONDS[0]
-#: Palier de la première rafale : 1 = rappel, 2 = avertissement, 3 = mute 10 min.
-SPAM_PREMIER_PALIER = 3
+#: Palier de la première rafale : 1 = rappel, 2 = avertissement, 3 = mute 5 min.
+#: 05/11/2026 : avertissement d'abord, mute seulement à la récidive.
+SPAM_PREMIER_PALIER = 2
 #: Spam soutenu : messages ÷ fenêtre longue (2× le seuil de rafale en 20 s).
 SPAM_FENETRE_LONGUE = 20
 #: Majuscules : dès 5 lettres (« WWWWW », « # WWWWWW »), plus de 70 % en capitales.
@@ -2290,7 +2294,7 @@ class AutoMod(commands.Cog, name="Automod"):
                     "warn",
                     stage,
                     None,
-                    "⚠️ avertissement : spam répété. Prochaine récidive : mute 10 minutes.",
+                    "⚠️ avertissement : spam répété. Prochaine récidive : mute 5 minutes.",
                 )
             try:
                 conf = await self.bot.db.get_guild_config(guild.id)
@@ -2306,7 +2310,7 @@ class AutoMod(commands.Cog, name="Automod"):
                 reason=f"AutoMod : spam répété — {reason}",
                 dm_text=(
                     f"Vous avez reçu un avertissement automatique sur {guild.name} pour spam répété. "
-                    "Une nouvelle récidive entraînera un mute de 10 minutes."
+                    "Une nouvelle récidive entraînera un mute de 5 minutes."
                 ),
                 warn_role=warn_role,
                 ban_threshold=0,
@@ -2316,7 +2320,7 @@ class AutoMod(commands.Cog, name="Automod"):
                     "warn",
                     stage,
                     None,
-                    "⚠️ avertissement enregistré pour spam répété. Prochaine récidive : mute 10 minutes.",
+                    "⚠️ avertissement enregistré pour spam répété. Prochaine récidive : mute 5 minutes.",
                 )
             return (
                 "warn",
@@ -2361,6 +2365,11 @@ class AutoMod(commands.Cog, name="Automod"):
                 "mais Discord a refusé la sanction.",
             )
 
+        await self._mp_sanction_automod(
+            member, guild,
+            f"Vous avez été rendu muet sur {guild.name} pendant {helpers.format_duration(duration)}.\n"
+            f"Raison : {reason}",
+        )
         return (
             "mute",
             stage,
@@ -4526,7 +4535,24 @@ class AutoMod(commands.Cog, name="Automod"):
             await member.timeout(until, reason=f"AutoMod : {reason}")
         except (discord.Forbidden, discord.HTTPException):
             return None
+        await self._mp_sanction_automod(
+            member, guild,
+            f"Vous avez été rendu muet sur {guild.name} pendant "
+            f"{helpers.format_duration(SPAM_TIMEOUT_SECONDS)}.\nRaison : {reason}",
+        )
         return "mute"
+
+    async def _mp_sanction_automod(self, member, guild: discord.Guild, texte: str) -> None:
+        """05/11/2026 : le membre sanctionné par l'AutoMod reçoit le même MP en
+        carte que pour une sanction manuelle (désactivable via sanctiondm)."""
+        try:
+            moderation_cog = self.bot.get_cog("Moderation")
+            gabarit = getattr(moderation_cog, "_get_sanction_dm_template", None)
+            if gabarit is not None and await gabarit(guild.id, "mute") is None:
+                return  # MP de mute désactivés sur ce serveur
+        except Exception:  # noqa: BLE001 — le réglage illisible n'empêche pas le MP
+            logger.debug("Réglage MP de sanction illisible guild=%s", guild.id, exc_info=True)
+        await moderation_service._send_dm_best_effort(member, texte)
 
     async def _record_incident_trace(self, message: discord.Message, incident: _Incident) -> None:
         """Une référence SX- par incident, écrite dans le fil comme une action du staff."""

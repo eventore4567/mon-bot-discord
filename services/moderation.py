@@ -288,7 +288,8 @@ async def _run_sanction_pipeline(
         if not dm_text:
             return False
         try:
-            await _send_dm_card(target, dm_text)
+            lien = await _lien_retour(guild) if action == "kick" else None
+            await _send_dm_card(target, dm_text, rejoindre_url=lien)
             return True
         except discord.HTTPException:
             return False
@@ -587,7 +588,7 @@ async def _apply_warn_role(
 _MOTS_LEVEE = ("retiré", "retire", "levé", "leve", "débanni", "plus muet", "lifted", "removed")
 
 
-def _carte_mp(text: str) -> discord.ui.LayoutView:
+def _carte_mp(text: str, rejoindre_url: str | None = None) -> discord.ui.LayoutView:
     """MP de sanction en petite carte colorée (05/11/2026 : « le MP est moche »).
 
     Première ligne en titre, le reste en corps. Vert pour une levée de sanction,
@@ -602,14 +603,41 @@ def _carte_mp(text: str) -> discord.ui.LayoutView:
     if corps:
         carte.add_item(discord.ui.Separator())
         carte.add_item(discord.ui.TextDisplay(corps[:3900]))
+    if rejoindre_url:
+        # 05/11/2026 : après un kick ou un débannissement, le lien pour revenir.
+        carte.add_item(discord.ui.ActionRow(
+            discord.ui.Button(label="Rejoindre le serveur", style=discord.ButtonStyle.link, url=rejoindre_url)
+        ))
     vue.add_item(carte)
     return vue
 
 
-async def _send_dm_card(target: discord.abc.User, text: str) -> None:
+async def _lien_retour(guild: discord.Guild | None) -> str | None:
+    """Invitation à usage unique (7 jours) pour revenir sur le serveur, ou None."""
+    if guild is None:
+        return None
+    me = getattr(guild, "me", None)
+    salons = [getattr(guild, "system_channel", None), *list(getattr(guild, "text_channels", ()) or ())]
+    for salon in salons:
+        if salon is None or me is None:
+            continue
+        try:
+            if not salon.permissions_for(me).create_instant_invite:
+                continue
+            invitation = await salon.create_invite(
+                max_age=7 * 24 * 3600, max_uses=1, unique=True,
+                reason="SentriX : lien de retour envoyé au membre",
+            )
+            return str(invitation.url)
+        except (discord.Forbidden, discord.HTTPException, AttributeError):
+            continue
+    return None
+
+
+async def _send_dm_card(target: discord.abc.User, text: str, *, rejoindre_url: str | None = None) -> None:
     """Envoie le MP en carte ; si Discord refuse la carte (hors MP fermé), en texte."""
     try:
-        await target.send(view=_carte_mp(text), allowed_mentions=discord.AllowedMentions.none())
+        await target.send(view=_carte_mp(text, rejoindre_url), allowed_mentions=discord.AllowedMentions.none())
     except discord.Forbidden:
         raise
     except (discord.HTTPException, TypeError, ValueError):
@@ -752,7 +780,7 @@ async def unban(
     dm_text = render_dm_text(user) if render_dm_text else None
     if dm_text:
         try:
-            await user.send(dm_text, allowed_mentions=discord.AllowedMentions.none())
+            await _send_dm_card(user, dm_text, rejoindre_url=await _lien_retour(guild))
             dm_sent = True
         except discord.HTTPException:
             dm_sent = False
