@@ -43,13 +43,18 @@ def test_un_membre_ordinaire_dans_le_salon_piege_est_pris():
     assert runtime._raison_bypass(_membre(), CONF) == "aucune exemption"
 
 
-def test_staff_proprietaire_et_verifies_restent_exemptes():
+def test_staff_et_proprietaire_restent_exemptes():
     runtime = _runtime()
     assert runtime._staff_bypass(_membre(admin=True), CONF) is True
     assert runtime._staff_bypass(_membre(gerer=True), CONF) is True
     assert runtime._staff_bypass(_membre(owner=True), CONF) is True
     assert runtime._staff_bypass(_membre(bot=True), CONF) is True
-    assert runtime._staff_bypass(_membre(roles=(50,)), CONF) is True
+
+
+def test_un_membre_verifie_est_pris_lui_aussi():
+    # 05/11/2026 : un compte vérifié peut être piraté ; le piège le prend aussi.
+    runtime = _runtime()
+    assert runtime._staff_bypass(_membre(roles=(50,)), CONF) is False
 
 
 def test_un_lien_d_arnaque_est_sanctionne_tout_de_suite():

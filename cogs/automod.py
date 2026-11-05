@@ -546,6 +546,12 @@ EXTERNAL_APP_BURST_WINDOW = 10.0
 EXTERNAL_APP_BURST_COUNT = 3
 EXTERNAL_APP_TIMEOUT_SECONDS = 3600
 SPAM_FILTERS = frozenset({"antispam", "antispam_duplicate", "antiemoji", "antimention"})
+#: Nom affiché de chaque spam dans l'avertissement public (« spam » par défaut).
+NATURE_SPAM = {
+    "antiemoji": "spam d'émojis",
+    "antimention": "spam de mentions",
+    "antispam_duplicate": "spam de messages identiques",
+}
 # Le contenu contenant un lien interdit est SUPPRIMÉ, jamais republié sous
 # le nom/avatar du membre via un webhook (même avec une URL censurée).
 LINK_NOTICE_FILTERS = frozenset({
@@ -3875,8 +3881,15 @@ class AutoMod(commands.Cog, name="Automod"):
             suivi = self.__dict__["_pings_tracker"] = FenetreGlissante(fenetre=PINGS_FENETRE, purge_toutes=500)
         cle = (message.guild.id, auteur)
         instant = _instant_message(message)
+        # 05/11/2026 : « @tomioka » ×8 dans UN message ne comptait qu'une fois
+        # (Discord dédoublonne message.mentions). Chaque occurrence compte.
+        contenu = str(getattr(message, "content", "") or "")
         for cible in set(cibles):
-            suivi.ajouter(cle, cible, maintenant=instant)
+            occurrences = (
+                contenu.count(f"<@{cible}>") + contenu.count(f"<@!{cible}>") + contenu.count(f"<@&{cible}>")
+            )
+            for _ in range(max(1, occurrences)):
+                suivi.ajouter(cle, cible, maintenant=instant)
         recentes = suivi.valeurs(cle, maintenant=instant)
         if len(recentes) >= PINGS_TOTAL or any(recentes.count(c) >= PINGS_MEME_CIBLE for c in set(cibles)):
             suivi.reinitialiser(cle)
@@ -4343,6 +4356,11 @@ class AutoMod(commands.Cog, name="Automod"):
                     message.author,
                     reason,
                 )
+                # 05/11/2026 : un flood d'émojis était annoncé comme « spam »
+                # tout court. Le message public nomme la vraie cause.
+                nature = NATURE_SPAM.get(filter_name)
+                if nature and spam_public_text:
+                    spam_public_text = spam_public_text.replace("spam", nature, 1)
                 incident.spam_stage = spam_stage
                 incident.duration_s = spam_duration or SPAM_TIMEOUT_SECONDS
                 if action == "warning_ping":
@@ -4971,6 +4989,31 @@ class AutoMod(commands.Cog, name="Automod"):
 
     # ---------------------------------------------------------------- ANTI-NUKE
 
+    async def _garde_identite_serveur(self, before: discord.Guild, after: discord.Guild) -> None:
+        champs = ("name", "icon", "banner", "splash", "description")
+        modifies = [c for c in champs if getattr(before, c, None) != getattr(after, c, None)]
+        if not modifies:
+            return
+        conf = await self.get_automod_cached(after.id)
+        if not conf or not conf["antinuke"]:
+            return
+        actor = await self.get_audit_actor(after, discord.AuditLogAction.guild_update)
+        if await self.is_antinuke_exempt(after, actor):
+            return
+        noms = self.__dict__.setdefault("_noms_serveur_avant_rafale", {})
+        if "name" in modifies and getattr(before, "name", None):
+            noms.setdefault((after.id, actor.id), before.name)
+        if not await self.record_nuke_action(after, actor.id):
+            return
+        await self.punish_nuker(after, actor.id, "Modifications répétées du serveur (nom, icône, bannière)")
+        # Remet le nom d'AVANT la rafale : c'est la trace la plus visible d'un nuke.
+        nom_origine = noms.pop((after.id, actor.id), None)
+        if nom_origine and nom_origine != after.name:
+            try:
+                await after.edit(name=nom_origine, reason="SentriX anti-nuke : nom du serveur restauré")
+            except (discord.Forbidden, discord.HTTPException, TypeError):
+                logger.warning("Anti-nuke : nom du serveur non restauré guild=%s", after.id, exc_info=True)
+
     async def record_nuke_action(self, guild: discord.Guild, actor_id: int) -> bool:
         """Retourne True si le seuil d'actions destructrices est dépassé pour cet auteur."""
         return self.nuke_tracker.ajouter((guild.id, actor_id)) >= NUKE_ACTION_THRESHOLD
@@ -5017,20 +5060,11 @@ class AutoMod(commands.Cog, name="Automod"):
         # un serveur dont ils ne sont pas le propriétaire Discord.
         if actor.id == PRIMARY_CREATOR_ID or actor.id in set(getattr(config, "OWNER_IDS", [])):
             return True
-        # Un administrateur du serveur gère salons et rôles en connaissance de
-        # cause : humain ou bot explicitement doté de l'accès Administrateur,
-        # il ne doit jamais être sanctionné automatiquement par SentriX.
-        member = _as_member(actor, guild)
-        if not isinstance(member, discord.Member):
-            try:
-                member = await guild.fetch_member(actor.id)
-            except (discord.NotFound, discord.Forbidden, discord.HTTPException, AttributeError):
-                pass
-        if (
-            isinstance(member, discord.Member)
-            and getattr(member.guild_permissions, "administrator", False) is True
-        ):
-            return True
+        # 05/11/2026 : un administrateur n'est PLUS exempté. Un compte admin
+        # piraté (ou un admin malveillant) supprimait tout le serveur sans la
+        # moindre réaction : c'est précisément ce que l'anti-nuke doit arrêter.
+        # Seule une RAFALE déclenche la sanction ; un admin de confiance se met
+        # dans la liste blanche anti-nuke (propriétaire uniquement).
         row = await self.bot.db.fetchone(
             "SELECT 1 FROM antinuke_whitelist WHERE guild_id = ? AND user_id = ?", (guild.id, actor.id)
         )
@@ -5092,6 +5126,13 @@ class AutoMod(commands.Cog, name="Automod"):
 
     @commands.Cog.listener()
     async def on_guild_update(self, before: discord.Guild, after: discord.Guild):
+        # 05/11/2026 : renommer le serveur ou changer son icône / sa bannière
+        # plusieurs fois très vite est un nuke comme un autre (« le serveur
+        # renommé NUKED-BY… »). Même seuil que les suppressions de salons.
+        try:
+            await self._garde_identite_serveur(before, after)
+        except Exception:  # noqa: BLE001 — la suite (vanity, raid) doit toujours tourner
+            logger.exception("Anti-nuke : garde identité serveur indisponible guild=%s", after.id)
         before_level = getattr(before, "verification_level", None)
         after_level = getattr(after, "verification_level", None)
         if before_level is not None and after_level is not None and before_level != after_level:

@@ -66,9 +66,10 @@ async def main() -> int:
         check(any("/messages/" in p for _m, p in actes) and any(p.endswith(f"/members/{uid}") for _m, p in actes),
               f"compte non vérifié, {nom} : message supprimé et compte sanctionné", str(actes))
 
+    # 05/11/2026 : un membre vérifié peut être piraté : le piège le prend aussi.
     actes = await poster(100000000000000504, (h.MEMBER_ROLE_ID,), "salut")
-    check(not any("/members/" in p for _m, p in actes), "un membre vérifié n'est jamais sanctionné par le piège",
-          str(actes))
+    check(any(p.endswith("/members/100000000000000504") for _m, p in actes),
+          "un membre vérifié qui écrit dans le piège est sanctionné", str(actes))
 
     # 04/11/2026 : un membre ordinaire (ni staff, ni vérifié, sans le rôle « non
     # vérifié ») qui écrit dans le salon piège est pris lui aussi.

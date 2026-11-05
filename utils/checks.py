@@ -253,6 +253,10 @@ def check_hierarchy(author: discord.Member, target: discord.Member) -> str | Non
 
 def check_bot_hierarchy(guild: discord.Guild, target: discord.Member) -> str | None:
     me = guild.me
+    # 05/11/2026 : « +ban @SentriX » répondait par un diagnostic de hiérarchie
+    # (« place le rôle SentriX au-dessus… ») avec un bouton Débannir.
+    if me is not None and target.id == me.id:
+        return "SentriX ne peut pas se sanctionner lui-même."
     if target.id == guild.owner_id:
         return "Je ne peux pas sanctionner le propriétaire du serveur."
     if target.top_role >= me.top_role:

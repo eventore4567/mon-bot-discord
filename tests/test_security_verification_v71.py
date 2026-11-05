@@ -104,7 +104,8 @@ class SecurityVerificationV71Tests(unittest.TestCase):
         self.assertIn("guild.owner_id", text)
         self.assertIn("administrator", text)
         self.assertIn("manage_guild", text)
-        self.assertIn("verified_role_id", text)
+        # 05/11/2026 : un membre vérifié n'est plus exempté du piège.
+        self.assertNotIn("verified_role_id", text)
 
     def test_legacy_honeypot_listener_is_removed_before_v71_listener(self):
         self.assertIn('remove_listener(old_message, "on_message")', SOURCE)
