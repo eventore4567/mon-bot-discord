@@ -56,6 +56,12 @@ CRITICAL_TIERS = {
 }
 
 
+# 05/11/2026 : commandes qu'un membre peut OUVRIR en lecture seule. L'écriture
+# reste protégée au clic, et cette protection a son propre test indépendant
+# (tests/test_setup_ouvert_a_tous.py). Le niveau déclaré reste contrôlé.
+LECTURE_SEULE_MEMBRE = frozenset({"setup"})
+
+
 class _Bot:
     def __init__(self, backend):
         self.sentrix_access_backend = backend
@@ -132,7 +138,7 @@ def auditer(noms: list[str]) -> int:
                 anomalies.append(
                     f"NIVEAU SENSIBLE INCORRECT   {nom}: attendu {expected}, obtenu {niveau}"
                 )
-            if "membre" in autorises:
+            if "membre" in autorises and M.normalise(nom) not in LECTURE_SEULE_MEMBRE:
                 anomalies.append(f"ESCALADE SENSIBLE MEMBRE   {nom}")
             if expected == "guild-owner" and "administrateur" in autorises:
                 anomalies.append(f"ESCALADE SENSIBLE ADMIN > OWNER SERVEUR   {nom}")
@@ -158,7 +164,7 @@ def auditer(noms: list[str]) -> int:
             anomalies.append(f"PROPRIETAIRE SERVEUR > OWNER GLOBAL   {nom}")
 
         # 3. Une commande sensible ouverte a un simple membre.
-        if "membre" in autorises and niveau not in ("public",):
+        if "membre" in autorises and niveau not in ("public",) and M.normalise(nom) not in LECTURE_SEULE_MEMBRE:
             anomalies.append(f"MEMBRE SUR COMMANDE NON PUBLIQUE   {nom} ({niveau})")
 
         # 4. L'ouverture doit etre croissante : ce qu'un profil obtient, les
