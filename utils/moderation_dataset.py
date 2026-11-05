@@ -204,6 +204,37 @@ def _uses_no_space_script(value: str) -> bool:
     return bool(_NO_SPACE_SCRIPT_RE.search(value))
 
 
+# 06/11/2026 : « les gens contournent la sécurité des bots avec des mots courts ».
+# Abréviations françaises courantes, développées AVANT l'analyse : le moteur de
+# contexte décide ensuite (« ntm » visant quelqu'un = attaque ; « nsm ce jeu »,
+# frustration sans cible, ne l'est pas). Les exclamations (« ptn ») restent intactes.
+ABREVIATIONS = {
+    "ntm": "nique ta mere", "ntmr": "nique ta mere", "ntr": "nique ta race",
+    "ntgm": "nique ta grand mere", "nsm": "nique sa mere", "nsr": "nique sa race",
+    "fdp": "fils de pute", "tg": "ta gueule", "ftg": "ferme ta gueule",
+    "fmtg": "ferme ta gueule", "vtff": "va te faire foutre", "vtf": "va te faire foutre",
+    "btmr": "baise ta mere", "bztmr": "baise ta mere", "bztm": "baise ta mere",
+    "jtbz": "je te baise", "jtb": "je te baise", "tamer": "ta mere", "tamere": "ta mere",
+    "nik": "nique", "niq": "nique", "bz": "baise", "pd": "pede", "encul": "encule",
+}
+
+
+#: Formes développées absentes du dataset d'origine (toujours analysées en contexte).
+PHRASES_COMPLEMENTAIRES = (
+    "baise ta mere", "baise ta race", "je te baise", "nique ta grand mere",
+    "nique tes morts", "nique ta famille", "ferme ta gueule", "ta mere la pute",
+)
+
+
+def developper_abreviations(normalized: str) -> str:
+    """« ntm » -> « nique ta mere » (texte déjà normalisé, en minuscules)."""
+    if not normalized:
+        return normalized
+    mots = normalized.split()
+    developpes = [ABREVIATIONS.get(_compacter_repetitions(mot), ABREVIATIONS.get(mot, mot)) for mot in mots]
+    return " ".join(developpes)
+
+
 class MultilingualModerationDataset:
     """Index en mémoire optimisé pour les messages Discord courts."""
 
@@ -267,6 +298,8 @@ class MultilingualModerationDataset:
                     self._terms.add(normalized)
 
             for phrase in phrases:
+                self._add_phrase(phrase)
+            for phrase in PHRASES_COMPLEMENTAIRES:
                 self._add_phrase(phrase)
 
             for raw_gap, raw_tokens in groups:
@@ -338,6 +371,7 @@ class MultilingualModerationDataset:
         normalized = normalize_message(text)
         if not normalized:
             return None
+        normalized = developper_abreviations(normalized)
         tokens = tuple(normalized.split())
 
         # Les motifs les plus précis passent avant le mot isolé. Cela permet aux logs
