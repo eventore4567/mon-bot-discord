@@ -4452,7 +4452,11 @@ class AutoMod(commands.Cog, name="Automod"):
         """
         # 06/11/2026 : un admin a plus de marge qu'un membre (seuls spam, arnaque et
         # pub d'invitations le visent, avec des seuils plus hauts).
-        if _is_discord_administrator(_as_member(message.author, message.guild)):
+        try:
+            auteur_admin = _is_discord_administrator(_as_member(message.author, message.guild))
+        except Exception:  # noqa: BLE001 — auteur illisible : traité comme un membre
+            auteur_admin = False
+        if auteur_admin:
             # Option coupée : un message d'admin n'est jamais supprimé ni sanctionné.
             if not await self.admins_soumis(message.guild.id):
                 return None
