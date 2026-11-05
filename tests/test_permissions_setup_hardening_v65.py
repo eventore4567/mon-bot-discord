@@ -164,11 +164,12 @@ class OwnerBoundaryTests(unittest.TestCase):
 
 
 class ConfigurationPermissionTests(unittest.TestCase):
-    def test_setup_requires_manage_guild_for_non_owner_non_admin(self):
+    def test_setup_opens_read_only_for_non_owner_non_admin(self):
+        # 05/11/2026 : tout membre peut OUVRIR /setup pour consulter ; chaque
+        # modification reste refusée sans Gérer le serveur (interaction_check V73).
         result = decide(Backend(), Member(30), "setup")
-        self.assertFalse(result.allowed)
-        self.assertEqual(result.policy, "categorie:configuration")
-        self.assertIn("Gérer le serveur", result.message)
+        self.assertTrue(result.allowed)
+        self.assertEqual(result.policy, "setup:lecture-seule")
 
     def test_manage_guild_allows_configuration_command(self):
         result = decide(Backend(), Member(31, manage_guild=True), "setup")
