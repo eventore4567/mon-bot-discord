@@ -1,9 +1,9 @@
 """Qui l'anti-nuke surveille.
 
-05/11/2026 : un administrateur n'est plus exempté (test réel : un compte admin
-a supprimé tous les salons sans aucune réaction). Seuls le propriétaire du
-serveur, SentriX, les propriétaires de SentriX et la liste blanche anti-nuke le
-sont. Seule une rafale déclenche la sanction.
+05/11/2026 : un administrateur reste exempté PAR DÉFAUT. Le propriétaire peut
+l'inclure avec « Sanctionner aussi les admins » (/setup → Sécurité, même
+interrupteur que +automod-strict). Tant que c'est coupé, une rafale destructrice
+d'un admin est signalée au propriétaire en MP.
 
 Les FILTRES de messages, eux, continuent de reconnaître l'administrateur, y
 compris quand l'auteur est transmis comme simple User.
@@ -59,22 +59,43 @@ def _exempt(cog, guild, acteur) -> bool:
     return asyncio.run(cog.is_antinuke_exempt(guild, acteur))
 
 
-def test_un_administrateur_est_surveille_par_l_anti_nuke():
+def test_un_administrateur_est_exempte_par_defaut():
     admin = _membre(50, administrateur=True)
     cog, guild = _contexte(admin)
+    assert _exempt(cog, guild, admin) is True
+
+
+def test_un_administrateur_transmis_comme_simple_user_est_reconnu():
+    admin = _membre(51, administrateur=True)
+    cog, guild = _contexte(admin)
+    assert _exempt(cog, guild, SimpleNamespace(id=51)) is True
+
+
+def test_sanctionner_aussi_les_admins_les_surveille():
+    admin = _membre(56, administrateur=True)
+    cog, guild = _contexte(admin)
+    cog.admins_soumis = AsyncMock(return_value=True)
     assert _exempt(cog, guild, admin) is False
 
 
-def test_un_administrateur_transmis_comme_simple_user_est_surveille():
-    admin = _membre(51, administrateur=True)
+def test_une_rafale_d_un_admin_exempte_previent_le_proprietaire():
+    admin = _membre(57, administrateur=True)
     cog, guild = _contexte(admin)
-    assert _exempt(cog, guild, SimpleNamespace(id=51)) is False
+    cog.admins_soumis = AsyncMock(return_value=False)
+    proprietaire = Mock()
+    proprietaire.send = AsyncMock()
+    guild.owner = proprietaire
+    guild.name = "Mon serveur"
 
+    async def scenario():
+        for _ in range(3):
+            await cog._noter_action_destructrice_admin(guild, admin)
+        # Une seule alerte, même si la rafale continue.
+        for _ in range(3):
+            await cog._noter_action_destructrice_admin(guild, admin)
 
-def test_un_administrateur_de_confiance_se_met_en_liste_blanche():
-    admin = _membre(56, administrateur=True)
-    cog, guild = _contexte(admin, whitelist={56})
-    assert _exempt(cog, guild, admin) is True
+    asyncio.run(scenario())
+    proprietaire.send.assert_awaited_once()
 
 
 def test_un_moderateur_sans_administrateur_reste_surveille():
@@ -83,11 +104,10 @@ def test_un_moderateur_sans_administrateur_reste_surveille():
     assert _exempt(cog, guild, moderateur) is False
 
 
-def test_un_bot_administrateur_est_surveille_lui_aussi():
-    # Un bot malveillant doté de l'accès Administrateur peut nuker un serveur.
+def test_un_bot_administrateur_n_est_pas_sanctionne_par_defaut():
     robot = _membre(53, administrateur=True, bot=True)
     cog, guild = _contexte(robot)
-    assert _exempt(cog, guild, robot) is False
+    assert _exempt(cog, guild, robot) is True
 
 
 def test_proprietaire_sentrix_et_liste_blanche_restent_exemptes():
