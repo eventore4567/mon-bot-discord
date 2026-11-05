@@ -38,6 +38,11 @@ CREATE TABLE IF NOT EXISTS infinite_counter_config (
 )
 """
 
+#: 06/11/2026 : réaction sur un bon nombre et croix sur un mauvais, réglables.
+REACTION_OK_DEFAUT = "✅"
+REACTION_ERREUR_DEFAUT = "❌"
+DUREE_AVIS = 6
+
 
 class StartNumberModal(discord.ui.Modal, title="Compteur infini — nombre de départ"):
     start = discord.ui.TextInput(label="Premier nombre attendu", placeholder="1", default="1", max_length=30)
@@ -55,6 +60,26 @@ class StartNumberModal(discord.ui.Modal, title="Compteur infini — nombre de d�
         if value < 1:
             return await interaction.response.send_message("Le compteur doit commencer à 1 ou plus.", ephemeral=True)
         self.owner.start_number = value
+        await self.owner.refresh(interaction)
+
+
+class ReactionsModal(discord.ui.Modal, title="Compteur infini — réactions"):
+    ok = discord.ui.TextInput(label="Réaction sur un bon nombre", default=REACTION_OK_DEFAUT, max_length=80)
+    erreur = discord.ui.TextInput(label="Réaction sur une erreur", default=REACTION_ERREUR_DEFAUT, max_length=80)
+
+    def __init__(self, owner: "InfiniteSetupView"):
+        super().__init__()
+        self.owner = owner
+        self.ok.default = owner.react_ok
+        self.erreur.default = owner.react_bad
+
+    async def on_submit(self, interaction: discord.Interaction):
+        self.owner.react_ok = str(self.ok.value).strip() or REACTION_OK_DEFAUT
+        self.owner.react_bad = str(self.erreur.value).strip() or REACTION_ERREUR_DEFAUT
+        # Compteur déjà actif : les réactions changent tout de suite, sans remise à zéro.
+        await self.owner.cog.set_reactions(
+            self.owner.ctx.guild.id, self.owner.react_ok, self.owner.react_bad,
+        )
         await self.owner.refresh(interaction)
 
 
@@ -82,6 +107,8 @@ class InfiniteSetupView(discord.ui.View):
         self.author_id = ctx.author.id
         self.channel_id: int | None = None
         self.start_number = 1
+        self.react_ok = REACTION_OK_DEFAUT
+        self.react_bad = REACTION_ERREUR_DEFAUT
         self.message: discord.Message | None = None
         self.add_item(CounterChannelSelect(self))
 
@@ -104,8 +131,16 @@ class InfiniteSetupView(discord.ui.View):
         e.add_field(name="Salon", value=channel.mention if channel else "**À configurer**", inline=True)
         e.add_field(name="Premier nombre", value=str(self.start_number), inline=True)
         e.add_field(
+            name="Réactions",
+            value=f"Bon nombre : {self.react_ok} · Erreur : {self.react_bad}",
+            inline=True,
+        )
+        e.add_field(
             name="Erreurs",
-            value="Aide interactive premium • correction staff possible • nettoyage automatique.",
+            value=(
+                "Mauvais nombre : réaction d'erreur + le bon nombre à écrire. "
+                "Texte : supprimé avec « non ». Les avis s'effacent tout seuls."
+            ),
             inline=False,
         )
         e.set_footer(text="SentriX • Progression sauvegardée après chaque nombre valide")
@@ -119,11 +154,16 @@ class InfiniteSetupView(discord.ui.View):
     async def start_button(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await interaction.response.send_modal(StartNumberModal(self))
 
+    @discord.ui.button(label="Réactions", style=discord.ButtonStyle.secondary, row=0)
+    async def reactions_button(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.send_modal(ReactionsModal(self))
+
     @discord.ui.button(label="Activer", style=discord.ButtonStyle.success, row=0)
     async def activate(self, interaction: discord.Interaction, _button: discord.ui.Button):
         if not self.channel_id:
             return await interaction.response.send_message("Choisissez d’abord le salon du compteur.", ephemeral=True)
         await self.cog.configure(self.ctx.guild.id, self.channel_id, self.start_number)
+        await self.cog.set_reactions(self.ctx.guild.id, self.react_ok, self.react_bad)
         for child in self.children:
             child.disabled = True
         self.stop()
@@ -165,6 +205,25 @@ class InfiniteCounter(commands.Cog, name="InfiniteCounter"):
 
     async def cog_load(self):
         await self.bot.db.execute(SCHEMA)
+        await self._ensure_reaction_columns()
+
+    async def _ensure_reaction_columns(self) -> None:
+        if self.__dict__.get("_colonnes_reactions"):
+            return
+        for colonne in ("react_ok", "react_bad"):
+            try:
+                await self.bot.db.execute(f"ALTER TABLE infinite_counter_config ADD COLUMN {colonne} TEXT")
+            except Exception:  # noqa: BLE001 — colonne déjà présente
+                pass
+        self.__dict__["_colonnes_reactions"] = True
+
+    async def set_reactions(self, guild_id: int, react_ok: str, react_bad: str) -> None:
+        await self._ensure_reaction_columns()
+        await self.bot.db.execute(
+            "UPDATE infinite_counter_config SET react_ok=?,react_bad=? WHERE guild_id=?",
+            (str(react_ok)[:80], str(react_bad)[:80], int(guild_id)),
+        )
+        self._invalidate_enabled(guild_id)
 
     def _lock(self, guild_id: int) -> asyncio.Lock:
         lock = self._locks.get(guild_id)
@@ -182,6 +241,14 @@ class InfiniteCounter(commands.Cog, name="InfiniteCounter"):
         )
         self._invalidate_enabled(guild_id)
 
+    @staticmethod
+    def _reaction(row, cle: str, defaut: str) -> str:
+        try:
+            valeur = row[cle]
+        except (KeyError, IndexError, TypeError):
+            valeur = None
+        return str(valeur or defaut)
+
     async def _invalid(
         self,
         message: discord.Message,
@@ -190,19 +257,56 @@ class InfiniteCounter(commands.Cog, name="InfiniteCounter"):
         expected: int,
         attempted: int | None = None,
         reason: str = "invalid",
+        row=None,
     ):
-        """Nettoie silencieusement une entrée invalide du salon de comptage.
+        """Entrée invalide : on explique, puis on nettoie (06/11/2026).
 
-        Aucun message de correction, ping, embed ou panneau n'est envoyé : le salon
-        reste uniquement composé des nombres valides. Les paramètres supplémentaires
-        restent acceptés afin de conserver les appels existants et faciliter l'audit.
+        - texte : supprimé tout de suite, avec « Non, ici on écrit seulement le prochain
+          nombre » ;
+        - mauvais nombre ou deux nombres de suite : réaction d'erreur (❌ par défaut,
+          réglable), puis « ce n'est pas le bon nombre, le suivant est X » ; le message
+          et l'avis disparaissent après quelques secondes.
+        Aucun ping : la mention reste visuelle.
         """
-        _ = (expected, attempted, reason)
+        auteur = getattr(getattr(message, "author", None), "mention", "")
+        if attempted is None:
+            avis = f"Non {auteur}, ici on écrit seulement le prochain nombre : **{expected}**."
+            supprimer_apres = 0
+        elif reason == "consecutive":
+            avis = (
+                f"{auteur}, vous ne pouvez pas compter deux fois de suite. "
+                f"Laissez quelqu'un d'autre écrire **{expected}**."
+            )
+            supprimer_apres = DUREE_AVIS
+        else:
+            avis = f"{auteur}, ce n'est pas le bon nombre. Le suivant est **{expected}**."
+            supprimer_apres = DUREE_AVIS
+        if supprimer_apres:
+            try:
+                await message.add_reaction(self._reaction(row, "react_bad", REACTION_ERREUR_DEFAUT))
+            except Exception:  # noqa: BLE001 — réaction invalide ou refusée : l'avis suffit
+                pass
+        try:
+            await message.channel.send(
+                avis, delete_after=DUREE_AVIS, allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        if supprimer_apres:
+            asyncio.get_running_loop().create_task(self._supprimer_plus_tard(message, supprimer_apres))
+            return
         try:
             await message.delete()
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
             pass
 
+    @staticmethod
+    async def _supprimer_plus_tard(message, delai: float) -> None:
+        await asyncio.sleep(delai)
+        try:
+            await message.delete()
+        except Exception:  # noqa: BLE001
+            pass
 
     @commands.group(name="infinit", aliases=["infinite", "compteur-infini"], invoke_without_command=True)
     @commands.guild_only()
@@ -346,6 +450,7 @@ class InfiniteCounter(commands.Cog, name="InfiniteCounter"):
                     expected=expected,
                     attempted=attempted,
                     reason="wrong",
+                    row=row,
                 )
             if row["last_user_id"] and int(row["last_user_id"]) == message.author.id:
                 return await self._invalid(
@@ -354,8 +459,13 @@ class InfiniteCounter(commands.Cog, name="InfiniteCounter"):
                     expected=expected,
                     attempted=expected,
                     reason="consecutive",
+                    row=row,
                 )
             await self.bot.db.execute(
                 "UPDATE infinite_counter_config SET next_number=?,last_user_id=?,updated_at=? WHERE guild_id=?",
                 (expected + 1, message.author.id, int(time.time()), message.guild.id),
             )
+            try:
+                await message.add_reaction(self._reaction(row, "react_ok", REACTION_OK_DEFAUT))
+            except Exception:  # noqa: BLE001 — réaction refusée : le nombre reste validé
+                pass

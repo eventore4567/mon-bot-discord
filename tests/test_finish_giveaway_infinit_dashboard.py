@@ -103,7 +103,9 @@ def test_infinite_counter_persists_and_invalid_input_is_silent():
     assert "class InfiniteMistakeView" not in source
     invalid_block = source[source.index("    async def _invalid("):source.index('    @commands.group(name="infinit"', source.index("    async def _invalid("))]
     assert "await message.delete()" in invalid_block
-    assert ".channel.send(" not in invalid_block
+    # 06/11/2026 : un avis court explique l'erreur ; il s'efface tout seul et ne pingue pas.
+    assert "delete_after=DUREE_AVIS" in invalid_block
+    assert "allowed_mentions=discord.AllowedMentions.none()" in invalid_block
     assert "send_message(" not in invalid_block
     assert "panels." not in invalid_block
     # Progress only advances in the valid branch; invalid branches return before this UPDATE.
