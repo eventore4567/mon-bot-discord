@@ -1038,6 +1038,18 @@ async def _permission_denial(interaction: discord.Interaction, decision) -> None
         or getattr(decision, "reason", None)
         or "Tu n'as pas la permission d'utiliser cette commande."
     )
+    # 05/11/2026 : refus en carte rouge « Accès refusé » (comme les commandes +),
+    # jamais en texte brut ; le texte reste le secours si la carte échoue.
+    try:
+        from utils import sentrix_panels as panels
+
+        await panels.envoyer(interaction, panels.carte_refus(text), ephemere=True)
+        return
+    except (discord.Forbidden, discord.InteractionResponded):
+        logger.debug("Impossible d'envoyer un refus slash.", exc_info=True)
+        return
+    except Exception:
+        logger.debug("Carte de refus impossible, texte de secours.", exc_info=True)
     try:
         await _send_plain_interaction_error(interaction, text)
     except (discord.Forbidden, discord.HTTPException, discord.InteractionResponded):

@@ -59,7 +59,10 @@ def test_un_membre_verifie_est_pris_lui_aussi():
 
 def test_un_lien_d_arnaque_est_sanctionne_tout_de_suite():
     source = (ROOT / "cogs" / "automod.py").read_text(encoding="utf-8")
-    assert 'if filter_name in ("antimention", "antiscam"):' in source
+    # 05/11/2026 : l'arnaque et la mention massive (@everyone, raid) restent
+    # immédiates ; les pings répétés passent par avertissement puis mute.
+    assert 'mute_immediat = filter_name == "antiscam" or (' in source
+    assert 'filter_name == "antimention" and reason == MOTIF_MENTION_MASSIVE' in source
     assert '"🔇 Mute anti-arnaque"' in source
 
 

@@ -571,7 +571,16 @@ NATIVE_CLEANUP_TASK = "automod-native-rules-cleanup"
 SPAM_NOTICE_GROUP_WINDOW_SECONDS = 6.0
 SPAM_NOTICE_GROUP_DELAY_SECONDS = 1.0
 SPAM_NOTICE_MAX_MENTIONS = 10
-SPAM_ESCALATION_RESET_SECONDS = 86400
+# 05/11/2026 : 24 h de mémoire faisaient muter dès la première rafale du
+# lendemain matin, « sans avertissement avant ». Une heure calme remet à zéro.
+SPAM_ESCALATION_RESET_SECONDS = 3600
+#: Juste après un avertissement, une nouvelle rafale ne mute pas encore : elle
+#: reçoit un « dernier avertissement » (« s'il spam juste après l'avertissement,
+#: c'est mute » — 05/11/2026).
+SPAM_GRACE_APRES_AVERTISSEMENT = 20.0
+#: @everyone ou 5 personnes différentes dans UN message : signature de raid,
+#: mute immédiat. Les pings répétés, eux, suivent avertissement puis mute.
+MOTIF_MENTION_MASSIVE = "Mention massive détectée."
 # 05/11/2026 : des mutes jusqu'à 24 h « abusent ». Paliers courts : 5 min,
 # 10 min, 30 min, 1 h, puis 2 h au maximum.
 SPAM_MUTE_DURATIONS_SECONDS = (300, 600, 1800, 3600, 7200)
@@ -589,6 +598,36 @@ PINGS_FENETRE = 60
 PINGS_MEME_CIBLE = 3
 PINGS_TOTAL = 6
 _JETONS_NON_TEXTE = re.compile(r"<a?:\w+:\d+>|<[@#][!&]?\d+>|<t:\d+(?::\w)?>|https?://\S+")
+
+
+def carte_alerte_admin(guild, admin):
+    """MP au propriétaire : un admin a enchaîné des actions destructrices.
+
+    05/11/2026 : « la carte est moche » — même panneau que le reste de SentriX
+    (bandeau fin en tête, sections), au lieu d'un bloc de texte brut.
+    """
+    return panels.Panneau(
+        titre="Un administrateur a fait des actions dangereuses",
+        sous_titre=f"Sur {getattr(guild, 'name', 'votre serveur')}",
+        kind="warning",
+        sections=(
+            panels.Section(
+                "Ce qui s'est passé",
+                texte=(
+                    f"{admin.mention} (`{admin.id}`) a supprimé ou modifié plusieurs "
+                    "éléments du serveur en très peu de temps."
+                ),
+            ),
+            panels.Section(
+                "Pourquoi il n'est pas sanctionné",
+                texte="Par défaut, SentriX ne sanctionne pas les administrateurs.",
+            ),
+            panels.Section(
+                "Pour qu'il le soit",
+                texte="`/setup` → **Sécurité** → **Sanctionner aussi les admins**",
+            ),
+        ),
+    )
 
 
 def _instant_message(message) -> float:
@@ -2277,7 +2316,22 @@ class AutoMod(commands.Cog, name="Automod"):
         # 04/11/2026 (« j'ai spam plein de fois, no sanction ») : la première rafale
         # ne donnait qu'un rappel, la deuxième un warn ; le mute n'arrivait qu'à la
         # troisième. Le spam est maintenant sanctionné dès la première rafale.
+        cle = (int(guild.id), int(member.id))
+        averti = self.__dict__.setdefault("_spam_dernier_avertissement", {})
+        depuis = averti.get(cle)
+        if depuis is not None and time.monotonic() - depuis < SPAM_GRACE_APRES_AVERTISSEMENT:
+            # Message supprimé, pas de nouveau palier : on prévient une dernière fois.
+            return (
+                "warning_ping",
+                0,
+                None,
+                "⚠️ dernier avertissement : encore un spam et c'est le mute (5 minutes).",
+            )
         stage = await self._next_spam_stage(guild.id, member.id) + (SPAM_PREMIER_PALIER - 1)
+        if stage <= 2:
+            averti[cle] = time.monotonic()
+            if len(averti) > 5000:
+                averti.clear()
 
         if stage == 1:
             return (
@@ -3609,7 +3663,7 @@ class AutoMod(commands.Cog, name="Automod"):
             getattr(message, "mention_everyone", False) is True
             or len({u.id for u in message.mentions} | {r.id for r in message.role_mentions}) >= 5
         ) and await self.security_filter_applies_to(message, "antimention"):
-            return await self._delete_and_warn(message, "Mention massive détectée.", "antimention")
+            return await self._delete_and_warn(message, MOTIF_MENTION_MASSIVE, "antimention")
 
         # 04/11/2026 (« j'ai ping un mec 5 fois, aucun anti-ping ») : les mentions
         # réparties sur plusieurs messages comptent aussi.
@@ -3901,11 +3955,35 @@ class AutoMod(commands.Cog, name="Automod"):
             )
             for _ in range(max(1, occurrences)):
                 suivi.ajouter(cle, cible, maintenant=instant)
+        # 05/11/2026 : « il n'a pas supprimé les premiers pings » — les messages qui
+        # ont mené au seuil sont gardés pour être retirés avec le dernier.
+        messages = self.__dict__.setdefault("_pings_messages", {})
+        precedents = [
+            (t, m) for t, m in messages.get(cle, ()) if instant - t <= PINGS_FENETRE
+        ]
+        precedents.append((instant, message))
+        messages[cle] = precedents[-20:]
+        if len(messages) > 2000:
+            messages.clear()
         recentes = suivi.valeurs(cle, maintenant=instant)
         if len(recentes) >= PINGS_TOTAL or any(recentes.count(c) >= PINGS_MEME_CIBLE for c in set(cibles)):
             suivi.reinitialiser(cle)
+            anciens = [m for _t, m in messages.pop(cle, ()) if m is not message]
+            if anciens:
+                try:
+                    asyncio.get_running_loop().create_task(self._supprimer_pings_precedents(anciens))
+                except RuntimeError:
+                    pass
             return "Mentions répétées (ping spam)."
         return None
+
+    @staticmethod
+    async def _supprimer_pings_precedents(anciens) -> None:
+        for ancien in anciens:
+            try:
+                await ancien.delete()
+            except Exception:  # noqa: BLE001 — déjà supprimé, salon fermé, droits
+                continue
 
     def _coordinated_copies(
         self, message: discord.Message, link_content: str, comptes: int = COORDINATED_AUTHORS
@@ -4299,7 +4377,10 @@ class AutoMod(commands.Cog, name="Automod"):
         # 04/11/2026 : un lien d'arnaque était seulement supprimé (sanction
         # uniquement via l'escalade, éteinte par défaut). Il est sanctionné
         # tout de suite, comme les pings en masse.
-        if filter_name in ("antimention", "antiscam"):
+        mute_immediat = filter_name == "antiscam" or (
+            filter_name == "antimention" and reason == MOTIF_MENTION_MASSIVE
+        )
+        if mute_immediat:
             try:
                 mention_action = await self._spam_timeout(message.guild, message.author, reason)
             except Exception:
@@ -4351,7 +4432,7 @@ class AutoMod(commands.Cog, name="Automod"):
         spam_public_text = None
 
         try:
-            if filter_name == "antimention":
+            if filter_name == "antimention" and mute_immediat:
                 action = mention_action or "mute_failed"
                 spam_duration = SPAM_TIMEOUT_SECONDS
                 incident.duration_s = SPAM_TIMEOUT_SECONDS
@@ -5110,7 +5191,19 @@ class AutoMod(commands.Cog, name="Automod"):
         if not (isinstance(member, discord.Member) and getattr(member.guild_permissions, "administrator", False) is True):
             return False
         if await self.admins_soumis(guild.id):
-            return False
+            # 05/11/2026 : « les bypass doivent marcher aussi pour les admins » —
+            # même avec « Sanctionner aussi les admins », un admin qui porte un
+            # rôle exempté (/setup → Sécurité → Seuils et exceptions) reste protégé.
+            try:
+                exemptes = await self.get_exempt_roles_cached(guild.id)
+            except Exception:  # noqa: BLE001 — lecture impossible : pas d'exemption
+                exemptes = set()
+            if not exemptes:
+                return False
+            try:
+                return any(int(role.id) in exemptes for role in list(member.roles))
+            except (TypeError, AttributeError, ValueError):
+                return False
         return True
 
     async def _noter_action_destructrice_admin(self, guild: discord.Guild, actor) -> None:
@@ -5139,24 +5232,9 @@ class AutoMod(commands.Cog, name="Automod"):
                 owner = await guild.fetch_member(guild.owner_id)
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 return
-        vue = discord.ui.LayoutView(timeout=None)
-        carte = discord.ui.Container(accent_colour=discord.Colour(0xFEE75C))
-        carte.add_item(discord.ui.TextDisplay(f"### ⚠️ Actions destructrices d'un admin sur {guild.name}"))
-        carte.add_item(discord.ui.TextDisplay(
-            f"{admin.mention} (`{admin.id}`) vient de supprimer ou modifier plusieurs éléments "
-            "du serveur très vite.\n\n"
-            "**SentriX ne sanctionne pas les administrateurs** par défaut. Pour qu'il le fasse :\n"
-            "`/setup` → **Sécurité** → **Sanctionner aussi les admins**."
-        ))
-        vue.add_item(carte)
+        vue = carte_alerte_admin(guild, admin)
         try:
-            from utils import sentrix_emojis
-
-            sentrix_emojis.appliquer_a_la_vue(vue)
-        except Exception:  # noqa: BLE001 — habillage seulement
-            pass
-        try:
-            await owner.send(view=vue, allowed_mentions=discord.AllowedMentions.none())
+            await panels.envoyer(owner, vue)
         except (discord.Forbidden, discord.HTTPException):
             logger.info("Alerte admin non sanctionné : MP du propriétaire fermé guild=%s", guild.id)
 

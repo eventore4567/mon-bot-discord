@@ -540,11 +540,6 @@ def _patch_setup_v74(bot: commands.Bot) -> None:
             # /setup reste éphémère et n'entre jamais dans cette branche.
             if guild is None or member is None:
                 return await target.send("La configuration est disponible uniquement sur un serveur.")
-            if not await setup_ui._can_setup(self.bot, member, guild):
-                return await target.send(
-                    "Vous n'avez pas la permission d'ouvrir la configuration de ce serveur.",
-                    allowed_mentions=discord.AllowedMentions.none(),
-                )
             view = cls(self.bot, guild, member.id)
             view._author_member = member
             requested = _requested_setup_category(target)
@@ -570,16 +565,11 @@ def _patch_setup_v74(bot: commands.Bot) -> None:
                 )
                 return None
 
-        if not await setup_ui._can_setup(self.bot, member, guild):
-            if isinstance(slash, discord.Interaction) and private_followup:
-                return await slash.followup.send(
-                    "Vous n'avez pas la permission d'utiliser /setup.",
-                    ephemeral=True,
-                    allowed_mentions=discord.AllowedMentions.none(),
-                )
-            return await setup_ui._permission_error(
-                slash if isinstance(slash, discord.Interaction) else target
-            )
+        # 05/11/2026 : tout le monde peut OUVRIR /setup (consultation). Le
+        # panneau refuse chaque clic d'un membre sans permission
+        # (setup_components_v73.SentriXSetupV73.interaction_check).
+        if guild is None or member is None:
+            return None
 
         if isinstance(target, commands.Context):
             target = slash

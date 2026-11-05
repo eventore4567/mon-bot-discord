@@ -1522,6 +1522,10 @@ def _patch_can_setup() -> None:
         decision = await permission_guard.evaluate_command_access(
             bot, command_name="setup", author=member, guild=guild,
         )
+        # « setup:lecture-seule » ouvre le panneau à tous, mais ne donne pas
+        # le droit de modifier : _can_setup garde la permission du staff.
+        if getattr(decision, "policy", "") == "setup:lecture-seule":
+            return False
         return bool(decision.allowed)
     can_setup_v2._sentrix_v2 = True
     setup_ui._can_setup = can_setup_v2

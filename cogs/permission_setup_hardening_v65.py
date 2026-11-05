@@ -205,6 +205,12 @@ async def secure_evaluate(bot, *, command_name: Any, author: Any, guild: Any) ->
             f"setup:{source}:deny",
         )
 
+    # 05/11/2026 : tout membre peut OUVRIR /setup pour consulter la configuration.
+    # Modifier un réglage reste réservé au staff : le panneau refuse chaque clic
+    # d'un membre sans permission (cogs/setup_components_v73.interaction_check).
+    if name == "setup":
+        return matrix.AccessDecision(True, policy="setup:lecture-seule")
+
     required = matrix.DISCORD_PERMISSION_COMMANDS.get(name)
     if required is not None:
         if _has_native_permission(author, guild, required):

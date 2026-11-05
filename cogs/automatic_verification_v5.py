@@ -694,6 +694,58 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
             raise RuntimeError("Le panneau de vérification n'a pas renvoyé de message Discord.")
         return sent
 
+    async def _retirer_panneaux_en_double(self, channel: discord.TextChannel, garder_id: int) -> int:
+        """Supprime les anciens panneaux de vérification du bot, sauf celui gardé.
+
+        05/11/2026 : chaque reconfiguration en publiait un nouveau (l'ancien était
+        réécrit en « Passerelle de vérification » par V71 et n'était plus reconnu).
+        Seuls les messages du bot reconnus comme panneau de portail sont retirés.
+        """
+        bot_user_id = getattr(getattr(self.bot, "user", None), "id", None)
+        if bot_user_id is None:
+            return 0
+        retires = 0
+        try:
+            async for message in channel.history(limit=30):
+                if message.id == garder_id or message.author.id != bot_user_id:
+                    continue
+                if not (
+                    self._looks_like_own_panel(message, "verify")
+                    or self._mentionne(message, ("passerelle de vérification", "security gateway"))
+                ):
+                    continue
+                try:
+                    await message.delete()
+                    retires += 1
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    pass
+        except (discord.Forbidden, discord.HTTPException):
+            pass
+        return retires
+
+    @staticmethod
+    def _mentionne(message: discord.Message, jetons: tuple[str, ...]) -> bool:
+        parts: list[str] = [str(getattr(message, "content", "") or "")]
+        for embed in (getattr(message, "embeds", None) or ()):
+            parts.extend((str(getattr(embed, "title", "") or ""),
+                          str(getattr(embed, "description", "") or ""),
+                          str(getattr(getattr(embed, "author", None), "name", "") or "")))
+
+        def collect(nodes, depth: int = 0) -> None:
+            if depth > 8:
+                return
+            for item in (nodes or ()):
+                for key in ("content", "text", "label"):
+                    value = getattr(item, key, None)
+                    if value:
+                        parts.append(str(value))
+                collect(getattr(item, "children", None), depth + 1)
+                collect(getattr(item, "components", None), depth + 1)
+
+        collect(getattr(message, "components", None))
+        texte = "\n".join(parts).casefold()
+        return any(jeton in texte for jeton in jetons)
+
     async def ensure_verified_panel_hidden(
         self, guild: discord.Guild, *, honeypot_enabled: bool | None = None,
     ) -> None:
@@ -835,6 +887,7 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
             verify_message_id,
             kind="verify",
         )
+        removed_verify_messages = await self._retirer_panneaux_en_double(verify, verify_message.id)
         trap_message = None
         removed_trap_messages = 0
         if honeypot_enabled:
@@ -875,7 +928,7 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
             "trap": trap,
             "verify_message": verify_message,
             "trap_message": trap_message,
-            "removed_verify_messages": 0,
+            "removed_verify_messages": removed_verify_messages,
             "removed_trap_messages": removed_trap_messages,
         }, None
 

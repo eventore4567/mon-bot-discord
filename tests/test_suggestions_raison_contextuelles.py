@@ -38,7 +38,7 @@ def test_la_regle_generale_sur_le_nom_d_option_a_disparu():
 
 
 @pytest.mark.parametrize("chemin", [
-    "ban", "unban", "kick", "warn", "timeout", "untimeout",
+    "ban", "kick", "warn", "timeout",
     "moderation hackban", "moderation tempban", "moderation lock",
     "security isolate", "protection block",
 ])
@@ -75,3 +75,22 @@ def test_on_peut_toujours_ecrire_sa_propre_raison(chemin):
 
 def test_une_commande_sans_famille_ne_propose_rien_plutot_qu_a_cote():
     assert _suggestions("weather") is None
+
+
+@pytest.mark.parametrize("chemin", ["unban", "untimeout", "moderation unwarn"])
+def test_lever_une_sanction_ne_propose_pas_de_motif_de_sanction(chemin):
+    # 05/11/2026 : « quand tu unban, fais que ça montre pas ça ».
+    suggestions = _suggestions(chemin)
+    assert suggestions is not None
+    assert "Erreur de modération" in suggestions
+    assert "Spam" not in suggestions and "Propos haineux" not in suggestions
+
+
+def test_une_duree_sans_unite_propose_minutes_heures_jours():
+    fournisseur = ss.PAR_OPTION["duree"]
+    choix = asyncio.run(fournisseur(None, "7"))
+    assert [(c.name, c.value) for c in choix] == [
+        ("7 minutes", "7m"), ("7 heures", "7h"), ("7 jours", "7j"),
+    ]
+    assert [c.value for c in asyncio.run(fournisseur(None, "1"))] == ["1m", "1h", "1j"]
+    assert asyncio.run(fournisseur(None, "1"))[0].name == "1 minute"

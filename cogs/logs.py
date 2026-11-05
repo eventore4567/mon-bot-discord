@@ -1463,7 +1463,9 @@ class Logs(commands.Cog, name="Logs"):
         )
         est_categorie = _est_categorie(channel)
         nom = "Catégorie" if est_categorie else "Salon"
-        fields = [(nom, _channel_ref(channel.id), True), ("Type", str(channel.type), True)]
+        # 05/11/2026 : « <#id> » était lu comme un membre par le rendu large, et le
+        # log sortait « Le salon Un salon a été créé ». Le nom, comme à la suppression.
+        fields = [(nom, f"`{channel.name}`", True), ("Type", str(channel.type), True)]
         if actor:
             fields.append(("Responsable", _user_ref(actor.id), True))
         panel = self._embed("Catégorie créée" if est_categorie else "Salon créé", fields=fields)
@@ -1541,7 +1543,7 @@ class Logs(commands.Cog, name="Logs"):
         # Une catégorie passe par le même évènement qu'un salon. L'annoncer comme
         # un « salon » ferait chercher un salon qui n'existe pas.
         est_categorie = _est_categorie(after)
-        fields = [("Catégorie" if est_categorie else "Salon", _channel_ref(after.id), True)]
+        fields = [("Catégorie" if est_categorie else "Salon", f"`{after.name}`", True)]
         if before.name != after.name:
             fields.append(("Nom", f"`{before.name}` → `{after.name}`", False))
         if before.category_id != after.category_id:
