@@ -1144,7 +1144,33 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             self.page = "word_reactions"
             await self.refresh(interaction)
         word_button.callback = open_word_reactions
-        container.add_item(discord.ui.ActionRow(word_button))
+
+        # 06/11/2026 : le compteur infini se configure aussi depuis /setup.
+        compteur_button = discord.ui.Button(
+            label="Infinite counter" if language == language_runtime.LANG_EN else "Compteur infini",
+            style=discord.ButtonStyle.secondary,
+        )
+
+        async def open_counter(interaction: discord.Interaction):
+            from . import infinite_counter
+
+            cog = self.bot.get_cog("InfiniteCounter")
+            if cog is None:
+                return await panels.envoyer(
+                    interaction.response,
+                    panels.depuis_embed(embeds.error("Le compteur infini n'est pas chargé.")),
+                    ephemere=True,
+                )
+            source = SimpleNamespace(guild=self.guild, author=interaction.user)
+            vue = infinite_counter.InfiniteSetupView(cog, source)
+            await panels.envoyer(
+                interaction.response,
+                panels.avec_composants(panels.depuis_embed(vue.embed()), vue),
+                ephemere=True,
+            )
+
+        compteur_button.callback = open_counter
+        container.add_item(discord.ui.ActionRow(word_button, compteur_button))
         self._add_navigation(container)
         self.add_item(container)
 

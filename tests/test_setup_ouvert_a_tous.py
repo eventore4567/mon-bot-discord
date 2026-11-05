@@ -61,3 +61,18 @@ def test_le_panneau_servi_herite_du_controle_des_clics():
 
     assert issubclass(v74.SentriXSetupV74, v73.SentriXSetupV73)
     assert v74.SentriXSetupV74.interaction_check is v73.SentriXSetupV73.interaction_check
+
+
+def test_le_compteur_infini_se_configure_en_slash_et_dans_setup():
+    from pathlib import Path
+
+    from utils import slash_catalog
+
+    chemins = {e.path: e.source for e in slash_catalog.ENTRIES} if hasattr(slash_catalog, "ENTRIES") else {}
+    source = (Path(__file__).resolve().parents[1] / "utils" / "slash_catalog.py").read_text(encoding="utf-8")
+    assert '_e("counter setup", "infinit",' in source
+    assert '"counter": frozenset({"setup", "status", "stop", "resume"})' in source
+    if chemins:
+        assert chemins.get("counter setup") == "infinit"
+    setup = (Path(__file__).resolve().parents[1] / "cogs" / "setup_experience_v74.py").read_text(encoding="utf-8")
+    assert "infinite_counter.InfiniteSetupView(cog, source)" in setup
