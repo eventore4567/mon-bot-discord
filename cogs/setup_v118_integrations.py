@@ -508,12 +508,12 @@ class VerificationSetupView(discord.ui.View):
             + f"\n**Sanction du piège :** {sanction if settings['honeypot_enabled'] else 'aucune'}\n\n"
             + pending
             + "### Deux configurations au choix\n"
-            "**1. Vérification seule :** un seul salon #verification-auto avec le portail web "
-            "(CAPTCHA, règlement et contrôle du compte). Aucun salon piège créé, aucune sanction.\n"
+            "**1. Vérification seule :** un seul salon #verification-auto avec le bouton « Se vérifier » "
+            "(test dans Discord, règlement et contrôle du compte). Aucun salon piège créé, aucune sanction.\n"
             "**2. Vérification + Honeypot :** le même portail et un second salon "
             "#stay-muted créé uniquement si ce mode est activé. Sanction Kick ou Softban.\n\n"
-            "La vérification utilise le site SentriX : le challenge classique de RaidProtect "
-            "n'est pas simulé. Aucun module n'est activé sans clic explicite.\n"
+            "La vérification se fait entièrement dans Discord : aucun site, aucune connexion au compte. "
+            "Aucun module n'est activé sans clic explicite.\n"
             "-# Un ancien #stay-muted vide peut être retiré lorsque vous repassez en mode 1. "
             "Un salon avec des messages ou du contenu non identifié est conservé et masqué."
         )
@@ -546,7 +546,7 @@ def _extend_guided_catalogue() -> None:
         guided._s(
             "portal",
             "Portail & Honeypot",
-            "Installe le portail web seul ou avec un Honeypot au choix, sans doublons.",
+            "Installe la vérification Discord seule ou avec un Honeypot au choix, sans doublons.",
             "internal:verification",
         ),
         guided._s(

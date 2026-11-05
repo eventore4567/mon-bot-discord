@@ -291,6 +291,10 @@ ACTIONS: dict[str, ActionSpec] = {
         "channel.create_text", None, ("name",), ("category",), None, "medium",
         description="créer un salon textuel",
     ),
+    "server.rename": ActionSpec(
+        "server.rename", None, ("name",), (), None, "medium",
+        description="renommer le serveur Discord",
+    ),
     "channel.rename": ActionSpec(
         "channel.rename", None, ("channel", "name"), (), None, "medium",
         description="renommer un salon existant",
@@ -794,7 +798,7 @@ def looks_action_request(text: str) -> bool:
     action_verb = re.search(
         r"\b(?:fais|fait|execute|exécute|utilise|ban|bannis|bannir|tempban|warn|"
         r"avertis|mute|unmute|kick|expulse|clear|purge|supprime|efface|cree|creer|"
-        r"crée|créer|ajoute|retire|enleve|renomme|configure|active|desactive|bloque|"
+        r"crée|créer|ajoute|retire|enleve|renomme|renommer|rename|configure|active|desactive|bloque|"
         r"censure|interdit|autorise|rejoint|quitte|connecte|deconnecte|joue|play|"
         r"pause|skip|stop|mets|met|envoie|publie|donne|deplace|change|ouvre|lance|"
         r"ferme|lock|unlock|cache|affiche|montre|verrouille|deverrouille|rouvre|slowmode|mode lent)\b",
@@ -805,7 +809,7 @@ def looks_action_request(text: str) -> bool:
 
     direct = bool(re.match(
         r"^(?:fais|fait|execute|exécute|utilise|cree|creer|crée|créer|ajoute|"
-        r"retire|enleve|configure|mets|met|envoie|publie|donne|change|ouvre|"
+        r"retire|enleve|renomme|renommer|rename|configure|mets|met|envoie|publie|donne|change|ouvre|"
         r"lance|ferme|active|desactive|bloque|censure|autorise|verrouille|deverrouille|rouvre|"
         r"lock|unlock|slowmode|mode lent)\b",
         normalized,
@@ -950,6 +954,19 @@ def local_parse(question: str) -> ParsedAction | None:
             99,
             "local",
         )
+
+    # 06/11/2026 : « @SentriX rename le serveur en « Meta le meilleur » » donnait un
+    # tutoriel au lieu de le faire.
+    rename_server = re.search(
+        r"\b(?:renomme[rsz]?|rename|change[rsz]?\s+(?:le\s+)?nom\s+du)\s+(?:le\s+|the\s+|mon\s+|ce\s+)?"
+        r"(?:serveur|server|serv)\b\s*(?:en|vers|par|pour|to|:|=)?\s*(.+)$",
+        question,
+        re.IGNORECASE,
+    )
+    if rename_server:
+        nom = rename_server.group(1).strip().strip("«»\"'“”‘’ ").strip(" .,;!")
+        if nom:
+            return ParsedAction("server.rename", {"name": nom[:100]}, 99, "local")
 
     rename_channel = re.search(
         r"\b(?:renomme|rename)\s+(<#\d{15,22}>|#[A-Za-z0-9_-]{1,100})\s+(?:en|vers)\s+(.+)$",
@@ -1415,6 +1432,8 @@ def missing_prompt(intent: str, slot: str, *, target: discord.Member | None = No
             return "Quel nom voulez-vous donner au rôle ?"
         if intent == "category.create":
             return "Quel nom voulez-vous donner à la catégorie ?"
+        if intent == "server.rename":
+            return "Quel nouveau nom voulez-vous donner au serveur ?"
     if slot == "category":
         return "Quelle catégorie voulez-vous utiliser ?"
     if slot == "role":

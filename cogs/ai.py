@@ -827,10 +827,8 @@ class Ai(commands.Cog, name="Ai"):
         instructions = await self._build_system_instructions(user_id, author_name, guild_id)
         # 06/11/2026 : en conversation (mention, réponse, /sentrix), SentriX lit le
         # salon et parle comme un membre du serveur (utils/ai_conversation.py).
-        from utils import ai_conversation
-        contexte_salon = ai_conversation.CONTEXTE_SALON.get()
-        if contexte_salon is not None:
-            instructions += "\n\n" + ai_conversation.consigne_avec_contexte(contexte_salon)
+        # (La consigne de conversation est ajoutée au niveau de ai_service.generate
+        # par cogs/ai_context_v9.py : elle couvre aussi les chemins de secours.)
         # Les wrappers historiques n'acceptent pas "attachments". Le listener
         # fournit donc la sélection validée via le contexte de CETTE requête.
         if image_urls is None:
@@ -1364,6 +1362,25 @@ class Ai(commands.Cog, name="Ai"):
                 await reply("J’ai quitté le salon vocal et arrêté la lecture.")
             except discord.HTTPException:
                 await reply("Je n’ai pas réussi à quitter le salon vocal.")
+            return True
+
+        if intent == "server.rename":
+            if actor.id != guild.owner_id and not actor.guild_permissions.manage_guild:
+                await reply("Il faut la permission **Gérer le serveur** pour le renommer.")
+                return True
+            if not me.guild_permissions.manage_guild:
+                await reply("Il me manque la permission **Gérer le serveur**.")
+                return True
+            nom = str(action.slots.get("name") or "").strip()[:100]
+            if len(nom) < 2:
+                await reply("Le nom doit faire au moins 2 caractères.")
+                return True
+            ancien = guild.name
+            try:
+                await guild.edit(name=nom, reason=reason)
+                await reply(f"C'est fait : **{ancien}** s'appelle maintenant **{nom}**.")
+            except (discord.Forbidden, discord.HTTPException):
+                await reply("Discord a refusé le renommage du serveur.")
             return True
 
         if intent == "category.create":
@@ -2146,7 +2163,7 @@ class Ai(commands.Cog, name="Ai"):
             await self._ask_for_missing_action_slot(message, action, missing[0], member=member)
             return True
 
-        if action.intent.startswith(("voice.", "channel.", "category.", "role.", "message.", "member.", "embed.", "security.block_link")):
+        if action.intent.startswith(("voice.", "channel.", "category.", "role.", "message.", "member.", "embed.", "security.block_link", "server.rename")):
             handled = await self._execute_native_action(message, action, member=member)
             if handled:
                 self._pending_actions.pop(self._pending_key(message), None)

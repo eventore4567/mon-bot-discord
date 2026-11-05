@@ -660,8 +660,18 @@ async def _complete_verification(
     member: discord.Member,
     *,
     accept_rules: bool,
+    methode: str = "web_oauth+captcha",
 ):
+    """Termine une vérification : règlement, âge, analyse adaptative, rôles, MP, log.
+
+    06/11/2026 : partagé avec la vérification DANS Discord (cogs/verification_discord.py,
+    ``methode="discord+challenge"``) — mêmes contrôles, sans site ni accès au compte.
+    """
     MIN_JOIN_DELAY_SECONDS = 8
+    raison_roles = (
+        "SentriX : vérification Discord réussie" if methode.startswith("discord")
+        else "SentriX : vérification web réussie"
+    )
 
     cog = bot.get_cog("HoneypotVerification")
     conf = await cog.config(guild.id) if cog else None
@@ -805,11 +815,9 @@ async def _complete_verification(
     key = (guild.id, member.id)
     try:
         if verified not in member.roles:
-            await member.add_roles(verified, reason="SentriX : vérification web réussie")
+            await member.add_roles(verified, reason=raison_roles)
         if unverified in member.roles:
-            await member.remove_roles(
-                unverified, reason="SentriX : vérification web réussie"
-            )
+            await member.remove_roles(unverified, reason=raison_roles)
     except (discord.Forbidden, discord.HTTPException):
         return None, _json_error(
             "SentriX ne peut pas modifier tes rôles. Un administrateur doit vérifier la hiérarchie du bot.",
@@ -848,7 +856,7 @@ async def _complete_verification(
             guild.id,
             member.id,
             int(time.time()),
-            "web_oauth+captcha",
+            methode,
             account_age,
         ),
     )
@@ -875,13 +883,20 @@ async def _complete_verification(
     try:
         from utils import log_service
         log_embed = discord.Embed(
-            title="Membre vérifié — site SentriX",
+            title=(
+                "Membre vérifié — Discord" if methode.startswith("discord")
+                else "Membre vérifié — site SentriX"
+            ),
             description=(
                 f"{member.mention} ({member.id})\n"
                 f"Compte âgé de : **{account_age // 86400} jour(s)**\n"
                 f"Score sécurité : **{security_score:.1f}/{security_threshold:.0f}**\n"
                 f"Observations : **{security_observations}** sur **{security_scans} passes**\n"
-                "Méthode : **OAuth Discord + règlement courant + CAPTCHA web + analyse adaptative multi-passes**."
+                + (
+                    "Méthode : **test dans Discord + règlement courant + analyse adaptative multi-passes**."
+                    if methode.startswith("discord") else
+                    "Méthode : **OAuth Discord + règlement courant + CAPTCHA web + analyse adaptative multi-passes**."
+                )
             ),
             colour=discord.Colour.green(),
         )
