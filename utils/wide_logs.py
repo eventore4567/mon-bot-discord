@@ -1662,6 +1662,13 @@ class WideLogView(discord.ui.LayoutView):
         # salon (« @utilisateur inconnu ») : l'ID reste lisible et copiable.
         header_lines = [meta, f"### {title}"]
         identity_ref = _trace_identity_ref(event_type, identity_id)
+        # 05/11/2026 : « Membre vérifié — site SentriX » (journal Sécurité)
+        # s'affichait « Élément · . » — le pseudo du membre sans sa mention.
+        # Quand la description mentionne la personne visée, c'est un membre.
+        if not identity_ref and identity_id and identity_label == "Élément" and re.search(
+            rf"<@!?{int(identity_id)}>", str(embed.description or "")
+        ):
+            identity_ref, identity_label = f"<@{int(identity_id)}>", "Membre"
         if identity_ref:
             identity_ref += _id_chip(identity_id)
         identity_display = identity_ref or (safe_text(identity_name)[:80] if identity_name else "")

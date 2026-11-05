@@ -60,3 +60,20 @@ def test_setup_s_ouvre_pour_tous_dans_les_deux_matrices_de_production():
         assert 'policy="setup:lecture-seule"' in (racine / fichier).read_text(encoding="utf-8")
     # _can_setup reste « peut modifier » : la lecture seule n'y donne pas accès.
     assert '== "setup:lecture-seule":\n            return False' in (racine / "setup_v2_ui.py").read_text(encoding="utf-8")
+
+
+def test_le_log_membre_verifie_nomme_le_membre_et_pas_un_element():
+    # Capture du 05/11 : « Élément · . » — le pseudo « . » du membre, sans mention.
+    from tests.test_log_markdown_readability import texts
+
+    uid = 1567568276001792092
+    embed = discord.Embed(
+        title="Membre vérifié — site SentriX",
+        description=f"<@{uid}> ({uid})\nCompte âgé de : **3 jour(s)**",
+    )
+    vue = wide_logs.WideLogView(
+        embed, banner_filename="", log_type="security", identity_name=".", identity_id=uid,
+    )
+    texte = texts(vue)
+    assert "Élément" not in texte
+    assert f"<@{uid}>" in texte and "Membre" in texte
