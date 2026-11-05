@@ -185,11 +185,13 @@ def contexte_discord_reel(bot, guild_id, channel_id, user_id) -> str:
             getattr(membre, "guild_permissions", None)
         )
         role_membre = getattr(getattr(membre, "top_role", None), "name", None)
-        lignes.append(
+        # Consigne pour le modèle (tutoiement voulu) : jamais affichée à un membre.
+        consigne_interlocuteur = (
             f"La personne qui te parle : {membre.display_name}"
             + (f" · rôle le plus haut : {role_membre}" if role_membre and role_membre != "@everyone" else "")
             + f" · permissions : {statut}"
         )
+        lignes.append(consigne_interlocuteur)
     try:
         from utils import ai_actions
 
@@ -198,11 +200,12 @@ def contexte_discord_reel(bot, guild_id, channel_id, user_id) -> str:
             if spec.description and spec.risk in {"low", "medium", "high"}
         })
         if savoir_faire:
-            lignes.append(
+            consigne_actions = (
                 "Ce que tu exécutes toi-même quand on te le demande en message (avec les "
                 "permissions de la personne) : " + " ; ".join(savoir_faire)[:3000]
                 + ". Pour le reste, propose la commande SentriX adaptée, sans prétendre l'avoir fait."
             )
+            lignes.append(consigne_actions)
     except Exception:  # noqa: BLE001
         pass
     return "\n".join(lignes)[:4600]
@@ -225,6 +228,12 @@ def install(bot: commands.Bot) -> None:
             return await current(*args, **kwargs)
 
         context = await build_server_context(bot, kwargs.get("guild_id"), kwargs.get("channel_id"))
+        # 06/11/2026 : garde-fou de sécurité sur TOUTES les réponses (consigne + filtre de
+        # sortie) — capture d'un mode d'emploi chimique dangereux.
+        from utils import ai_safety
+        base_securite = kwargs.get("instructions", ai_service.SYSTEM_PROMPT)
+        if ai_safety.CONSIGNE_SECURITE not in base_securite:
+            kwargs["instructions"] = f"{base_securite}\n\n{ai_safety.CONSIGNE_SECURITE}"
         # 06/11/2026 : en conversation (mention, réponse, /sentrix), le ton d'un membre
         # du serveur et la conversation récente — sur TOUS les chemins (y compris les
         # secours qui appellent ai_service.generate directement).
@@ -257,6 +266,18 @@ def install(bot: commands.Bot) -> None:
                 f"{context}"
             )
         resultat = await current(*args, **kwargs)
+        texte_brut = getattr(resultat, "text", None)
+        if isinstance(texte_brut, str) and texte_brut:
+            propre = ai_safety.filtrer(texte_brut)
+            if propre != texte_brut:
+                logger.warning(
+                    "Réponse IA bloquée (mode d'emploi dangereux) guild=%s user=%s",
+                    kwargs.get("guild_id"), kwargs.get("user_id"),
+                )
+                try:
+                    resultat.text = propre
+                except Exception:  # noqa: BLE001
+                    pass
         if contexte_salon is not None:
             texte = getattr(resultat, "text", None)
             if isinstance(texte, str) and texte:

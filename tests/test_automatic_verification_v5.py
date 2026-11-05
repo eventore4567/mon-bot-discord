@@ -131,7 +131,9 @@ class AutomaticVerificationV5Tests(unittest.TestCase):
         manual = source.split("async def start_human_verification", 1)[1].split("async def evaluate_member", 1)[0]
         # Les anciens boutons Discord ouvrent désormais le vérificateur web
         # (public_verification_v120) : plus aucun défi rejoué dans Discord.
-        self.assertIn("verification_url", manual)
+        # 06/11/2026 : le démarrage manuel ouvre le test DANS Discord, plus le site.
+        self.assertIn("verification_discord", manual)
+        self.assertNotIn("verification_url", manual)
         self.assertNotIn("_challenges", manual)
 
 

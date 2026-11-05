@@ -9,6 +9,7 @@ def test_adaptive_setup_describes_web_captcha_and_score():
     assert "**40 signaux**" in section
     assert "**8 familles pondérées**" in section
     assert "score sur **20**" in section
-    assert "**portail web SentriX**" in section
-    assert "CAPTCHA" in section
+    # 06/11/2026 : la vérification se fait dans Discord, plus sur le site.
+    assert "**test dans Discord**" in section
+    assert "OAuth" not in section and "portail web" not in section
     assert "ne donne jamais directement le rôle final" in section

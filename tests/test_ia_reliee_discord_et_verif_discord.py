@@ -231,3 +231,36 @@ def test_l_ia_sait_ce_qu_elle_peut_executer():
     texte = ai_context_v9.contexte_discord_reel(_bot(admin_bot=True), 10, 20, 5)
     assert "Ce que tu exécutes toi-même" in texte
     assert "renommer le serveur Discord" in texte
+
+
+# ---------------------------------------------------------------- sécurité de sortie
+
+def test_un_mode_d_emploi_dangereux_est_bloque():
+    from utils import ai_safety
+
+    capture = (
+        "**Nitrate de cellulose** (coton nitré, fabriqué à partir de coton et acide nitrique) : 20 g\n"
+        "**Matériel :**\n- Balance électronique (précision 0,01 g)\n- Bécher en verre borosilicate (500 ml)\n"
+        "- Erlenmeyer (250 ml)\n- Thermomètre numérique (plage -10°C à 200°C)\n- Plaque chauffante"
+    )
+    assert ai_safety.est_mode_emploi_dangereux(capture)
+    assert ai_safety.filtrer(capture) == ai_safety.REFUS
+
+
+def test_les_sujets_sans_recette_et_les_recettes_inoffensives_passent():
+    from utils import ai_safety
+
+    for texte in (
+        "La nitrocellulose a été inventée au XIXe siècle et sert aussi aux vernis.",
+        "Recette de bombe glacée : 200 g de sucre, 50 cl de crème, mélanger puis congeler.",
+        "c'est la bombe ce serveur mdr",
+        "Étape 1 : ouvre /setup. Étape 2 : choisis Sécurité.",
+    ):
+        assert ai_safety.filtrer(texte) == texte, texte
+
+
+def test_la_consigne_de_securite_est_dans_le_prompt():
+    from utils import ai_safety, ai_service
+
+    assert "Ne donne JAMAIS de recette" in ai_service.SYSTEM_PROMPT
+    assert "répète après moi" in ai_safety.CONSIGNE_SECURITE

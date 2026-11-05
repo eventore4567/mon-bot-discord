@@ -204,20 +204,19 @@ def test_web_completion_runs_adaptive_security_before_role_grant():
 
 
 def test_no_legacy_discord_challenge_can_grant_verification_anymore():
+    # 06/11/2026 : les anciens chemins ouvrent le NOUVEAU test Discord
+    # (cogs/verification_discord.py), qui passe par _complete_verification.
+    # Aucun ancien code d'attribution de rôle ne reste atteignable.
     start = HONEYPOT_SOURCE.index("async def start_human_verification")
     complete = HONEYPOT_SOURCE.index("async def complete_human_challenge")
     start_chunk = HONEYPOT_SOURCE[start:complete]
-    redirect_at = start_chunk.index("verification_url")
-    return_at = start_chunk.index("return await interaction.response.send_message", redirect_at)
-    legacy_sequence = start_chunk.find("VerificationSequenceView(", redirect_at)
-    assert return_at >= 0
+    return_at = start_chunk.index("return await verification_discord.demarrer(interaction)")
+    legacy_sequence = start_chunk.find("VerificationSequenceView(")
     assert legacy_sequence == -1 or return_at < legacy_sequence
 
     complete_end = HONEYPOT_SOURCE.index("@commands.Cog.listener()", complete)
     complete_chunk = HONEYPOT_SOURCE[complete:complete_end]
-    redirect_at = complete_chunk.index("verification_url")
-    legacy_grant = complete_chunk.find("member.add_roles", redirect_at)
+    return_at = complete_chunk.index("return await verification_discord.demarrer(interaction)")
+    legacy_grant = complete_chunk.find("member.add_roles")
     # Any historical role-grant code is unreachable after the mandatory early return.
-    return_at = complete_chunk.index("return await interaction.response.send_message", redirect_at)
-    assert return_at >= 0
     assert legacy_grant == -1 or return_at < legacy_grant
