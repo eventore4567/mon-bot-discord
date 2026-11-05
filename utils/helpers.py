@@ -1,8 +1,12 @@
 """Fonctions utilitaires génériques réutilisées dans plusieurs cogs."""
 
+import asyncio
 import logging
 import re
 import discord
+
+#: Marge au-delà du délai d'une ConfirmView avant d'arrêter son attente de force.
+MARGE_ATTENTE_CONFIRMATION = 15.0
 
 from utils import embeds
 
@@ -273,6 +277,22 @@ class ConfirmView(discord.ui.View):
         self._figer()
         self.stop()
         await interaction.response.defer()
+
+    async def wait(self) -> bool:
+        """Attente bornée, quoi qu'il arrive au message.
+
+        05/11/2026 : un +server-restore est resté 6 h 49 suspendu sur ce wait()
+        (bot retiré du serveur juste après l'envoi) : le délai de la vue n'a
+        jamais déclenché. Au-delà du délai prévu (+ marge), l'attente s'arrête
+        comme une expiration normale (value reste None = rien n'est fait).
+        """
+        if self.timeout is None:
+            return await super().wait()
+        try:
+            return await asyncio.wait_for(super().wait(), timeout=float(self.timeout) + MARGE_ATTENTE_CONFIRMATION)
+        except asyncio.TimeoutError:
+            self.stop()
+            return True
 
     async def on_timeout(self) -> None:
         """Le silence n'est pas une reponse : on le dit."""
