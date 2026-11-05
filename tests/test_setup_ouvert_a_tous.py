@@ -52,3 +52,12 @@ def test_un_clic_de_simple_membre_est_refuse_en_carte(monkeypatch):
 def test_un_clic_d_admin_passe(monkeypatch):
     monkeypatch.setattr(v73.panels, "envoyer", AsyncMock())
     assert asyncio.run(_vue(10).interaction_check(_interaction(_user(10, admin=True)))) is True
+
+
+def test_le_panneau_servi_herite_du_controle_des_clics():
+    # Le panneau réellement servi (setup_invitations → v74) hérite de V73 :
+    # c'est lui qui refuse les modifications d'un simple membre.
+    from cogs import setup_experience_v74 as v74
+
+    assert issubclass(v74.SentriXSetupV74, v73.SentriXSetupV73)
+    assert v74.SentriXSetupV74.interaction_check is v73.SentriXSetupV73.interaction_check

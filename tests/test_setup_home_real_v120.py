@@ -46,7 +46,10 @@ def test_setup_is_private_and_prefix_does_not_expose_controls():
     start = text.index("    async def final_send_setup(")
     send = text[start:text.index("    current = setup_ui.OfficialSetup.send_setup", start)]
     prefix = send[:send.index("# Discord ne sait pas envoyer un panneau éphémère")]
-    assert prefix.index("_can_setup(") < prefix.index("panels.envoyer(target, view, ephemere=False)")
+    # 05/11/2026 : /setup s'ouvre pour tous (lecture) ; chaque clic est contrôlé par
+    # SentriXSetupV73.interaction_check (peut_configurer), plus par _can_setup à l'ouverture.
+    assert "_can_setup(" not in prefix
+    assert prefix.index("if guild is None or member is None") < prefix.index("panels.envoyer(target, view, ephemere=False)")
     slash = send[send.index("# Discord ne sait pas envoyer un panneau éphémère"):]
     assert "ephemere=True" in slash and "ephemere=False" not in slash
     assert "Tu n'as pas" not in send

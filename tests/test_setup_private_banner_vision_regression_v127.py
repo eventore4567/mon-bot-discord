@@ -90,17 +90,16 @@ def test_final_setup_private_from_first_interaction_ack():
     end = src.index("    current = setup_ui.OfficialSetup.send_setup", start)
     code = src[start:end]
     assert "await _prepare_private_setup_interaction(slash)" in code
-    # La branche +setup est publique et vérifie les permissions AVANT
-    # d'envoyer quoi que ce soit. La branche /setup continue de différer
-    # en privé avant son propre contrôle de permissions.
+    # La branche /setup diffère en privé avant tout le reste.
+    # 05/11/2026 : /setup s'ouvre pour tous (lecture) ; chaque clic est contrôlé par
+    # SentriXSetupV73.interaction_check (peut_configurer), plus par _can_setup à l'ouverture.
     ack = code.index("await _prepare_private_setup_interaction(slash)")
-    slash_check = code.index("await setup_ui._can_setup(", ack)
-    assert ack < slash_check
+    assert ack < code.index("view = cls(self.bot, guild, member.id)", ack)
     assert "Aucun panneau public n'a été envoyé" not in code
     assert "return await panels.envoyer(target.followup, view, ephemere=True)" in code
     assert "return await panels.envoyer(target, view, ephemere=True)" in code
     assert "return await panels.envoyer(target, view, ephemere=False)" in code
-    assert "await setup_ui._can_setup(self.bot, member, guild)" in code
+    assert "await setup_ui._can_setup(self.bot, member, guild)" not in code
     assert "delete_after=15" not in code
     assert "PrivateSetupLauncher" not in code
     for name in ("cogs/setup_invitations.py", "cogs/ai.py", "cogs/ai_api_hotfix.py",
@@ -373,7 +372,9 @@ def test_prefix_setup_is_public_immediate_and_slash_remains_ephemeral():
         "        # Discord ne sait pas envoyer un panneau éphémère", 1
     )[0]
     assert "target.interaction is None" in prefix
-    assert "await setup_ui._can_setup(self.bot, member, guild)" in prefix
+    # 05/11/2026 : /setup s'ouvre pour tous (lecture) ; chaque clic est contrôlé par
+    # SentriXSetupV73.interaction_check (peut_configurer), plus par _can_setup à l'ouverture.
+    assert "if guild is None or member is None" in prefix
     assert "await view.prepare()" in prefix
     assert "return await panels.envoyer(target, view, ephemere=False)" in prefix
     assert "PrivateSetupLauncher" not in source
