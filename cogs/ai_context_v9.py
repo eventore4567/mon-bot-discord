@@ -18,6 +18,7 @@ _NO_CONTEXT_COMMANDS = frozenset({
     "sentrix-action-plan",
     "sentrix-command-router",
     "sentrix-command-classifier",
+    "sentrix-moderation-contexte",
 })
 
 

@@ -589,7 +589,10 @@ ADMIN_EVERYONE_SEUIL = 3
 #: le monde va retirer SentriX ». Même avec « Sanctionner aussi les admins », seuls
 #: ces filtres les visent ; majuscules, émojis, liens, invitations, insultes et pings
 #: répétés ne les concernent pas. Le spam d'un admin est supprimé avec un simple rappel.
-FILTRES_POUR_ADMINS = frozenset({"antispam", "antimention", "antiscam"})
+FILTRES_POUR_ADMINS = frozenset({"antispam", "antimention", "antiscam", "antiinvite"})
+#: Nombre d'incidents en 10 minutes avant de sanctionner un admin (rôles à risque
+#: retirés : Discord interdit de le muter). Un membre, lui, est averti puis muté.
+ADMIN_SEUILS = {"antiscam": 1, "spam": 3, "antiinvite": 3}
 ADMIN_EVERYONE_FENETRE = 600
 # 05/11/2026 : des mutes jusqu'à 24 h « abusent ». Paliers courts : 5 min,
 # 10 min, 30 min, 1 h, puis 2 h au maximum.
@@ -3775,6 +3778,13 @@ class AutoMod(commands.Cog, name="Automod"):
         # avant pour tout le monde, sans interrupteur, et appliquait un timeout.
         if conf.get("antiinsult") and await self.security_filter_applies_to(message, "antiinsult"):
             dataset_match = self.moderation_dataset.match(message.content)
+            # 06/11/2026 : « analyse le contexte : rien de grave, rien ; insultant,
+            # sanction ». « je te baise au foot mdr » n'est pas une insulte.
+            if (
+                dataset_match and dataset_match.confidence >= 0.70
+                and await self._insulte_selon_contexte(message) is False
+            ):
+                dataset_match = None
             if dataset_match and dataset_match.confidence >= 0.92:
                 return await self._delete_and_timeout(
                     message,
@@ -4001,6 +4011,102 @@ class AutoMod(commands.Cog, name="Automod"):
                     pass
             return "Mentions répétées (ping spam)."
         return None
+
+    async def _insulte_selon_contexte(self, message) -> bool | None:
+        """L'IA relit le message et la conversation : True offensant, False anodin.
+
+        None si l'IA ne répond pas (coupée, quota, délai) : la sanction suit alors
+        l'analyse locale, comme avant.
+        """
+        try:
+            from utils import ai_conversation, ai_service
+
+            contexte = await ai_conversation.transcription_recente(
+                message, getattr(getattr(self.bot, "user", None), "id", None)
+            )
+            consigne_moderation = (
+                "Tu modères un serveur Discord francophone. Décide si le DERNIER message est une "
+                "vraie insulte ou attaque envers quelqu'un (y compris abrégée : ntm, fdp, tg, "
+                "bztmr…), ou s'il est anodin : vanne entre amis clairement sur le ton du jeu, "
+                "expression (« je te baise au foot » = je te bats), frustration contre un jeu, "
+                "citation, question. Réponds par un seul mot : OFFENSANT ou ANODIN."
+            )
+            entree = (
+                (f"Conversation récente :\n{contexte[-1500:]}\n\n" if contexte else "")
+                + f"Dernier message ({getattr(message.author, 'display_name', 'membre')}) : "
+                + str(message.content)[:500]
+            )
+            resultat = await asyncio.wait_for(
+                ai_service.generate(
+                    entree, model_key=ai_service.MODEL_LUNA, reasoning_effort="none",
+                    instructions=consigne_moderation, guild_id=message.guild.id,
+                    channel_id=getattr(message.channel, "id", None), user_id=message.author.id,
+                    command="sentrix-moderation-contexte", web_search=False,
+                ),
+                timeout=6,
+            )
+        except Exception:  # noqa: BLE001 — l'analyse locale reste l'arbitre
+            logger.debug("Contexte d'insulte indisponible guild=%s", getattr(message.guild, "id", None), exc_info=True)
+            return None
+        verdict = str(getattr(resultat, "text", "") or "").strip().upper()
+        if not getattr(resultat, "ok", False) or not verdict:
+            return None
+        if "ANODIN" in verdict and "OFFENSANT" not in verdict:
+            return False
+        if "OFFENSANT" in verdict:
+            return True
+        return None
+
+    async def _incident_admin(self, message, reason: str, filter_name: str) -> None:
+        """Spam, arnaque ou pub d'un administrateur : tolérance, puis sanction.
+
+        Arnaque : sanction dès la 1re (compte probablement piraté). Spam et invitations :
+        au 3e incident en 10 minutes. Discord interdit de muter un administrateur :
+        la sanction retire ses rôles à risque et prévient le propriétaire.
+        """
+        famille = "spam" if filter_name in SPAM_FILTERS else self._canonical_security_filter(filter_name)
+        seuil = ADMIN_SEUILS.get(famille)
+        if seuil is None:
+            return
+        if famille in {"spam", "antiscam"}:
+            try:
+                await message.delete()
+            except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+                pass
+        cle = (message.guild.id, message.author.id, famille)
+        maintenant = time.monotonic()
+        derniers = self.__dict__.setdefault("_admin_dernier_incident", {})
+        if famille == "spam" and maintenant - derniers.get(cle, -1e9) < SPAM_INCIDENT_WINDOW_SECONDS:
+            return  # même rafale : un seul incident
+        derniers[cle] = maintenant
+        suivi = self.__dict__.get("_incidents_admins")
+        if suivi is None:
+            suivi = self.__dict__["_incidents_admins"] = FenetreGlissante(
+                fenetre=ADMIN_EVERYONE_FENETRE, purge_toutes=200,
+            )
+        if suivi.ajouter(cle, getattr(message, "id", 0)) < seuil:
+            if famille == "spam":
+                try:
+                    await panels.texte_court(
+                        message.channel, f"{message.author.mention}, doucement sur le spam.",
+                        supprimer_apres=6,
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+            return
+        suivi.reinitialiser(cle)
+        if famille == "antiinvite":
+            try:
+                await message.delete()
+            except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+                pass
+        membre = _as_member(message.author, message.guild)
+        if isinstance(membre, discord.Member):
+            libelle = {"spam": "spam répété", "antiscam": "lien d'arnaque", "antiinvite": "pub d'invitations répétée"}
+            await self._repondre_abus_privilegie(
+                message.guild, membre, f"Admin : {libelle.get(famille, reason)} — {reason}",
+                ABUS_PRIVILEGIE_SEUIL,
+            )
 
     async def _everyone_d_un_admin(self, message) -> None:
         """@everyone / @here d'un administrateur : toléré, sauf s'il insiste."""
@@ -4344,6 +4450,13 @@ class AutoMod(commands.Cog, name="Automod"):
         pour inclure le nombre réel de messages supprimés). Détections suivantes dans la
         fenêtre : suppression silencieuse, compteur incrémenté.
         """
+        # 06/11/2026 : un admin a plus de marge qu'un membre (seuls spam, arnaque et
+        # pub d'invitations le visent, avec des seuils plus hauts).
+        if _is_discord_administrator(_as_member(message.author, message.guild)):
+            # Option coupée : un message d'admin n'est jamais supprimé ni sanctionné.
+            if not await self.admins_soumis(message.guild.id):
+                return None
+            return await self._incident_admin(message, reason, filter_name)
         # Protection de dernier recours pour les autres listeners AutoMod qui
         # appelleraient cette méthode directement, sans passer par le filtre.
         if await self._admin_exempte(message.author, message.guild.id):

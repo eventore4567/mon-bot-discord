@@ -190,7 +190,7 @@ def test_les_admins_ont_plus_de_marge_que_les_membres(monkeypatch):
     cog.get_ignored_channels_cached = AsyncMock(return_value=set())
     message = SimpleNamespace(author=admin, guild=guild, channel=SimpleNamespace(id=3, parent_id=None))
 
-    for filtre in ("anticaps", "antiemoji", "antilink", "antiinvite", "antiinsult"):
+    for filtre in ("anticaps", "antiemoji", "antilink", "antiinsult"):
         assert asyncio.run(cog.security_filter_applies_to(message, filtre)) is False, filtre
 
     action = asyncio.run(cog._spam_progressive_action(guild, admin, "spam"))
