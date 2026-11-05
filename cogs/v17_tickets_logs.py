@@ -151,16 +151,19 @@ async def _flush_group(bot, original, key: tuple[int, str, str]) -> None:
     guild = items[0][0]
     log_type = key[2]
     if len(items) < LOG_BATCH_THRESHOLD:
-        for _guild, embed, file in items:
-            await original(bot, _guild, log_type, embed, file=file)
+        # 05/11/2026 : l'identité (nom du salon, auteur) passée à send_log était
+        # perdue ici — le log sortait « Le salon Un salon a été supprimé », sans
+        # nom ni auteur. Elle est rejouée avec chaque événement.
+        for _guild, embed, file, identity in items:
+            await original(bot, _guild, log_type, embed, file=file, **identity)
         return
 
     event_key = key[1]
-    ids = {_target_id(embed) for _guild, embed, _file in items}
+    ids = {_target_id(embed) for _guild, embed, _file, _identity in items}
     ids.discard(None)
     actors = await _audit_actor_map(guild, event_key, {int(value) for value in ids})
     lines = []
-    for _guild, embed, _file in items:
+    for _guild, embed, _file, _identity in items:
         target_id = _target_id(embed)
         lines.append(_line_from_embed(embed, target_id, actors.get(target_id) if target_id else None))
 
@@ -205,7 +208,7 @@ def install_log_pipeline(bot: commands.Bot) -> None:
             return await current(runtime_bot, guild, log_type, embed, file=file, **identity)
         key = (guild.id, event_key, str(log_type))
         buffers = state(runtime_bot).setdefault("v17_log_buffers", {})
-        buffers.setdefault(key, []).append((guild, embed.copy(), file))
+        buffers.setdefault(key, []).append((guild, embed.copy(), file, dict(identity)))
         tasks = state(runtime_bot).setdefault("v17_log_buffer_tasks", {})
         task = tasks.get(key)
         if task is None or task.done():
