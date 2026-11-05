@@ -474,6 +474,7 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("notifications status", "notifs-status", "Check notification delivery status."),
     _e("notifications preview", "notifs-test", "Preview a notification with real title and thumbnail."),
 
+    _e("counter setup", "infinit", "Set up the counting game (channel, first number)."),
     _e("counter status", "infinit status", "Show the counting game status."),
     _e("counter stop", "infinit stop", "Pause the counting game."),
     _e("counter resume", "infinit resume", "Resume the counting game."),
@@ -780,7 +781,8 @@ _MENU_SIMPLIFIE_KEEP: dict[str, frozenset[str]] = {
     "tickets": frozenset({"open", "reopen", "transcript"}),
     "config": frozenset(()),
     "market": frozenset(()),
-    "counter": frozenset(()),
+    # 06/11/2026 : « le compteur infini configurable en / » — de retour dans le menu.
+    "counter": frozenset({"setup", "status", "stop", "resume"}),
     "starboard": frozenset(()),
     "fun": frozenset(()),
     "race": frozenset(()),

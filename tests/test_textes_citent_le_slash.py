@@ -26,7 +26,9 @@ def test_sous_commande_hors_menu_garde_le_prefixe():
 
 
 def test_sans_route_publiee_le_texte_reste_tel_quel():
-    assert panels.commandes_en_code("Lancez `+infinit`.") == "Lancez `+infinit`."
+    # /counter setup existe depuis le 06/11/2026 : +infinit a maintenant une route publiée.
+    assert panels.commandes_en_code("Lancez `+infinit`.") == "Lancez `/counter setup`."
+    assert panels.commandes_en_code("Lancez `+jeuxjour`.") == "Lancez `+jeuxjour`."
     assert panels.commandes_en_code("`+alias add`") == "`+alias add`"
 
 

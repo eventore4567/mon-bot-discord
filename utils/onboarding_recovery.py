@@ -55,6 +55,17 @@ async def mark_welcomed(db, member):
         )
 
 
+def _arret_en_cours(bot, exc: BaseException) -> bool:
+    """La connexion se ferme parce que l'instance s'arrête (pool asyncpg, connecteur HTTP)."""
+    texte = str(exc).casefold()
+    if "pool is closing" in texte or "connector is closed" in texte or "pool is closed" in texte:
+        return True
+    try:
+        return bool(bot.is_closed())
+    except Exception:  # noqa: BLE001
+        return False
+
+
 class Recovery:
     def __init__(self, bot, handle_join, is_active):
         self.bot = bot
@@ -100,8 +111,13 @@ class Recovery:
                 )
                 self.pending.discard(guild.id)
                 self.initialized.add(guild.id)
-            except Exception:
+            except Exception as exc:
                 self.pending.add(guild.id)
+                # Arrêt en cours (déploiement) : la base se ferme sous nos pieds.
+                # Ce n'est pas une panne ; l'instance suivante reprend le rattrapage.
+                if _arret_en_cours(self.bot, exc):
+                    logger.debug("Rattrapage interrompu par l'arrêt guild=%s", guild.id)
+                    return
                 logger.exception("Rattrapage des arrivées incomplet guild=%s", guild.id)
 
     async def run(self):

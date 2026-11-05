@@ -77,3 +77,13 @@ def test_le_log_membre_verifie_nomme_le_membre_et_pas_un_element():
     texte = texts(vue)
     assert "Élément" not in texte
     assert f"<@{uid}>" in texte and "Membre" in texte
+
+
+def test_l_arret_de_l_instance_n_est_pas_journalise_comme_une_panne():
+    from utils.onboarding_recovery import _arret_en_cours
+
+    bot = SimpleNamespace(is_closed=lambda: False)
+    assert _arret_en_cours(bot, RuntimeError("pool is closing")) is True
+    assert _arret_en_cours(bot, RuntimeError("Connector is closed.")) is True
+    assert _arret_en_cours(bot, RuntimeError("syntax error")) is False
+    assert _arret_en_cours(SimpleNamespace(is_closed=lambda: True), RuntimeError("x")) is True

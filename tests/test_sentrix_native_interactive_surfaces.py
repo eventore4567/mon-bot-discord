@@ -145,7 +145,9 @@ def test_infinite_counter_invalid_messages_are_deleted_silently():
     ]
 
     assert "await message.delete()" in invalid
-    assert ".channel.send(" not in invalid
+    # 06/11/2026 : avis court (« le suivant est X »), effacé tout seul, sans ping.
+    assert "delete_after=DUREE_AVIS" in invalid
+    assert "allowed_mentions=discord.AllowedMentions.none()" in invalid
     assert "send_message(" not in invalid
     assert "panels." not in invalid
     assert "InfiniteMistakeView" not in source
