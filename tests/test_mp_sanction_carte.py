@@ -59,3 +59,13 @@ def test_un_mp_ferme_n_est_pas_retente():
     target.send = AsyncMock(side_effect=discord.Forbidden(type("R", (), {"status": 403, "reason": "x"})(), "fermé"))
     assert asyncio.run(svc._send_dm_best_effort(target, "Sanction")) is False
     assert target.send.await_count == 1
+
+
+def test_la_carte_de_mp_prend_les_emojis_sentrix(monkeypatch):
+    from utils import sentrix_emojis
+
+    monkeypatch.setattr(sentrix_emojis, "_RESOLUS", {"success": "<a:success:1>"})
+    monkeypatch.setattr(sentrix_emojis, "_resolu", lambda nom: "<a:success:1>" if nom.endswith("success") else None)
+    vue = svc._carte_mp("Votre mute a été retiré.")
+    assert "<a:success:1>" in _textes(vue)
+    assert "✅" not in _textes(vue)
