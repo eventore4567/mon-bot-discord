@@ -46,26 +46,8 @@ def _payload_emoji_key(emoji: discord.PartialEmoji) -> str:
 
 
 def _self_role_error(guild: discord.Guild, role: discord.Role) -> str | None:
-    if role.is_default():
-        return "Le rôle @everyone ne peut pas être distribué par réaction."
-    if role.managed:
-        return "Ce rôle est géré par Discord ou une intégration."
-    bot_member = guild.me
-    if bot_member is None or role >= bot_member.top_role:
-        return "Placez ce rôle sous le rôle du bot dans Paramètres du serveur > Rôles."
-    permissions = role.permissions
-    if (
-        permissions.administrator
-        or permissions.manage_guild
-        or permissions.manage_roles
-        or permissions.manage_channels
-        or permissions.ban_members
-        or permissions.kick_members
-        or permissions.moderate_members
-        or permissions.manage_webhooks
-    ):
-        return "Les rôles d'administration ou de modération ne peuvent pas être obtenus automatiquement."
-    return None
+    from cogs.economy import _self_assignable_role_error
+    return _self_assignable_role_error(guild, role)
 
 
 def role_grant_problem(guild: discord.Guild, role: discord.Role | None) -> str | None:
@@ -918,7 +900,7 @@ class Verification(commands.Cog, name="Verification"):
         if self.bot.user is None or message.author.id != self.bot.user.id:
             return
         rows = await self.bot.db.fetchall(
-            "SELECT * FROM reaction_roles WHERE guild_id = ? AND message_id = ? ORDER BY rowid ASC",
+            "SELECT * FROM reaction_roles WHERE guild_id = ? AND message_id = ? ORDER BY role_id ASC",
             (guild.id, message.id),
         )
         description = panel["description"] or "Réagissez avec l'emoji correspondant pour recevoir ou retirer un rôle."
@@ -929,13 +911,12 @@ class Verification(commands.Cog, name="Verification"):
             label = row["label"] or (role.name if role else "Indisponible")
             lines.append(f"{row['emoji']} **{label}** — {role_text}")
         listing = "\n".join(lines) if lines else "Aucun rôle n'est encore configuré."
-        embed = await self._embed(
-            guild.id,
-            title=panel["title"],
-            description=f"{description}\n\n**Rôles disponibles**\n{listing}"[:4096],
-        )
+        card = discord.ui.LayoutView(timeout=None)
+        box = discord.ui.Container(accent_colour=0x9B59B6)
+        box.add_item(discord.ui.TextDisplay(f"## {panel['title']}\n{description}\n\n**Rôles disponibles**\n{listing}"[:3900]))
+        card.add_item(box)
         try:
-            await message.edit(embed=embed)
+            await message.edit(content=None, embeds=[], attachments=[], view=card, allowed_mentions=discord.AllowedMentions.none())
         except (discord.Forbidden, discord.NotFound, discord.HTTPException):
             return
 
@@ -986,7 +967,7 @@ class Verification(commands.Cog, name="Verification"):
             (ctx.guild.id, message.id),
         )
         existing = await self.bot.db.fetchone(
-            "SELECT rowid FROM reaction_roles WHERE guild_id = ? AND message_id = ? AND emoji_key = ?",
+            "SELECT role_id FROM reaction_roles WHERE guild_id = ? AND message_id = ? AND emoji_key = ?",
             (ctx.guild.id, message.id, emoji_key),
         )
         if not existing and count_row and count_row["total"] >= 20:
@@ -1079,7 +1060,7 @@ class Verification(commands.Cog, name="Verification"):
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Association introuvable', kind='danger')))
         if message:
             try:
-                await message.clear_reaction(parsed_emoji)
+                await message.remove_reaction(parsed_emoji, self.bot.user)
             except (discord.Forbidden, discord.NotFound, discord.HTTPException):
                 pass
             await self._refresh_role_panel(ctx.guild, panel, message)
@@ -1170,7 +1151,7 @@ class Verification(commands.Cog, name="Verification"):
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
-        if payload.member is None or payload.member.bot:
+        if not payload.guild_id or (payload.member is not None and payload.member.bot):
             return
         emoji_key = _payload_emoji_key(payload.emoji)
         row = await self.bot.db.fetchone(
@@ -1183,10 +1164,8 @@ class Verification(commands.Cog, name="Verification"):
         guild = self.bot.get_guild(payload.guild_id)
         role = guild.get_role(row["role_id"]) if guild else None
         if role:
-            try:
-                await payload.member.add_roles(role, reason="Rôle sur réaction")
-            except (discord.Forbidden, discord.HTTPException):
-                pass
+            from utils.reaction_role_options import apply_reaction
+            await apply_reaction(self.bot, payload, row, adding=True)
 
     @commands.Cog.listener()
     async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent):
@@ -1213,10 +1192,8 @@ class Verification(commands.Cog, name="Verification"):
             return
         role = guild.get_role(row["role_id"])
         if member and role:
-            try:
-                await member.remove_roles(role, reason="Retrait rôle sur réaction")
-            except (discord.Forbidden, discord.HTTPException):
-                pass
+            from utils.reaction_role_options import apply_reaction
+            await apply_reaction(self.bot, payload, row, adding=False)
 
     # Note : configurer le rôle automatique se fait via /setautorole (cog Configuration)
     # ou directement dans l'assistant /setup — pas besoin d'une commande en double ici.

@@ -157,6 +157,11 @@ def _valid_roles(guild: discord.Guild, role_ids: list[int]) -> tuple[list[discor
         if role >= me.top_role:
             errors.append(f"Le rôle de SentriX doit être placé au-dessus de **{role.name}**.")
             continue
+        from cogs.economy import _self_assignable_role_error
+        error = _self_assignable_role_error(guild, role)
+        if error:
+            errors.append(error)
+            continue
         valid.append(role)
     return valid, errors
 
@@ -223,6 +228,12 @@ async def _save_panel(
             int(time.time()),
         ),
     )
+
+    if mode == "reaction":
+        from utils.reaction_role_options import register_legacy_panel
+        await register_legacy_panel(bot, guild_id=message.guild.id, channel_id=message.channel.id,
+                                    message_id=message.id, mappings=mappings or [],
+                                    creator_id=creator_id, created_at=int(time.time()))
 
 
 class ExistingRoleSelect(discord.ui.Select):
@@ -734,31 +745,17 @@ class SentriXRegressionRuntime(commands.Cog, name="SentriXRegressionFix"):
     async def _apply_reaction(self, payload: discord.RawReactionActionEvent, *, add: bool) -> None:
         if self.bot.user is None or payload.user_id == self.bot.user.id or payload.guild_id is None:
             return
+        canonical = await self.bot.db.fetchone(
+            "SELECT message_id FROM reaction_role_panels WHERE guild_id=? AND message_id=?",
+            (payload.guild_id,payload.message_id),
+        )
+        if canonical is not None:
+            return  # Le listener Verification applique les options persistantes.
         role_id = await self._mapping_for(payload.message_id, payload.emoji)
         if role_id is None:
             return
-        guild = self.bot.get_guild(int(payload.guild_id))
-        if guild is None:
-            return
-        role = guild.get_role(role_id)
-        if role is None:
-            return
-        member = payload.member if add else guild.get_member(payload.user_id)
-        if member is None:
-            try:
-                member = await guild.fetch_member(payload.user_id)
-            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                return
-        me = guild.me
-        if member.bot or me is None or role.managed or role >= me.top_role:
-            return
-        try:
-            if add and role not in member.roles:
-                await member.add_roles(role, reason="SentriX • rôle par réaction")
-            elif not add and role in member.roles:
-                await member.remove_roles(role, reason="SentriX • retrait réaction")
-        except (discord.Forbidden, discord.HTTPException):
-            logger.warning("Reaction role failed guild=%s user=%s role=%s", guild.id, member.id, role.id)
+        from utils.reaction_role_options import apply_reaction
+        await apply_reaction(self.bot, payload, {"role_id":role_id}, adding=add)
 
     @commands.Cog.listener("on_raw_reaction_add")
     async def reaction_added(self, payload: discord.RawReactionActionEvent):

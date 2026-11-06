@@ -223,6 +223,11 @@ def _expected(name: str, tier: str, persona: str, module_off: bool, bot_missing:
             return ("refuse", "owner-serveur")
         if not module_off and persona != "proprietaire-serveur":
             return ("refuse", "owner-serveur")
+    # /setup est consultable par tous depuis le 05/11 ; ce n'est pas une
+    # autorisation de modifier. Les vues vérifient propriétaire et permission à
+    # chaque interaction (test_setup_component_admin_rejects_member).
+    if name == "setup" and not module_off and not bot_missing:
+        return ("autorise", "lecture-seule")
     if tier == "owner-global":
         if persona != "proprietaire-sentrix":
             return ("refuse", "owner-sentrix")

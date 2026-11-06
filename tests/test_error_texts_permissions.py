@@ -17,7 +17,7 @@ from utils import error_texts
 from utils.access_matrix import AccessDecision
 from utils.checks import BotPermissionError
 
-ECO_OFF = "Le **système d'argent est désactivé** sur ce serveur. Les soldes, récompenses et boutiques sont actuellement bloqués."
+ECO_OFF = "L'économie est désactivée sur ce serveur"
 
 
 def test_bot_permission_error_keeps_its_original_message_everywhere():
@@ -128,7 +128,7 @@ def test_economy_off_uses_the_money_system_wording_in_every_evaluator():
     from utils import access_matrix
 
     eco = access_matrix.module_disabled_message("economy")
-    assert eco.startswith("Le **système d'argent est désactivé** sur ce serveur.")
+    assert eco == "L'économie est désactivée sur ce serveur"
     assert access_matrix.module_disabled_message("levels").startswith("Le **système de niveaux est désactivé**")
     assert access_matrix.module_disabled_message("roles").startswith("Le module **Rôles** est désactivé")
     decision = access_matrix.AccessDecision(False, eco, "module:economy:off")

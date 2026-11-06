@@ -77,7 +77,7 @@ class SystemFeatureCommands(commands.Cog, name="SystemFeatures"):
         if getattr(ctx.command, "cog_name", None) == "Economy":
             if not await is_system_enabled(self.bot.db, ctx.guild.id, "economy"):
                 raise checks.BotPermissionError(
-                    "Le **système d'argent est désactivé** sur ce serveur. Les soldes, récompenses et boutiques sont actuellement bloqués."
+                    "L'économie est désactivée sur ce serveur"
                 )
 
         if _is_level_command(ctx.command):
@@ -255,7 +255,7 @@ def _patch_economy(bot: commands.Bot) -> None:
             if guild_id and not await is_system_enabled(bot.db, guild_id, "economy"):
                 return await _send_interaction_disabled(
                     interaction,
-                    "💰 Le système d'argent est désactivé sur ce serveur : **la boutique et les achats sont bloqués**.",
+                    "L'économie est désactivée sur ce serveur",
                 )
             return await original(interaction, selected_value)
         cog.handle_shop_selection = MethodType(guarded_shop_selection, cog)
@@ -266,7 +266,7 @@ def _patch_economy(bot: commands.Bot) -> None:
 def _disabled_embed(system: str) -> discord.Embed:
     if system == "economy":
         return embeds.info(
-            "Le système d'argent est désactivé sur ce serveur. Les anciennes données sont conservées, mais les soldes et boutiques ne sont pas actifs."
+            "L'économie est désactivée sur ce serveur"
         )
     return embeds.info(
         "Le système de niveaux est désactivé sur ce serveur. Les anciens niveaux sont conservés, mais aucun nouvel XP n'est gagné."

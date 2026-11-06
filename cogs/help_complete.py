@@ -67,7 +67,7 @@ CATEGORIES: tuple[CategorySpec, ...] = (
     ),
     CategorySpec(
         "economy", "💰", "Économie et boutique",
-        "Argent, banque, boutique, inventaire et récompenses.",
+        "Métiers et promotions, série quotidienne, intérêts bancaires, boutique et gains des jeux. Configurer : /setup → Économie.",
         "community",
         frozenset({
             "balance", "economy", "daily", "weekly", "work", "rob", "pay",
@@ -215,7 +215,7 @@ CATEGORIES: tuple[CategorySpec, ...] = (
     ),
     CategorySpec(
         "roles", "🎭", "Rôles et vérification",
-        "Panels de rôles, réactions, vérification et rôles de masse.",
+        "Rôles par réaction : /setup → Rôles → Rôles par réaction. Vérification et rôles de masse.",
         "staff",
         frozenset({
             "rolepanel", "rolepanel-refresh", "reactionrole-add",

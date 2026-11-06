@@ -277,6 +277,8 @@ async def reward_game_winner(
     les duels, jeux communautaires, vues à boutons et futures commandes ne peuvent donc
     plus contourner +gamesetup par un chemin de récompense direct.
     """
+    from utils.economy_settings import get_economy_settings
+    economy_settings = await get_economy_settings(bot, guild_id)
     metadata = metadata or {}
     settings = await get_settings(bot, guild_id)
     # Les jeux restent jouables quand l'économie est OFF, mais aucun argent
@@ -285,6 +287,8 @@ async def reward_game_winner(
         await economy_rewards_enabled(bot, guild_id)
         if result == "win" and base_amount > 0 else True
     )
+
+    economy_on = economy_on and bool(economy_settings["enabled"]) and bool(economy_settings["games_pay"])
 
     if result == "win" and base_amount > 0 and economy_on:
         limit = int(settings.get("daily_limit", 0) or 0)
@@ -304,6 +308,7 @@ async def reward_game_winner(
                 )
 
     final_amount = compute_reward(settings, base_amount) if result == "win" and economy_on else 0
+    final_amount = int(final_amount * float(economy_settings["games_multiplier"]))
     if not economy_on:
         metadata = {**metadata, "economy_disabled": True}
     if result == "win" and final_amount > 0:

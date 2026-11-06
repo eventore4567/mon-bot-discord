@@ -87,7 +87,7 @@ GROUP_DESCRIPTIONS: dict[str, str] = {
     "tickets": "Support tickets.",
     "suggestions": "Share ideas with the server team.",
     "remind": "Personal reminders.",
-    "economy": "Coins, rewards and transfers.",
+    "economy": "Coins, careers, daily streaks, bank interest and game rewards. Configure: /setup → Economy.",
     "shop": "Buy and sell with server coins.",
     "market": "Trade items with other members.",
     "level": "Levels, XP and level rewards.",
@@ -281,9 +281,9 @@ CATALOG: tuple[SlashEntry, ...] = (
 
     # ------------------------------------------------------------------- Économie
     _e("balance", "balance", "Show your balance or a member's."),
-    _e("economy daily", "daily", "Claim your daily reward."),
+    _e("economy daily", "daily", "Claim your daily reward, streak bonus and bank interest."),
     _e("economy weekly", "weekly", "Claim your weekly reward."),
-    _e("economy work", "work", "Work to earn coins."),
+    _e("economy work", "work", "Work to earn coins and progress through career promotions."),
     _e("economy rob", "rob", "Try to rob another member."),
     _e("economy pay", "pay", "Send coins to another member."),
     _e("economy deposit", "deposit", "Deposit coins in the bank."),
