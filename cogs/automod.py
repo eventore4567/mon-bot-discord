@@ -35,6 +35,7 @@ privé de ses rôles dangereux et expulsé, et le propriétaire du serveur est a
 """
 
 import asyncio
+import inspect
 import logging
 import re
 import time
@@ -621,6 +622,16 @@ PINGS_FENETRE = 60
 PINGS_MEME_CIBLE = 3
 PINGS_TOTAL = 6
 _JETONS_NON_TEXTE = re.compile(r"<a?:\w+:\d+>|<[@#][!&]?\d+>|<t:\d+(?::\w)?>|https?://\S+")
+
+
+async def _mp_vue(destinataire, vue) -> None:
+    """Envoie une carte en MP ; un destinataire sans MP possible est ignoré."""
+    envoi = getattr(destinataire, "send", None)
+    if envoi is None:
+        return
+    resultat = envoi(view=vue, allowed_mentions=discord.AllowedMentions.none())
+    if inspect.isawaitable(resultat):
+        await resultat
 
 
 def carte_mp_simple(titre: str, texte: str, couleur: int):
@@ -2733,29 +2744,23 @@ class AutoMod(commands.Cog, name="Automod"):
         try:
             proprietaire = guild.owner or await guild.fetch_member(guild.owner_id)
             if proprietaire:
-                await proprietaire.send(
-                    view=carte_mp_simple(
-                        f"🚨 Abus d'un membre privilégié sur {guild.name}",
-                        f"{member.mention} (`{member.id}`)\n**Raison :** {reason}\n"
-                        f"**Action :** {action}",
-                        0xED4245,
-                    ),
-                    allowed_mentions=discord.AllowedMentions.none(),
-                )
+                await _mp_vue(proprietaire, carte_mp_simple(
+                    f"🚨 Abus d'un membre privilégié sur {guild.name}",
+                    f"{member.mention} (`{member.id}`)\n**Raison :** {reason}\n"
+                    f"**Action :** {action}",
+                    0xED4245,
+                ))
         except (discord.Forbidden, discord.HTTPException, AttributeError):
             pass
         if retires:
             try:
-                await member.send(
-                    view=carte_mp_simple(
-                        f"🛑 Vos rôles ont été retirés sur {guild.name}",
-                        f"**Raison :** {reason}\n**Rôles retirés :** "
-                        + ", ".join(r.name for r in retires)
-                        + "\n-# Le propriétaire du serveur a été prévenu.",
-                        0xED4245,
-                    ),
-                    allowed_mentions=discord.AllowedMentions.none(),
-                )
+                await _mp_vue(member, carte_mp_simple(
+                    f"🛑 Vos rôles ont été retirés sur {guild.name}",
+                    f"**Raison :** {reason}\n**Rôles retirés :** "
+                    + ", ".join(r.name for r in retires)
+                    + "\n-# Le propriétaire du serveur a été prévenu.",
+                    0xED4245,
+                ))
             except (discord.Forbidden, discord.HTTPException, AttributeError):
                 pass
 
