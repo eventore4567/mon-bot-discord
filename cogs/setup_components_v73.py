@@ -548,8 +548,12 @@ class SentriXSetupV73(discord.ui.LayoutView):
         self.backend.category = page
         self.backend.render()
         legacy_panel = await self.backend.build_embed()
+        if page == "levels" and getattr(self,"_separate_economy",False):
+            for index in reversed(range(len(legacy_panel.fields))):
+                if any(word in str(legacy_panel.fields[index].name).casefold() for word in ("économie","monnaie","boutique")):
+                    legacy_panel.remove_field(index)
         states = await self._effective_states()
-        emoji, label, description = CATEGORY_META.get(
+        emoji, label, description = getattr(self,"_category_meta",CATEGORY_META).get(
             page,
             ("⚙️", setup_ui.CATEGORIES.get(page, (page.title(), ""))[0], "Configuration SentriX."),
         )
@@ -578,6 +582,8 @@ class SentriXSetupV73(discord.ui.LayoutView):
         controls = list(self.backend.children)
         movable: list[discord.ui.Item] = []
         for item in controls:
+            if page == "levels" and getattr(self,"_separate_economy",False) and any(word in str(getattr(item,"label","")).casefold() for word in ("économie","argent","monnaie")):
+                continue
             if _is_legacy_navigation(item):
                 continue
             if not _can_move_to_action_row(item):

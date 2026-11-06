@@ -275,6 +275,8 @@ def _install_rolepanel_custom_emojis() -> bool:
     if getattr(cls, "_sentrix_custom_emoji_builder", False):
         return True
 
+    from utils import sentrix_emojis
+
     original_rebuild = cls.rebuild
     original_embed = cls.embed
     original_create = cls.create_panel
@@ -309,8 +311,7 @@ def _install_rolepanel_custom_emojis() -> bool:
             if len(set(keys)) != len(keys):
                 return await interaction.response.send_message("Chaque rôle doit avoir un emoji différent.", ephemeral=True)
             self.builder.custom_emojis = emojis
-            self.builder.rebuild()
-            await interaction.response.edit_message(embed=self.builder.embed(), view=self.builder)
+            await self.builder.refresh(interaction)
 
     async def choose_emojis(interaction: discord.Interaction, builder) -> None:
         if not builder.selected_role_ids:
@@ -325,14 +326,21 @@ def _install_rolepanel_custom_emojis() -> bool:
             button = discord.ui.Button(
                 label="Choisir les emojis",
                 style=discord.ButtonStyle.primary,
-                emoji="😀",
+                emoji=sentrix_emojis.partiel("role"),
                 custom_id=f"sentrix:rolepanel-builder:custom-emojis:{self.owner_id}",
-                row=2,
             )
             async def callback(interaction: discord.Interaction):
                 await choose_emojis(interaction, self)
             button.callback = callback
-            self.add_item(button)
+            container = next((item for item in self.children if isinstance(item, discord.ui.Container)), None)
+            if isinstance(self, discord.ui.LayoutView):
+                row = discord.ui.ActionRow(button)
+                if container is not None:
+                    container.add_item(row)
+                else:
+                    self.add_item(row)
+            else:
+                self.add_item(button)
 
     def embed(self):
         panel = original_embed(self)
@@ -352,60 +360,8 @@ def _install_rolepanel_custom_emojis() -> bool:
         return panel
 
     async def create_panel(self, interaction: discord.Interaction):
-        custom = list(getattr(self, "custom_emojis", []) or [])
-        if self.mode != "reaction" or not custom:
-            return await original_create(self, interaction)
-        if not self.selected_role_ids:
-            return await interaction.response.send_message("Sélectionnez au moins un rôle existant avant de créer le panneau.", ephemeral=True)
-        roles, errors = role_runtime._valid_roles(self.guild, self.selected_role_ids)
-        if not roles:
-            return await interaction.response.send_message(
-                "Aucun rôle sélectionné n'est modifiable par SentriX.\n" + "\n".join(f"• {item}" for item in errors[:6]),
-                ephemeral=True,
-            )
-        if len(custom) != len(roles):
-            return await interaction.response.send_message(
-                "Le nombre d'emojis ne correspond plus aux rôles sélectionnés. Cliquez sur **Choisir les emojis** puis validez à nouveau.",
-                ephemeral=True,
-            )
-        keys = [role_runtime._emoji_key(value) for value in custom]
-        if len(set(keys)) != len(keys):
-            return await interaction.response.send_message("Chaque rôle doit avoir un emoji différent.", ephemeral=True)
-
-        await interaction.response.defer()
-        role_ids = [role.id for role in roles]
-        mappings = [
-            {"emoji": emoji, "key": role_runtime._emoji_key(emoji), "role_id": role.id}
-            for emoji, role in zip(custom, roles)
-        ]
-        try:
-            message = await interaction.channel.send(embed=role_runtime._reaction_embed(self.guild, mappings))
-            try:
-                for item in mappings:
-                    await message.add_reaction(item["emoji"])
-            except (discord.Forbidden, discord.HTTPException):
-                try:
-                    await message.delete()
-                except discord.HTTPException:
-                    pass
-                return await interaction.followup.send(
-                    "Un des emojis n'est pas utilisable par SentriX. Vérifiez l'emoji choisi et les permissions, puis réessayez.",
-                    ephemeral=True,
-                )
-            await role_runtime._save_panel(
-                self.bot, message, mode="reaction", role_ids=role_ids, mappings=mappings, creator_id=self.owner_id,
-            )
-            success = discord.Embed(
-                title="Panneau créé",
-                description=f"Mode : **réactions emoji**\nRôles : **{len(role_ids)}**\nEmojis personnalisés : **{len(mappings)}**\n\nSentriX n'a créé aucun nouveau rôle.",
-                colour=0x2FBF71,
-            )
-            await interaction.message.edit(embed=success, view=None)
-            self.stop()
-        except discord.Forbidden:
-            await interaction.followup.send("SentriX n'a pas la permission d'envoyer le panneau ou de gérer ces rôles.", ephemeral=True)
-        except discord.HTTPException:
-            await interaction.followup.send("Discord a refusé la création du panneau. Réessayez dans quelques secondes.", ephemeral=True)
+        # Le moteur unique respecte le salon choisi et les contrôles de rôles.
+        return await original_create(self, interaction)
 
     cls.rebuild = rebuild
     cls.embed = embed

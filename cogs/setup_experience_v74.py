@@ -70,6 +70,7 @@ CATEGORY_META["tickets"] = (
     "Activation manuelle et personnalisation complète du panel et de ses boutons.",
 )
 
+CATEGORY_META["levels"] = ("📈", "Niveaux & réputation", "XP, activité, vocal, progression et récompenses de niveau.")
 CATEGORY_META["economy"] = ("💰", "Économie", "Monnaie, récompenses, métiers, banque, boutique et jeux.")
 
 SECURITY_BOT_PERMISSIONS = (
@@ -279,6 +280,8 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         self.moderation_member_id: int | None = None
         self.moderation_profile = "moderator"
         self.avance = False
+        self._category_meta = CATEGORY_META
+        self._separate_economy = True
         self.guide_step: int | None = None
 
     async def rebuild(self) -> None:
@@ -817,21 +820,13 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             select.callback = save
             container.add_item(discord.ui.ActionRow(select))
 
-        async def open_reactions(interaction):
-            from .reaction_role_setup import ReactionRoleSetupView
-            await interaction.response.send_message(view=await ReactionRoleSetupView(self.bot, self.guild, interaction.user.id).build(), ephemeral=True)
+        async def open_role_panels(interaction):
+            from .reaction_role_setup import RolePanelHubView
+            await interaction.response.send_message(view=RolePanelHubView(self.bot,self.guild,interaction.user.id),ephemeral=True)
 
-        async def open_role_panel(interaction):
-            from sentrix_regression_runtime import RolePanelBuilder
-            builder = RolePanelBuilder(self.bot, self.guild, interaction.user.id)
-            await interaction.response.send_message(view=builder, ephemeral=True)
-            builder.message = await interaction.original_response()
-
-        reactions = discord.ui.Button(label="Rôles par réaction", style=discord.ButtonStyle.primary)
-        reactions.callback = open_reactions
-        role_panel = discord.ui.Button(label="Panneau de rôles", style=discord.ButtonStyle.secondary)
-        role_panel.callback = open_role_panel
-        container.add_item(discord.ui.ActionRow(reactions, role_panel))
+        role_panels = discord.ui.Button(label="Panneaux de rôles", style=discord.ButtonStyle.primary)
+        role_panels.callback = open_role_panels
+        container.add_item(discord.ui.ActionRow(role_panels))
 
         reward = discord.ui.Button(label="Ajouter / modifier une récompense de niveau", style=discord.ButtonStyle.secondary)
 
