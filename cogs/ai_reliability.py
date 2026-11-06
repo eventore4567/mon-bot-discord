@@ -29,9 +29,18 @@ from utils.instance_identity import brand_label, brand_text, instance_key
 logger = logging.getLogger("bot.ai-reliability")
 _INSTALLED = False
 
-# 15 secondes était trop court pour GPT-5.6 Sol lorsqu'une commande demande du code
-# complet. La limite reste bornée afin qu'une panne réseau ne bloque jamais le bot.
-TEXT_TIMEOUT_SECONDS = 45.0
+# Les modèles à raisonnement peuvent légitimement dépasser une minute sur un problème
+# mathématique long. Le délai reste configurable et strictement borné : assez large pour
+# une vraie réponse, sans jamais laisser une connexion OpenAI immobiliser un worker.
+def _env_float(name: str, default: float, minimum: float, maximum: float) -> float:
+    try:
+        value = float(os.getenv(name, str(default)) or default)
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(maximum, value))
+
+
+TEXT_TIMEOUT_SECONDS = _env_float("SENTRIX_AI_TEXT_TIMEOUT", 120.0, 30.0, 180.0)
 
 
 def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
