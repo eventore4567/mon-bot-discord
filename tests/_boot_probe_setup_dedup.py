@@ -207,6 +207,38 @@ async def main():
         method == "DELETE" and path == role_path
         for method, path, data in h.CALLS[before:]
     )
+    # Reproduction du compte protégé : le retrait ordinaire reste interdit,
+    # mais le retrait explicite de sa réaction doit atteindre Discord.
+    from unittest.mock import patch
+
+    import cogs.owner_sanction_immunity as immunity
+
+    member = guild.get_member(h.SECOND_ID)
+    role = guild.get_role(h.PING_ROLE_ID)
+    with patch.object(
+        immunity,
+        "_is_protected",
+        side_effect=lambda target: getattr(target, "id", None) == h.SECOND_ID,
+    ):
+        before = len(h.CALLS)
+        await member.remove_roles(role, reason="Retrait rôle sur réaction")
+        assert not any(
+            method == "DELETE" and path == role_path
+            for method, path, data in h.CALLS[before:]
+        )
+        del payload.member  # Discord ne joint pas le membre sur un retrait brut.
+        await Verification(bot).on_raw_reaction_remove(payload)
+        assert any(
+            method == "DELETE" and path == role_path
+            for method, path, data in h.CALLS[before:]
+        )
+        before = len(h.CALLS)
+        await member.remove_roles(role)
+        assert not any(
+            method == "DELETE" and path == role_path
+            for method, path, data in h.CALLS[before:]
+        )
+
     before = len(h.CALLS)
     await wizard.publish(interaction(bot))
     assert not any(
@@ -264,7 +296,9 @@ async def main():
             for method, path, data in h.CALLS[before:]
         )
     for view in (home, wizard, composer, public):
-        assert isinstance(view.children[0].children[0], discord.ui.MediaGallery)
+        assert not any(
+            isinstance(i, discord.ui.MediaGallery) for i in view.walk_children()
+        )
     print(
         json.dumps(
             {

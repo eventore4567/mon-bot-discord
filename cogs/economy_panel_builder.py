@@ -7,7 +7,7 @@ import logging
 
 import discord
 
-from cogs.economy_setup import GOLD, AdminView, button, panel_header
+from cogs.economy_setup import GOLD, AdminView, button
 from utils.component_context import ComponentContext
 from utils.economy_settings import enabled_or_reply
 
@@ -35,7 +35,6 @@ class ActivityPublicView(discord.ui.LayoutView):
         super().__init__(timeout=None)
         self.bot, self.config = bot, config
         box = discord.ui.Container(accent_colour=GOLD)
-        panel_header(box)
         box.add_item(discord.ui.TextDisplay(f"## {config['title']}\n{config['text']}"))
         for group in ("Economy", "GamesRapides"):
             names = [
@@ -155,7 +154,6 @@ class EconomyPanelBuilder(AdminView):
     def build(self):
         self.clear_items()
         box = discord.ui.Container(accent_colour=GOLD)
-        panel_header(box)
         box.add_item(
             discord.ui.TextDisplay(
                 "## Créer un panneau\nChoisissez le contenu, personnalisez le texte puis publiez dans un salon."
@@ -310,7 +308,6 @@ class EconomyPanelBuilder(AdminView):
         self.busy = False
         self.clear_items()
         box = discord.ui.Container(accent_colour=GOLD)
-        panel_header(box)
         box.add_item(discord.ui.TextDisplay("## Panneau publié\n" + message.jump_url))
         self.add_item(box)
         await i.edit_original_response(view=self)
