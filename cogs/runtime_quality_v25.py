@@ -37,10 +37,10 @@ _CRITICAL_CONTRACTS: dict[str, tuple[str, ...]] = {
     # 04/11/2026 : /mute expose « notifier » (MP facultatif), comme /warn.
     "mute": ("membre", "duree", "raison", "notifier"),
     "tempban": ("membre", "duree", "raison"),
-    # 30/10/2026 : le choix de purge des messages est désormais interactif.
-    # /ban expose envoyer_mp pour le MP facultatif. Synchronisé avec
+    # Le choix de suppression est une option native du /ban, sans panneau ultérieur.
+    # Le MP reste facultatif. Synchronisé avec
     # tools/v25_quality_gate.py et les signatures réellement chargées.
-    "ban": ("membre", "raison", "envoyer_mp"),
+    "ban": ("membre", "raison", "envoyer_mp", "supprimer_messages"),
     "kick": ("membre", "raison"),
 }
 

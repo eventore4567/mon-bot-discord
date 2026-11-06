@@ -57,9 +57,10 @@ def test_le_constructeur_est_une_carte_v2_avec_les_menus_dedans():
     assert isinstance(carte, discord.ui.Container)
     assert carte.accent_colour is not None
     elements = [type(e.children[0]).__name__ for e in carte.children if isinstance(e, discord.ui.ActionRow)]
-    assert elements[:3] == ["BuilderRolePicker", "BuilderPresetSelect", "BuilderModeSelect"]
+    assert elements[:3] == ["BuilderRolePicker", "BuilderChannelPicker", "BuilderModeSelect"]
     texte = carte.children[0].content
-    assert "Panneau de rôles" in texte and "modèle" in texte
+    assert "Panneau de rôles" in texte and "modèle" not in texte
+    assert "salon de publication" in texte
     # « Créer le panneau » attend au moins un rôle.
     boutons = [e for e in carte.children if isinstance(e, discord.ui.ActionRow)][-1].children
     assert boutons[0].label == "Créer le panneau" and boutons[0].disabled

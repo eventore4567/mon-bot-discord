@@ -25,21 +25,38 @@ def _context():
 
 
 class BanPurgeUiTests(unittest.IsolatedAsyncioTestCase):
-    async def test_slash_ne_bannit_pas_avant_une_reponse(self):
+    async def test_slash_bannit_directement_sans_panneau_et_conserve_par_defaut(self):
         ctx, target = _context()
         cog = Moderation.__new__(Moderation)
         cog.bot = SimpleNamespace()
-        # La hiérarchie est contrôlée avant le panneau (test suivant).
         cog.check_targetable = AsyncMock(return_value=True)
-
+        cog._ack = AsyncMock()
+        cog._perform_ban = AsyncMock(return_value="success")
         await Moderation.ban.callback(cog, ctx, target, raison="spam", envoyer_mp=False)
+        ctx.send.assert_not_awaited()
+        cog._perform_ban.assert_awaited_once_with(ctx, target, "spam", delete_message_seconds=0, send_confirmation=True, envoyer_mp=False)
 
-        ctx.send.assert_awaited_once()
-        self.assertIs(ctx.send.await_args.kwargs["ephemeral"], True)
-        view = ctx.send.await_args.kwargs["view"]
-        self.assertIsInstance(view, _BanPurgeView)
-        self.assertIs(view.envoyer_mp, False)
-        self.assertEqual({b.label for b in view.children}, {"Oui", "Non", "Annuler"})
+    async def test_chaque_option_transmet_la_bonne_duree(self):
+        for choice,seconds in (("Conserver",0),("15 minutes",900),("1 heure",3600),("24 heures",86400)):
+            with self.subTest(choice=choice):
+                ctx,target=_context()
+                cog=Mock()
+                cog.check_targetable=AsyncMock(return_value=True)
+                cog._ack=AsyncMock()
+                cog._perform_ban=AsyncMock(return_value="success")
+                await Moderation.ban.callback(cog,ctx,target,supprimer_messages=choice)
+                self.assertEqual(cog._perform_ban.call_args.kwargs['delete_message_seconds'],seconds)
+                ctx.send.assert_not_awaited()
+
+    async def test_option_invalide_ne_lance_pas_le_ban(self):
+        ctx,target=_context()
+        cog=Mock()
+        cog.check_targetable=AsyncMock(return_value=True)
+        cog._reply=AsyncMock()
+        cog._perform_ban=AsyncMock()
+        await Moderation.ban.callback(cog,ctx,target,supprimer_messages="invalide")
+        cog._perform_ban.assert_not_awaited()
+        self.assertIn('Choisissez',cog._reply.call_args.args[1])
 
     async def test_cible_protegee_refusee_avant_le_panneau(self):
         ctx, target = _context()

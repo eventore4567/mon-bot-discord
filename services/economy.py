@@ -191,7 +191,7 @@ async def atomic_gamble(db, guild_id: int, user_id: int, amount: int, *, win: bo
             return "error"
 
 
-async def atomic_rob(db, guild_id: int, thief_id: int, victim_id: int) -> tuple[str, int]:
+async def atomic_rob(db, guild_id: int, thief_id: int, victim_id: int, *, success_chance: int = 40, fine: int | None = None) -> tuple[str, int]:
     """Tentative de vol atomique (verrou db._economy_lock), appelée directement
     par cogs/economy.py. Les vérifications ctx/Discord restent dans le cog. Retourne
     (statut, valeur) : "cooldown"/secondes_restantes, "poor"/0, "retry"/0,
@@ -236,7 +236,7 @@ async def atomic_rob(db, guild_id: int, thief_id: int, victim_id: int) -> tuple[
                 "UPDATE economy SET last_rob=? WHERE guild_id=? AND user_id=?",
                 (now_ts, guild_id, thief_id),
             )
-            if secrets.randbelow(100) < 40:
+            if secrets.randbelow(100) < max(5, min(90, int(success_chance))):
                 ceiling = min(target_cash, 300)
                 amount = 1 + secrets.randbelow(ceiling)
                 debit = await conn.execute(
@@ -259,7 +259,7 @@ async def atomic_rob(db, guild_id: int, thief_id: int, victim_id: int) -> tuple[
                 await conn.commit()
                 return "success", amount
 
-            requested = 20 + secrets.randbelow(81)
+            requested = 20 + secrets.randbelow(81) if fine is None else max(0, int(fine))
             penalty = safe_penalty(actor_cash, requested)
             if penalty:
                 await conn.execute(

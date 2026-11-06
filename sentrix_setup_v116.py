@@ -113,11 +113,12 @@ MODULES: tuple[ModuleSpec, ...] = (
         _s("import", "Importer des données", "Importer XP, niveaux et argent depuis un export JSON.", "import-data"),
     )),
     ModuleSpec("economy", "Économie", "Banque, monnaie, boutique, inventaire et réputation.", (
+        _s("settings", "Réglages économie", "Récompenses, métiers, intérêts, vol, boutique, jeux et panneau public.", "economy-setup"),
         _s("currency", "Monnaie", "Changer le nom et l'emoji, ou importer un emoji personnalisé.", "currency-config"),
-        _s("bank", "Banque", "Portefeuille et banque des membres.", "hint:+banque"),
-        _s("shop", "Boutique", "Objets, rôles et achats disponibles.", "hint:+shop"),
-        _s("inventory", "Inventaire", "Objets possédés et gestion des récompenses.", "hint:+inventory"),
-        _s("reputation", "Réputation", "Cooldown et affichage de la réputation.", "levels-config"),
+        _s("bank", "Banque", "Portefeuille et banque des membres.", "economy-setup"),
+        _s("shop", "Boutique", "Objets, rôles et achats disponibles.", "economy-setup"),
+        _s("inventory", "Inventaire", "Objets possédés et gestion des récompenses.", "economy-setup"),
+        _s("reputation", "Réputation", "Cooldown et affichage de la réputation.", "economy-setup"),
         _s("import", "Importer des données", "Importer les soldes, XP et niveaux depuis un autre bot.", "import-data"),
     )),
     ModuleSpec("tickets", "Tickets", "Panels, formulaires, permissions et logs.", (
@@ -131,7 +132,8 @@ MODULES: tuple[ModuleSpec, ...] = (
         _s("autorole", "Autorôle", "Rôle distribué automatiquement à l'arrivée.", "config:autorole"),
         _s("verification", "Vérification", "Rôle reçu après validation.", "verification"),
         _s("levels", "Rôles de niveau", "Paliers et rôles automatiques liés aux niveaux.", "levels-config"),
-        _s("reaction", "Rôles réactions", "Panels et rôles auto-attribuables.", "hint:+rolepanel"),
+        _s("reaction", "Panneau de rôles", "Choisir les rôles, le salon et publier un panneau de libre-service.", "role-panel"),
+        _s("reaction_manage", "Rôles par réaction", "Gérer les associations, les panneaux et leurs options.", "reaction-setup"),
     )),
     ModuleSpec("verification", "Vérification", "CAPTCHA, rôle, salon et panneau de validation.", (
         _s("role", "Rôle vérifié", "Choisir le rôle attribué après validation.", "verification"),
@@ -779,6 +781,27 @@ async def _run_action(view, interaction: discord.Interaction) -> None:
         return await _open_automation(view, interaction, action.split(":", 1)[1])
     elif action == "music-config":
         return await _open_music_config(view, interaction)
+    elif action in {"economy-setup", "reaction-setup"}:
+        if interaction.guild is None or not interaction.user.guild_permissions.administrator:
+            return await interaction.response.send_message("Permission Administrateur requise.", ephemeral=True)
+        if action == "economy-setup":
+            from cogs.economy_setup import EconomySetupView
+            subview = await EconomySetupView(view.bot, interaction.guild, interaction.user.id).build()
+        else:
+            from cogs.reaction_role_setup import ReactionRoleSetupView
+            subview = await ReactionRoleSetupView(view.bot, interaction.guild, interaction.user.id).build()
+        return await interaction.response.send_message(view=subview, ephemeral=True)
+    elif action == "role-panel":
+        from sentrix_regression_runtime import RolePanelBuilder
+        guild = interaction.guild
+        if guild is None or not interaction.user.guild_permissions.administrator:
+            return await interaction.response.send_message("Permission Administrateur requise.", ephemeral=True)
+        if guild.me is None or not guild.me.guild_permissions.manage_roles:
+            return await interaction.response.send_message("SentriX a besoin de la permission Gérer les rôles.", ephemeral=True)
+        builder = RolePanelBuilder(view.bot, guild, interaction.user.id)
+        await interaction.response.send_message(view=builder, ephemeral=True)
+        builder.message = await interaction.original_response()
+        return
     elif action == "games-config":
         return await _open_games_config(view, interaction)
     elif action == "verification-channel-access":

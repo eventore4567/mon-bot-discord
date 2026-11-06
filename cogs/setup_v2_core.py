@@ -536,6 +536,9 @@ async def set_module_enabled(
     # Invalidation immediate : couper un module doit prendre effet au message suivant,
     # pas au bout du TTL.
     invalidate_module_cache(guild_id, module)
+    if module == "economy":
+        from utils.economy_settings import sync_economy_switch
+        await sync_economy_switch(bot,guild_id,enabled,actor_id)
     if module == "ai":
         await bot.db.execute(
             "INSERT INTO ai_settings (guild_id,enabled,updated_at) VALUES (?,?,?) "
@@ -608,6 +611,8 @@ async def set_currency(
     # Le classement économique et les profils lisaient deux sources d'emojis
     # différentes. Synchroniser l'affichage sans toucher aux soldes.
     await bot.db.set_stats_settings(int(guild_id), {"economy_emoji": symbol})
+    from utils.economy_settings import invalidate
+    invalidate(bot, guild_id)
 
 
 async def get_role_command_decision(

@@ -29,6 +29,7 @@ _CONFIG_PERSISTENCE_MARKERS = (
     "self_role_panels",
     "self_role_items",
     "reaction_role",
+    "sentrix_economy_settings",
     "disabled_commands",
     "command_blocked_channels",
     "command_channel_blocks",

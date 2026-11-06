@@ -31,6 +31,7 @@ from utils import sentrix_panels as sx_panels
 from database.db import now
 from services import economy as economy_service
 from utils import economy_progress as progression
+from utils.economy_settings import get_economy_settings, enabled_or_reply
 
 DAILY_AMOUNT = 200
 WEEKLY_AMOUNT = 1000
@@ -70,6 +71,7 @@ def _self_assignable_role_error(guild: discord.Guild, role: discord.Role) -> str
         or permissions.ban_members
         or permissions.kick_members
         or permissions.moderate_members
+        or getattr(permissions, "mention_everyone", False)
         or permissions.manage_webhooks
     )
     if dangerous:
@@ -181,12 +183,17 @@ class Economy(commands.Cog, name="Economy"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
+    async def cog_check(self, ctx):
+        return await enabled_or_reply(self.bot, ctx)
+
     async def cog_load(self):
         # Un handler générique suffit pour tous les panneaux, même après redémarrage :
         # l'article choisi est toujours revérifié dans SQLite avant le débit.
         if not getattr(self.bot, "_sentrix_shop_view_registered", False):
             self.bot.add_view(ShopRoleView(persistent_handler=True))
             self.bot._sentrix_shop_view_registered = True
+        from cogs.economy_setup import EconomyPublicView
+        self.bot.add_view(EconomyPublicView(self.bot))
         self._shop_panel_refresh_task = asyncio.create_task(self._refresh_shop_panels_after_ready())
 
     async def cog_unload(self):
@@ -287,6 +294,7 @@ class Economy(commands.Cog, name="Economy"):
         classement et les gains récurrents rendent le chiffre lisible.
         """
         settings = await self.bot.db.get_stats_settings(ctx.guild.id)
+        economy_settings = await get_economy_settings(self.bot, ctx.guild.id)
         emoji = settings.get("economy_emoji", "🪙")
         stats = await stats_service.get_member_statistics(self.bot, ctx.guild, membre)
         nombre = stats_service.format_number
@@ -348,7 +356,7 @@ class Economy(commands.Cog, name="Economy"):
         if membre.id == ctx.author.id:
             try:
                 compte = await self.bot.db.get_balance(ctx.guild.id, membre.id)
-                for libelle, champ, delai in (("Daily", "last_daily", DAILY_COOLDOWN), ("Work", "last_work", WORK_COOLDOWN)):
+                for libelle, champ, delai in (("Daily", "last_daily", DAILY_COOLDOWN), ("Work", "last_work", int(economy_settings["work_cooldown"]))):
                     pret = int(compte[champ] or 0) + delai if compte else 0
                     carriere.append(sx_panels.Ligne(
                         f"`+{libelle.lower()}`", "✅ disponible" if pret <= time.time() else f"<t:{pret}:R>",
@@ -416,17 +424,23 @@ class Economy(commands.Cog, name="Economy"):
     )
     @app_commands.describe(membre="Le membre visé (optionnel)")
     async def balance(self, ctx: commands.Context, membre: discord.Member = None):
+        if not await enabled_or_reply(self.bot, ctx):
+            return
+        settings = await get_economy_settings(self.bot, ctx.guild.id)
         await self._send_balance(ctx, membre or ctx.author)
 
     @commands.hybrid_command(name="daily", description="Récupérer votre récompense quotidienne.")
     async def daily(self, ctx: commands.Context):
+        if not await enabled_or_reply(self.bot, ctx):
+            return
+        settings = await get_economy_settings(self.bot, ctx.guild.id)
         amount, boost = await temporary_boosts.apply_money_boost(
-            self.bot.db, ctx.guild.id, ctx.author.id, DAILY_AMOUNT
+            self.bot.db, ctx.guild.id, ctx.author.id, settings["daily_amount"]
         )
         # 07/11/2026 : 1 % d'intérêts sur la banque (plafonnés), versés avec le daily.
         try:
             compte = await self.bot.db.get_balance(ctx.guild.id, ctx.author.id)
-            interet = progression.interets(int(compte["bank"] or 0) if compte else 0)
+            interet = max(0, min(int(settings["interest_cap"]), int(int(compte["bank"] or 0) * float(settings["interest_rate"]))))
         except Exception:
             interet = 0
         ok, remaining = await self.bot.db.claim_timed_reward(
@@ -438,7 +452,7 @@ class Economy(commands.Cog, name="Economy"):
             )
         details = []
         if interet:
-            details.append(sx_panels.Ligne("Intérêts de la banque", f"+{stats_service.format_number(interet)} (1 %)"))
+            details.append(sx_panels.Ligne("Intérêts de la banque", f"+{stats_service.format_number(interet)} ({float(settings['interest_rate'])*100:g} %)"))
         # La série dans le MÊME panneau (avant : un second message à part).
         try:
             from cogs import community_v3
@@ -473,8 +487,11 @@ class Economy(commands.Cog, name="Economy"):
 
     @commands.hybrid_command(name="weekly", description="Récupérer votre récompense hebdomadaire.")
     async def weekly(self, ctx: commands.Context):
+        if not await enabled_or_reply(self.bot, ctx):
+            return
+        settings = await get_economy_settings(self.bot, ctx.guild.id)
         amount, boost = await temporary_boosts.apply_money_boost(
-            self.bot.db, ctx.guild.id, ctx.author.id, WEEKLY_AMOUNT
+            self.bot.db, ctx.guild.id, ctx.author.id, settings["weekly_amount"]
         )
         ok, remaining = await self.bot.db.claim_timed_reward(
             ctx.guild.id, ctx.author.id, "last_weekly", amount, WEEKLY_COOLDOWN, "weekly"
@@ -502,14 +519,20 @@ class Economy(commands.Cog, name="Economy"):
 
     @commands.hybrid_command(name="work", description="Travailler pour gagner de l'argent.")
     async def work(self, ctx: commands.Context):
+        if not await enabled_or_reply(self.bot, ctx):
+            return
+        settings = await get_economy_settings(self.bot, ctx.guild.id)
         # 07/11/2026 : vrai métier avec promotions, tâche du jour et événements.
         travaux = await progression.nombre_de_travaux(self.bot.db, ctx.guild.id, ctx.author.id)
         base_amount, evenement, metier, tache = progression.tirer_salaire(travaux)
+        if (settings["work_min"], settings["work_max"]) != (WORK_MIN, WORK_MAX):
+            base_amount = random.randint(int(settings["work_min"]), int(settings["work_max"]))
+        base_amount = max(1, int(base_amount * float(settings["salary_multiplier"])))
         amount, boost = await temporary_boosts.apply_money_boost(
             self.bot.db, ctx.guild.id, ctx.author.id, base_amount
         )
         ok, remaining = await self.bot.db.claim_timed_reward(
-            ctx.guild.id, ctx.author.id, "last_work", amount, WORK_COOLDOWN, "work"
+            ctx.guild.id, ctx.author.id, "last_work", amount, int(settings["work_cooldown"]), "work"
         )
         if not ok:
             return await self._panneau_attente(
@@ -537,7 +560,7 @@ class Economy(commands.Cog, name="Economy"):
             titre="Travail",
             resume=f"{ctx.author.mention} {tache}.",
             montant=amount,
-            cooldown=WORK_COOLDOWN,
+            cooldown=int(settings["work_cooldown"]),
             details=details,
         )
 
@@ -551,6 +574,9 @@ class Economy(commands.Cog, name="Economy"):
         if membre.bot:
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Vous ne pouvez pas voler un bot.')))
 
+        settings = await get_economy_settings(self.bot, ctx.guild.id)
+        if not settings['rob_enabled']:
+            return await ctx.send("Le vol est désactivé sur ce serveur.", ephemeral=True)
         # Source de vérité unique : transaction, cooldown, amende, journal et rollback
         # sont tous gérés dans services/economy.py. Aucun monkeypatch runtime nécessaire.
         kind, value = await economy_service.atomic_rob(
@@ -558,6 +584,7 @@ class Economy(commands.Cog, name="Economy"):
             ctx.guild.id,
             ctx.author.id,
             membre.id,
+            success_chance=int(settings["rob_success"]), fine=None if settings["rob_fine"] == -1 else int(settings["rob_fine"]),
         )
         if kind == "cooldown":
             minutes = max(1, (int(value) + 59) // 60)
@@ -812,6 +839,9 @@ class Economy(commands.Cog, name="Economy"):
         })
 
     async def handle_shop_selection(self, interaction: discord.Interaction, raw_item_id: str):
+        from utils.component_context import ComponentContext
+        if not await enabled_or_reply(self.bot, ComponentContext(self.bot, interaction)):
+            return
         if interaction.guild is None or not isinstance(interaction.user, discord.Member):
             return await interaction.response.send_message("Cette boutique fonctionne uniquement dans un serveur.", ephemeral=True)
         try:
@@ -1329,6 +1359,9 @@ class Economy(commands.Cog, name="Economy"):
             detail="Les soldes portefeuille et banque de tous les membres seront remis à zéro. L'historique d'audit reste conservé.",
         ):
             return
+        await self._reset_economy_confirmed(ctx)
+
+    async def _reset_economy_confirmed(self, ctx):
         await self.bot.db.execute("DELETE FROM economy WHERE guild_id = ?", (ctx.guild.id,))
         await journaliser(self.bot, ctx, "economy_grant", "💣 Économie réinitialisée", {
             "🗑️ Portée": "tous les soldes portefeuille et banque du serveur",

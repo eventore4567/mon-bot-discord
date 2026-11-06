@@ -210,7 +210,7 @@ async def explain_check_failure(bot, *, command: Any, author: Any, guild: Any) -
 
             cog_name = str(getattr(command, "cog_name", "") or "")
             if cog_name == "Economy" and not await is_system_enabled(bot.db, int(guild_id), "economy"):
-                return "Le **système d'argent est désactivé** sur ce serveur."
+                return "L'économie est désactivée sur ce serveur"
             if cog_name in {"Levels", "Stats"} and not await is_system_enabled(bot.db, int(guild_id), "levels"):
                 return "Le **système de niveaux est désactivé** sur ce serveur."
         except Exception:

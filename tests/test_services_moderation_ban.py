@@ -232,16 +232,16 @@ class PersistSanctionDirectTests(unittest.IsolatedAsyncioTestCase):
 class SlashOptionsContracts(unittest.TestCase):
     """Vérifie les vrais paramètres du slash de Discord, pas seulement la source."""
 
-    def test_ban_slash_asks_message_deletion_in_an_interactive_view(self):
-        from cogs.moderation import Moderation, _BanPurgeSelect
+    def test_ban_slash_offers_message_deletion_in_command_options(self):
+        from cogs.moderation import Moderation
 
         slash = Moderation.ban.app_command
         self.assertIsNotNone(slash)
         options = {parameter.name: parameter for parameter in slash.parameters}
-        self.assertEqual(set(options), {"membre", "raison", "envoyer_mp"})
+        self.assertEqual(set(options), {"membre", "raison", "envoyer_mp", "supprimer_messages"})
         self.assertIs(options["envoyer_mp"].default, True)
-        select = _BanPurgeSelect()
-        self.assertEqual([int(x.value) for x in select.options], [900, 3600, 86400])
+        self.assertEqual(options["supprimer_messages"].default, "Conserver")
+        self.assertEqual([x.value for x in options["supprimer_messages"].choices], ["Conserver", "15 minutes", "1 heure", "24 heures"])
 
     def test_warn_slash_has_boolean_notifier_default_true(self):
         from cogs.moderation import Moderation

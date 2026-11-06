@@ -768,8 +768,7 @@ def module_disabled_message(module: str) -> str:
     interrupteurs +economy-system / +level-system et du garde métier) : on le garde.
     """
     if module == "economy":
-        return ("Le **système d'argent est désactivé** sur ce serveur. "
-                "Un administrateur peut le réactiver dans `+setup` ou `/setup`.")
+        return "L'économie est désactivée sur ce serveur"
     if module == "levels":
         return ("Le **système de niveaux est désactivé** sur ce serveur. "
                 "Un administrateur peut le réactiver dans `+setup` ou `/setup`.")
