@@ -2001,19 +2001,9 @@ class AutoMod(commands.Cog, name="Automod"):
                     pass
             return "warn"
         suivi.reinitialiser(cle)
-        me = guild.me
-        if (
-            me is None or not me.guild_permissions.moderate_members
-            or member.id == guild.owner_id or member.top_role >= me.top_role
-        ):
-            return "mute_failed"
-        try:
-            log_service.mark_sanction(guild.id, member.id, "timeout")
-            await member.timeout(
-                discord.utils.utcnow() + timedelta(seconds=EVERYONE_MUTE_SECONDES),
-                reason="AutoMod : @everyone / @here répété (3 fois)",
-            )
-        except (discord.Forbidden, discord.HTTPException):
+        if await self._muter(
+            guild, member, EVERYONE_MUTE_SECONDES, "@everyone / @here répété (3 fois)"
+        ) == "mute_failed":
             return "mute_failed"
         await self._mp_sanction_automod(
             member, guild,
@@ -2627,37 +2617,14 @@ class AutoMod(commands.Cog, name="Automod"):
         duration = SPAM_MUTE_DURATIONS_SECONDS[
             min(stage - 3, len(SPAM_MUTE_DURATIONS_SECONDS) - 1)
         ]
-        me = guild.me
-        if (
-            me is None
-            or not me.guild_permissions.moderate_members
-            or member.id == guild.owner_id
-            or member.top_role >= me.top_role
-        ):
+        resultat = await self._muter(guild, member, duration, f"récidive spam niveau {stage} — {reason}")
+        if resultat == "mute_failed":
             return (
                 "mute_failed",
                 stage,
                 duration,
-                f"⚠️ spam répété détecté. Timeout prévu : {helpers.format_duration(duration)}, "
-                "mais SentriX n’a pas la permission ou la hiérarchie nécessaire.",
-            )
-
-        until = discord.utils.utcnow() + timedelta(seconds=duration)
-        current_timeout = member.timed_out_until
-        try:
-            if not current_timeout or current_timeout < until:
-                log_service.mark_sanction(guild.id, member.id, "timeout")
-                await member.timeout(
-                    until,
-                    reason=f"AutoMod : récidive spam niveau {stage} — {reason}",
-                )
-        except (discord.Forbidden, discord.HTTPException):
-            return (
-                "mute_failed",
-                stage,
-                duration,
-                f"⚠️ spam répété détecté. Timeout prévu : {helpers.format_duration(duration)}, "
-                "mais Discord a refusé la sanction.",
+                f"⚠️ spam répété : mute de {helpers.format_duration(duration)} impossible "
+                "(le propriétaire a été prévenu).",
             )
 
         await self._mp_sanction_automod(
@@ -3879,6 +3846,16 @@ class AutoMod(commands.Cog, name="Automod"):
                 logger.exception("Contrôle d'application externe en échec guild=%s", message.guild.id)
             return
         if message.author.bot or not message.guild:
+            return
+        # 07/11/2026 : « mute SentriX » — Discord a refusé le timeout (permission ou
+        # rôle trop bas) : SentriX retire lui-même les messages pendant la durée prévue.
+        if self._est_mute_sentrix(message.guild.id, message.author.id):
+            self._mark_xp_skip(message.id)
+            try:
+                log_service.mark_purged((message.id,))
+                await message.delete()
+            except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+                pass
             return
         # Le bypass admin s'applique AVANT la blacklist, le spam, l'anti-arnaque,
         # les insultes et toute détection qui pourrait supprimer un message.
@@ -5110,21 +5087,123 @@ class AutoMod(commands.Cog, name="Automod"):
         except Exception:
             logger.exception("Avertissement anti-spam groupé impossible salon=%s", getattr(channel, "id", None))
 
+    def _est_mute_sentrix(self, guild_id: int, user_id: int) -> bool:
+        mutes = self.__dict__.get("_mutes_sentrix")
+        if not mutes:
+            return False
+        fin = mutes.get((int(guild_id), int(user_id)))
+        if fin is None:
+            return False
+        if time.monotonic() >= fin:
+            mutes.pop((int(guild_id), int(user_id)), None)
+            return False
+        return True
+
+    async def _muter(self, guild: discord.Guild, member, secondes: int, raison: str) -> str:
+        """Mute par Discord, sinon « mute SentriX » : jamais un simple échec.
+
+        07/11/2026 : « s'il n'a pas la perm, ça sert à rien, il spamme des trucs dans
+        l'AutoMod ; qu'il trouve une solution à la place ». Si Discord refuse le timeout
+        (Modérer les membres absente, rôle de SentriX trop bas), SentriX supprime
+        lui-même chaque message du membre pendant la durée prévue, et prévient le
+        propriétaire UNE fois avec la marche à suivre. Rend "mute", "mute_sentrix",
+        ou "mute_failed" (seulement si même la suppression est impossible).
+        """
+        # Un discord.User (parti du serveur) n'a pas de timeout : rien à muter.
+        if not callable(getattr(member, "timeout", None)) or member.id == guild.owner_id:
+            return "mute_failed"
+        until = discord.utils.utcnow() + timedelta(seconds=int(secondes))
+        actuel = getattr(member, "timed_out_until", None)
+        if actuel and actuel >= until:
+            return "mute"
+        me = guild.me
+        cause = None
+        if me is None or not me.guild_permissions.moderate_members:
+            cause = "permission"
+        elif member.top_role >= me.top_role:
+            cause = "hierarchie"
+        else:
+            try:
+                log_service.mark_sanction(guild.id, member.id, "timeout")
+                await member.timeout(until, reason=f"AutoMod : {raison}"[:500])
+                return "mute"
+            except discord.Forbidden:
+                cause = "hierarchie"
+            except discord.HTTPException:
+                cause = "discord"
+        # Repli : SentriX retire lui-même les messages (Gérer les messages suffit).
+        if me is not None and not me.guild_permissions.manage_messages:
+            await self._alerter_permission_manquante(guild, "manage_messages")
+            return "mute_failed"
+        mutes = self.__dict__.setdefault("_mutes_sentrix", {})
+        if len(mutes) > 5000:
+            maintenant = time.monotonic()
+            for cle, fin in list(mutes.items()):
+                if fin <= maintenant:
+                    mutes.pop(cle, None)
+        mutes[(int(guild.id), int(member.id))] = time.monotonic() + int(secondes)
+        await self._alerter_permission_manquante(guild, cause, membre=member)
+        return "mute_sentrix"
+
+    async def _alerter_permission_manquante(self, guild: discord.Guild, cause: str, *, membre=None) -> None:
+        """UN MP au propriétaire par serveur et par cause toutes les 6 h (jamais de spam)."""
+        deja = self.__dict__.setdefault("_alertes_permissions", {})
+        cle = (int(guild.id), str(cause))
+        maintenant = time.monotonic()
+        if maintenant - deja.get(cle, -1e9) < 6 * 3600:
+            return
+        deja[cle] = maintenant
+        textes = {
+            "permission": (
+                "Il me manque **Modérer les membres** : je ne peux pas utiliser le mute de Discord.",
+                "Paramètres du serveur → Rôles → mon rôle → active **Modérer les membres**.",
+            ),
+            "hierarchie": (
+                f"Mon rôle est plus bas que celui de {getattr(membre, 'mention', 'ce membre')} : "
+                "Discord m'interdit de le muter, l'expulser ou le bannir.",
+                "Paramètres du serveur → Rôles → **glisse mon rôle tout en haut** de la liste.",
+            ),
+            "discord": (
+                "Discord a refusé le mute pour une raison technique.",
+                "Rien à faire pour l'instant ; si ça se répète, vérifie mon rôle et mes permissions.",
+            ),
+            "kick": (
+                "Il me manque **Expulser des membres** : je n'ai pas pu expulser les comptes du raid.",
+                "Paramètres du serveur → Rôles → mon rôle → active **Expulser** et **Bannir des membres**.",
+            ),
+            "manage_messages": (
+                "Il me manque **Gérer les messages** : je ne peux ni muter, ni supprimer les messages.",
+                "Paramètres du serveur → Rôles → mon rôle → active **Gérer les messages** "
+                "et **Modérer les membres**.",
+            ),
+        }
+        probleme, solution = textes.get(cause, textes["discord"])
+        repli = (
+            "En attendant, j'applique mon **propre mute** : je supprime automatiquement chaque "
+            "message du membre pendant la durée prévue."
+            if cause != "manage_messages" else "En attendant, je ne peux que prévenir."
+        )
+        vue = carte_securite_mp(
+            "Il me manque un droit pour sanctionner",
+            {"Statut": "Solution de repli appliquée" if cause != "manage_messages" else "Action impossible",
+             "Problème": probleme, "Solution": solution, "En attendant": repli},
+            serveur=getattr(guild, "name", ""), echec=cause == "manage_messages",
+        )
+        proprietaire = guild.owner
+        if proprietaire is None:
+            try:
+                proprietaire = await guild.fetch_member(guild.owner_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                return
+        try:
+            await _mp_vue(proprietaire, vue)
+        except (discord.Forbidden, discord.HTTPException):
+            pass
+
     async def _spam_timeout(self, guild: discord.Guild, member: discord.abc.User, reason: str) -> str | None:
         """Exclusion temporaire directe pour un incident de spam (une seule par incident)."""
-        if not isinstance(member, discord.Member):
-            return None
-        me = guild.me
-        if member.id == guild.owner_id or me is None or not me.guild_permissions.moderate_members or member.top_role >= me.top_role:
-            return None
-        until = discord.utils.utcnow() + timedelta(seconds=SPAM_TIMEOUT_SECONDS)
-        current = member.timed_out_until
-        if current and current > until:
-            return "mute"
-        try:
-            log_service.mark_sanction(guild.id, member.id, "timeout")
-            await member.timeout(until, reason=f"AutoMod : {reason}")
-        except (discord.Forbidden, discord.HTTPException):
+        resultat = await self._muter(guild, member, SPAM_TIMEOUT_SECONDS, reason)
+        if resultat == "mute_failed":
             return None
         await self._mp_sanction_automod(
             member, guild,
@@ -5277,33 +5356,23 @@ class AutoMod(commands.Cog, name="Automod"):
         timeout_applied = False
         timeout_status = "Impossible à appliquer : permission ou hiérarchie insuffisante."
         if isinstance(member, discord.Member):
-            me = message.guild.me
             until = discord.utils.utcnow() + timedelta(seconds=DATASET_TIMEOUT_SECONDS)
             current_timeout = member.timed_out_until
             if current_timeout and current_timeout > until:
                 timeout_applied = True
                 timeout_status = "Un timeout plus long était déjà actif; il a été conservé."
-            elif (
-                member.id != message.guild.owner_id
-                and me is not None
-                and me.guild_permissions.moderate_members
-                and member.top_role < me.top_role
-            ):
-                try:
-                    await member.timeout(
-                        until,
-                        reason="AutoMod : contenu offensant détecté par le filtre multilingue",
-                    )
+            elif member.id != message.guild.owner_id:
+                if await self._muter(
+                    message.guild, member, DATASET_TIMEOUT_SECONDS,
+                    "contenu offensant détecté par le filtre multilingue",
+                ) != "mute_failed":
                     timeout_applied = True
                     timeout_status = "Exclusion temporaire appliquée pendant 10 minutes."
-                except (discord.Forbidden, discord.HTTPException):
-                    pass
 
         public_status = (
             "Sanction : exclusion temporaire de 10 minutes."
             if timeout_applied
-            else "Le message a été bloqué, mais le bot n’a pas pu appliquer le mute. "
-                 "Vérifiez la permission Modérer les membres et la hiérarchie des rôles."
+            else "Le message a été bloqué."
         )
         try:
             # 07/11/2026 : « la bannière aux avertissements » — avertissement sans bannière.
@@ -5802,7 +5871,16 @@ class AutoMod(commands.Cog, name="Automod"):
                     await member.kick(reason=f"AutoMod anti-nuke : {reason}")
                     action_taken = "expulsé du serveur (le bot n'a pas la permission de bannir)"
                 except discord.Forbidden:
-                    action_taken = "rôles à risque retirés, mais impossible de le sanctionner davantage (permissions insuffisantes)"
+                    # 07/11/2026 : plutôt qu'un échec, la solution de repli : SentriX
+                    # supprime lui-même ses messages pendant 24 h et prévient le propriétaire.
+                    repli = await self._muter(guild, member, 86400, f"anti-nuke — {reason}")
+                    action_taken = (
+                        "rôles à risque retirés et messages bloqués 24 h par SentriX "
+                        "(Discord refuse le ban : rôle de SentriX trop bas)"
+                        if repli != "mute_failed"
+                        else "rôles à risque retirés, mais impossible de le sanctionner davantage (permissions insuffisantes)"
+                    )
+                    await self._alerter_permission_manquante(guild, "hierarchie", membre=member)
         echec = "impossible de le sanctionner" in str(action_taken)
         regle = f"Plus de {NUKE_ACTION_THRESHOLD - 1} actions destructrices en peu de temps"
         await self._journal_securite(
