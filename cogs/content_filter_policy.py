@@ -82,6 +82,7 @@ def _patch_automod(bot: commands.Bot) -> None:
     # listener historique.
     original_delete_and_warn = automod._delete_and_warn
     original_maybe_escalate = automod._maybe_escalate
+    original_delete_and_timeout = automod._delete_and_timeout
     # `automod` ci-dessus est l'INSTANCE du cog ; le seuil d'abus est une
     # constante de module. On importe le module sous un nom distinct pour
     # que la différence saute aux yeux au lieu de produire une AttributeError.
@@ -106,7 +107,11 @@ def _patch_automod(bot: commands.Bot) -> None:
         filter_name: str = "automod",
         *,
         censored_content: str | None = None,
+        **options,
     ):
+        # 07/11/2026 : `allow_escalation` (insultes probables) faisait planter cet
+        # enrobage — TypeError, et l'insulte n'était ni supprimée ni sanctionnée.
+        # Toute option est désormais transmise telle quelle.
         if (
             message.guild is not None
             and message.author.id == message.guild.owner_id
@@ -118,6 +123,7 @@ def _patch_automod(bot: commands.Bot) -> None:
             reason,
             filter_name,
             censored_content=censored_content,
+            **options,
         )
 
     automod._delete_and_warn = MethodType(owner_safe_delete_and_warn, automod)
@@ -192,13 +198,36 @@ def _patch_automod(bot: commands.Bot) -> None:
         ):
             return None
         detail = reason or "Contenu offensant détecté par le filtre multilingue."
-        return await _self._delete_and_warn(message, detail, "multilingual_toxicity")
+        # 07/11/2026 : « des fois il n'avertit pas, pas bien du tout ». Une insulte
+        # confirmée n'était jamais sanctionnée. Désormais : 1re fois suppression +
+        # avertissement ; récidive dans l'heure, mute de 10 minutes.
+        if message.guild is not None and message.author.id != message.guild.owner_id:
+            import time as _time
+
+            suivi = _self.__dict__.setdefault("_insultes_confirmees", {})
+            cle = (int(message.guild.id), int(message.author.id))
+            maintenant = _time.monotonic()
+            recents = [t for t in suivi.get(cle, ()) if maintenant - t < INSULTE_FENETRE]
+            recents.append(maintenant)
+            suivi[cle] = recents
+            if len(suivi) > 5000:
+                suivi.clear()
+            if len(recents) >= 2:
+                suivi.pop(cle, None)
+                return await original_delete_and_timeout(message, detail, detection_kind=detection_kind)
+        return await _self._delete_and_warn(
+            message, f"{detail} Avertissement : la prochaine fois, c'est le mute.", "multilingual_toxicity",
+        )
 
     automod._delete_and_timeout = MethodType(delete_only_toxicity, automod)
 
     logger.info(
         "Politique contenu activée : immunité propriétaire pilotable, filtres suppression seule sauf propriétaire immunité OFF, anti-nuke inchangé."
     )
+
+
+#: Fenêtre de récidive des insultes confirmées (1re : avertissement, 2e : mute).
+INSULTE_FENETRE = 3600
 
 
 def install(bot: commands.Bot) -> None:

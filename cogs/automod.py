@@ -41,7 +41,7 @@ import re
 import time
 import unicodedata
 from dataclasses import dataclass, field as _champ
-from datetime import timedelta
+from datetime import datetime, timedelta
 from urllib.parse import urlsplit
 
 import discord
@@ -588,6 +588,8 @@ SPAM_ESCALATION_RESET_SECONDS = 3600
 #: reçoit un « dernier avertissement » (« s'il spam juste après l'avertissement,
 #: c'est mute » — 05/11/2026).
 SPAM_GRACE_APRES_AVERTISSEMENT = 20.0
+#: 07/11/2026 : un membre présent depuis 24 h voit sa 1re rafale laissée (rappel seul).
+SPAM_ETABLI_SECONDES = 86400
 #: @everyone ou 5 personnes différentes dans UN message : signature de raid,
 #: mute immédiat. Les pings répétés, eux, suivent avertissement puis mute.
 MOTIF_MENTION_MASSIVE = "Mention massive détectée."
@@ -642,6 +644,48 @@ def carte_mp_simple(titre: str, texte: str, couleur: int):
     carte.add_item(discord.ui.TextDisplay(f"### {titre}"[:3900]))
     carte.add_item(discord.ui.Separator())
     carte.add_item(discord.ui.TextDisplay(texte[:3900]))
+    vue.add_item(carte)
+    try:
+        from utils import sentrix_emojis
+
+        sentrix_emojis.appliquer_a_la_vue(vue)
+    except Exception:  # noqa: BLE001 — habillage seulement
+        pass
+    return vue
+
+
+#: Icône de chaque ligne de la carte de sécurité envoyée en MP.
+_ICONES_SECURITE = {
+    "Statut": "📍", "Compte": "👤", "Protection": "🛡️", "Règle": "📏", "Motif": "📝",
+    "Date": "🕒", "Action": "⚡",
+}
+
+
+def carte_securite_mp(titre: str, champs: dict, *, serveur: str = "", echec: bool = False):
+    """Carte de sécurité en MP (07/11/2026 : « toujours cette bannière » en bas, « plus
+    propre, plus de couleur, bien mise »). Liseré rouge (échec) ou orange (réussite),
+    en-tête, statut en évidence, puis une ligne par information — aucune bannière."""
+    couleur = 0xED4245 if echec else 0xF0A020
+    vue = discord.ui.LayoutView(timeout=None)
+    carte = discord.ui.Container(accent_colour=discord.Colour(couleur))
+    entete = f"## 🚨 {titre}"
+    if serveur:
+        entete += f"\n-# Sur **{serveur}**"
+    carte.add_item(discord.ui.TextDisplay(entete[:3900]))
+    statut = str(champs.get("Statut") or "")
+    if statut:
+        puce = "🔴" if echec else "🟢"
+        carte.add_item(discord.ui.TextDisplay(f"> {puce} **{statut}**"[:3900]))
+    carte.add_item(discord.ui.Separator())
+    lignes = [
+        f"{_ICONES_SECURITE.get(nom, '▫️')} **{nom}** · {valeur}"
+        for nom, valeur in champs.items()
+        if nom != "Statut" and str(valeur or "").strip()
+    ]
+    if lignes:
+        carte.add_item(discord.ui.TextDisplay("\n".join(lignes)[:3900]))
+    carte.add_item(discord.ui.Separator())
+    carte.add_item(discord.ui.TextDisplay("-# 🛡️ SentriX · Sécurité — rien à faire si c'était prévu."))
     vue.add_item(carte)
     try:
         from utils import sentrix_emojis
@@ -4149,7 +4193,15 @@ class AutoMod(commands.Cog, name="Automod"):
                     if m is not None and m is not message
                 ]
                 self.spam_tracker.reinitialiser(key)
-                earlier = self._delete_burst(message.guild.id, burst)
+                # 07/11/2026 : « qu'il ne supprime pas les messages au premier
+                # avertissement ». 1re rafale : rappel seul, messages laissés ; la suite
+                # (récidive, messages après le rappel) est supprimée comme avant.
+                if self._premier_rappel_spam(message):
+                    self._spam_garder().add(int(message.id))
+                    self._noter_laisses(message.guild.id, [*burst, message])
+                    earlier = []
+                else:
+                    earlier = self._delete_burst(message.guild.id, burst)
                 result = await self._delete_and_warn(message, "Spam de messages détecté.", "antispam")
                 incident = self.incidents.get(key)
                 if incident is not None and earlier:
@@ -4280,11 +4332,17 @@ class AutoMod(commands.Cog, name="Automod"):
         au 3e incident en 10 minutes. Discord interdit de muter un administrateur :
         la sanction retire ses rôles à risque et prévient le propriétaire.
         """
+        # 07/11/2026 : les mentions d'un admin (@everyone compris) ont leur propre règle
+        # (_everyone_d_un_admin) ; comptées comme du spam, elles étaient supprimées.
+        if filter_name == "antimention":
+            return
         famille = "spam" if filter_name in SPAM_FILTERS else self._canonical_security_filter(filter_name)
         seuil = ADMIN_SEUILS.get(famille)
         if seuil is None:
             return
-        if famille in {"spam", "antiscam"}:
+        # Arnaque : supprimée tout de suite (compte probablement piraté). Spam et
+        # invitations d'un admin : rien n'est supprimé avant la sanction.
+        if famille == "antiscam":
             try:
                 await message.delete()
             except (discord.Forbidden, discord.NotFound, discord.HTTPException):
@@ -4311,7 +4369,7 @@ class AutoMod(commands.Cog, name="Automod"):
                     pass
             return
         suivi.reinitialiser(cle)
-        if famille == "antiinvite":
+        if famille in {"antiinvite", "spam"}:
             try:
                 await message.delete()
             except (discord.Forbidden, discord.NotFound, discord.HTTPException):
@@ -4423,6 +4481,8 @@ class AutoMod(commands.Cog, name="Automod"):
             jusqua = self._renfort_jusqua = {}
         deja = self._renfort_actif(guild.id)
         jusqua[guild.id] = time.monotonic() + spam_sensitivity.RENFORT_SECONDES
+        # Raid révélé : les messages laissés au 1er rappel partent aussi.
+        self._supprimer_laisses(guild.id)
         if not deja:
             asyncio.create_task(self._annoncer_renfort(guild, distincts, raid))
 
@@ -4449,6 +4509,66 @@ class AutoMod(commands.Cog, name="Automod"):
             await helpers.send_log(self.bot, guild, "spam_boost", carte)
         except Exception:
             logger.exception("Annonce du renfort anti-raid impossible guild=%s", guild.id)
+
+    def _spam_garder(self) -> set:
+        """Messages de la 1re rafale à laisser visibles (rappel sans suppression)."""
+        garder = self.__dict__.setdefault("_spam_messages_gardes", set())
+        if len(garder) > 2000:
+            garder.clear()
+        return garder
+
+    def _noter_laisses(self, guild_id: int, messages: list) -> None:
+        """Retient les messages laissés au 1er rappel : si un raid se révèle ensuite
+        (renfort anti-raid), ils sont supprimés après coup."""
+        laisses = self.__dict__.setdefault("_spam_laisses", {})
+        maintenant = time.monotonic()
+        liste = [
+            (t, m) for t, m in laisses.get(int(guild_id), [])
+            if maintenant - t < spam_sensitivity.RENFORT_FENETRE
+        ]
+        liste.extend((maintenant, m) for m in messages if m is not None)
+        laisses[int(guild_id)] = liste[-300:]
+        if len(laisses) > 500:
+            laisses.clear()
+
+    def _supprimer_laisses(self, guild_id: int) -> None:
+        for _, earlier in self.__dict__.get("_spam_laisses", {}).pop(int(guild_id), []):
+            self._mark_xp_skip(earlier.id)
+            log_service.mark_purged((earlier.id,))
+            asyncio.ensure_future(self._purge_queue().supprimer(earlier))
+
+    def _premier_rappel_spam(self, message) -> bool:
+        """Vrai pour la 1re rafale d'un membre ÉTABLI dans l'heure (ou toute rafale d'un
+        admin, dont les messages ne partent qu'à la sanction).
+
+        Jamais pendant un renfort anti-raid ni pour un compte arrivé depuis moins de
+        SPAM_ETABLI_SECONDES : un raid reste nettoyé entièrement dès le 1er message.
+        """
+        try:
+            if _is_discord_administrator(_as_member(message.author, message.guild)):
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            if self._renfort_actif(message.guild.id):
+                return False
+        except Exception:  # noqa: BLE001
+            pass
+        arrivee = getattr(message.author, "joined_at", None)
+        if not isinstance(arrivee, datetime):
+            return False
+        if (discord.utils.utcnow() - arrivee).total_seconds() < SPAM_ETABLI_SECONDES:
+            return False
+        cle = (int(message.guild.id), int(message.author.id))
+        rappels = self.__dict__.setdefault("_spam_rappels", {})
+        maintenant = time.monotonic()
+        precedent = rappels.get(cle)
+        if precedent is not None and maintenant - precedent < SPAM_ESCALATION_RESET_SECONDS:
+            return False
+        if len(rappels) > 5000:
+            rappels.clear()
+        rappels[cle] = maintenant
+        return True
 
     def _purge_queue(self) -> SuppressionsGroupees:
         """Suppressions regroupées par salon : sous une rafale de plusieurs spammeurs,
@@ -4708,7 +4828,14 @@ class AutoMod(commands.Cog, name="Automod"):
             # de carte « Message supprimé » par message en plus — mesuré : 242 cartes
             # pour une vague de 20 spammeurs. Même règle que +clear.
             log_service.mark_purged((message.id,))
-        deletion = asyncio.ensure_future(self._purge_queue().supprimer(message))
+        garder = self.__dict__.get("_spam_messages_gardes")
+        message_garde = bool(garder and int(getattr(message, "id", 0) or 0) in garder)
+        if message_garde:
+            garder.discard(int(message.id))
+            deletion = asyncio.get_running_loop().create_future()
+            deletion.set_result(None)  # laissé exprès : ni « supprimé » ni « refusé »
+        else:
+            deletion = asyncio.ensure_future(self._purge_queue().supprimer(message))
 
         async def finish_deletion() -> None:
             # Republication contrôlée SentriX : seulement APRÈS suppression réussie, et
@@ -4741,6 +4868,7 @@ class AutoMod(commands.Cog, name="Automod"):
             message_preview=_automod_message_preview(message),
             message_id=int(getattr(message, "id", 0) or 0),
             raw_content=_contenu_brut(message),
+            deleted=0 if message_garde else 1,
         )
         self.incidents[key] = incident
         if filter_name in SPAM_FILTERS:
@@ -4766,7 +4894,8 @@ class AutoMod(commands.Cog, name="Automod"):
                 logger.exception("Timeout %s impossible guild=%s user=%s", filter_name, message.guild.id, message.author.id)
         await finish_deletion()
         if deletion.done() and not deletion.cancelled() and deletion.exception() is None:
-            incident.deleted_ok = bool(deletion.result())
+            resultat = deletion.result()
+            incident.deleted_ok = None if resultat is None else bool(resultat)
 
         await self._record_incident_trace(message, incident)
         try:
@@ -5642,15 +5771,32 @@ class AutoMod(commands.Cog, name="Automod"):
                     action_taken = "expulsé du serveur (le bot n'a pas la permission de bannir)"
                 except discord.Forbidden:
                     action_taken = "rôles à risque retirés, mais impossible de le sanctionner davantage (permissions insuffisantes)"
-        e = await self._journal_securite(
+        echec = "impossible de le sanctionner" in str(action_taken)
+        regle = f"Plus de {NUKE_ACTION_THRESHOLD - 1} actions destructrices en peu de temps"
+        await self._journal_securite(
             guild, titre="Anti-nuke déclenché", auteur=member or actor_id, protection="Anti-nuke",
-            regle=f"Plus de {NUKE_ACTION_THRESHOLD - 1} actions destructrices en peu de temps", motif=reason,
-            action=f"Auteur {action_taken}", echec="impossible de le sanctionner" in str(action_taken),
+            regle=regle, motif=reason, action=f"Auteur {action_taken}", echec=echec,
+        )
+        # 07/11/2026 : le MP passait par depuis_embed, dont la bannière s'affichait
+        # en pièce jointe SOUS la carte. Carte dédiée, colorée, sans bannière.
+        maintenant = int(time.time())
+        vue = carte_securite_mp(
+            "Anti-nuke déclenché",
+            {
+                "Statut": "Échec — sanction impossible" if echec else "Serveur protégé",
+                "Compte": f"<@{actor_id}> · `{actor_id}`",
+                "Règle": regle,
+                "Motif": reason,
+                "Action": f"Auteur {action_taken}",
+                "Date": f"<t:{maintenant}:F> · <t:{maintenant}:R>",
+            },
+            serveur=getattr(guild, "name", ""),
+            echec=echec,
         )
         try:
             owner = guild.owner or await guild.fetch_member(guild.owner_id)
             if owner:
-                await panels.envoyer(owner, panels.depuis_embed(e))
+                await _mp_vue(owner, vue)
         except (discord.Forbidden, discord.HTTPException, AttributeError):
             pass
 

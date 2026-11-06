@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -71,6 +72,7 @@ def _member() -> Mock:
     member.guild = guild
     member.top_role = 1
     member.timed_out_until = None
+    member.joined_at = discord.utils.utcnow() - timedelta(days=30)
     member.timeout = AsyncMock()
     member.roles = []
     member.guild_permissions = Mock(administrator=False, manage_guild=False)
@@ -127,10 +129,13 @@ async def test_une_rafale_de_30_messages_produit_une_seule_sanction_un_avertisse
     assert member.timeout.await_count == 0
     assert court.await_count == 1
     assert cog.log_action.await_count == 1
-    # Toute la rafale disparaît, y compris les messages d'avant le déclenchement.
-    assert sum(1 for m in messages if m.delete.await_count) == 30
+    # 07/11/2026 : « pas de suppression au premier avertissement ». Les messages qui
+    # déclenchent le rappel restent ; tout ce qui suit le rappel est supprimé.
+    supprimes = [m.delete.await_count > 0 for m in messages]
+    premiers = supprimes.index(True)
+    assert premiers >= 1 and not any(supprimes[:premiers]) and all(supprimes[premiers:])
     fields = {f.name: f.value for f in cog.log_action.await_args.args[1].fields}
-    assert fields["Messages supprimés"] == "30", fields
+    assert fields["Messages supprimés"] == str(30 - premiers), fields
     assert fields["Niveau anti-spam"] == "1"
     note = court.await_args.args[1]
     assert "<@7>" in note and "spam" in note

@@ -1021,7 +1021,12 @@ def _patch_punishment(bot: commands.Bot) -> None:
                     )
 
             try:
-                automod.nuke_tracker[(guild.id, int(actor_id))] = []
+                # Le suivi est une FenetreGlissante (plus un dict) depuis le 04/11.
+                cle = (guild.id, int(actor_id))
+                if hasattr(automod.nuke_tracker, "reinitialiser"):
+                    automod.nuke_tracker.reinitialiser(cle)
+                else:
+                    automod.nuke_tracker[cle] = []
             except Exception:
                 logger.warning("Étape non critique ignorée dans punish_v55", exc_info=True)
 

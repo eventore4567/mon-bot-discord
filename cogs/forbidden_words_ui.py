@@ -53,13 +53,17 @@ class ForbiddenWordsUI(commands.Cog):
             filter_name: str = "automod",
             *,
             censored_content: str | None = None,
+            **options,
         ):
+            # 07/11/2026 : les options (allow_escalation…) sont transmises — sans
+            # elles, une insulte probable plantait ici et n'était jamais avertie.
             if filter_name != "blacklist_word":
                 return await original_delete_and_warn(
                     message,
                     reason,
                     filter_name,
                     censored_content=censored_content,
+                    **options,
                 )
 
             from cogs import automod as automod_module

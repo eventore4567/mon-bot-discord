@@ -29,6 +29,15 @@ MESSAGE_MAX = 150
 MOT_MAX = 60
 MOTS_MAX = 1000
 RAISON = "SentriX : mots bloqués configurés dans /setup"
+#: 07/11/2026 : « la possibilité aussi dans mots interdits pour les liens ».
+#: Une règle de liens bloque toute adresse web et toute invitation Discord avant
+#: l'envoi ; les sites listés restent autorisés (liste d'autorisation Discord).
+MOTIFS_LIENS = [
+    r"(?i)\bhttps?://\S+",
+    r"(?i)\b(?:www\.)\S+",
+    r"(?i)\bdiscord(?:app)?\.(?:gg|com/invite)/\S+",
+]
+SITES_MAX = 100
 
 
 def lire_mots(texte: str) -> list[str]:
@@ -65,6 +74,37 @@ def mots_de(regle) -> list[str]:
     return list(getattr(getattr(regle, "trigger", None), "keyword_filter", None) or [])
 
 
+def est_regle_liens(regle) -> bool:
+    return bool(getattr(getattr(regle, "trigger", None), "regex_patterns", None))
+
+
+def sites_de(regle) -> list[str]:
+    return list(getattr(getattr(regle, "trigger", None), "allow_list", None) or [])
+
+
+def lire_sites(texte: str) -> list[str]:
+    """« youtube.com, tenor.com » -> ['*youtube.com*', '*tenor.com*'] (forme Discord)."""
+    sites = []
+    for mot in lire_mots(texte):
+        mot = re.sub(r"^https?://", "", mot).strip("*/ ")
+        if mot and f"*{mot}*" not in sites:
+            sites.append(f"*{mot}*")
+    return sites[:SITES_MAX]
+
+
+def resume(regle) -> str:
+    if est_regle_liens(regle):
+        sites = ", ".join(s.strip("*") for s in sites_de(regle))
+        return f"Liens bloqués (autorisés : {sites or 'aucun site'})"
+    return ", ".join(mots_de(regle))
+
+
+def declencheur(mots: list[str] | None = None, *, liens: bool = False, sites: list[str] | None = None):
+    if liens:
+        return discord.AutoModTrigger(regex_patterns=list(MOTIFS_LIENS), allow_list=list(sites or []))
+    return discord.AutoModTrigger(keyword_filter=list(mots or []))
+
+
 def message_de(regle) -> str:
     for action in getattr(regle, "actions", None) or ():
         texte = getattr(action, "custom_message", None)
@@ -73,7 +113,10 @@ def message_de(regle) -> str:
     return ""
 
 
-async def creer(guild: discord.Guild, mots: list[str], message: str) -> discord.AutoModRule:
+async def creer(
+    guild: discord.Guild, mots: list[str], message: str, *, liens: bool = False,
+    sites: list[str] | None = None,
+) -> discord.AutoModRule:
     existantes = await lister(guild)
     if len(existantes) >= MAX_REGLES:
         raise ValueError(f"Discord limite à {MAX_REGLES} règles de mots bloqués.")
@@ -82,11 +125,103 @@ async def creer(guild: discord.Guild, mots: list[str], message: str) -> discord.
     return await guild.create_automod_rule(
         name=f"{PREFIXE} {numero}",
         event_type=discord.AutoModRuleEventType.message_send,
-        trigger=discord.AutoModTrigger(keyword_filter=mots),
+        trigger=declencheur(mots, liens=liens, sites=sites),
         actions=[discord.AutoModRuleAction(custom_message=message[:MESSAGE_MAX] or None)],
         enabled=True,
         reason=RAISON,
     )
+
+
+async def modifier(regle, *, mots: list[str] | None = None, message: str = "",
+                   sites: list[str] | None = None):
+    """Remplace les mots (ou les sites autorisés d'une règle de liens) et le message."""
+    liens = est_regle_liens(regle)
+    return await regle.edit(
+        trigger=declencheur(mots, liens=liens, sites=sites),
+        actions=[discord.AutoModRuleAction(custom_message=message[:MESSAGE_MAX] or None)],
+        reason=RAISON,
+    )
+
+
+async def _repondre_erreur(interaction: discord.Interaction, exc: Exception, guild_id: int) -> None:
+    if isinstance(exc, ValueError):
+        texte = str(exc)
+    elif isinstance(exc, discord.Forbidden):
+        texte = "Il me faut la permission **Gérer le serveur** pour modifier les règles."
+    else:
+        logger.warning("Règle de mots bloqués refusée guild=%s : %s", guild_id, exc)
+        texte = "Discord a refusé la règle (limite de règles atteinte ou mot invalide)."
+    await interaction.response.send_message(texte, ephemeral=True)
+
+
+class LiensModal(discord.ui.Modal, title="Bloquer les liens"):
+    sites = discord.ui.TextInput(
+        label="Sites autorisés (facultatif, séparés par ,)",
+        placeholder="youtube.com, tenor.com, twitch.tv",
+        style=discord.TextStyle.paragraph,
+        max_length=2000,
+        required=False,
+    )
+    message = discord.ui.TextInput(
+        label="Message affiché à la personne",
+        placeholder="Les liens sont interdits ici, merci d'utiliser le salon #pub.",
+        max_length=MESSAGE_MAX,
+        required=False,
+    )
+
+    def __init__(self, owner: "MotsBloquesView", regle=None):
+        super().__init__(title="Modifier le blocage des liens" if regle is not None else "Bloquer les liens")
+        self.owner = owner
+        self.regle = regle
+        if regle is not None:
+            self.sites.default = ", ".join(s.strip("*") for s in sites_de(regle))[:2000]
+            self.message.default = message_de(regle)[:MESSAGE_MAX]
+
+    async def on_submit(self, interaction: discord.Interaction):
+        sites = lire_sites(self.sites.value)
+        message = str(self.message.value or "").strip()
+        try:
+            if self.regle is not None:
+                await modifier(self.regle, message=message, sites=sites)
+            else:
+                await creer(self.owner.guild, [], message, liens=True, sites=sites)
+        except (ValueError, discord.HTTPException) as exc:
+            return await _repondre_erreur(interaction, exc, self.owner.guild.id)
+        await self.owner.rafraichir(interaction)
+
+
+class ModifierModal(discord.ui.Modal, title="Modifier la règle"):
+    """Mots pré-remplis : on en ajoute, on en retire, on change le message."""
+
+    mots = discord.ui.TextInput(
+        label="Mots-clés (retirez ou ajoutez, séparés par ,)",
+        style=discord.TextStyle.paragraph,
+        max_length=4000,
+    )
+    message = discord.ui.TextInput(
+        label="Message affiché à la personne",
+        max_length=MESSAGE_MAX,
+        required=False,
+    )
+
+    def __init__(self, owner: "MotsBloquesView", regle):
+        super().__init__()
+        self.owner = owner
+        self.regle = regle
+        self.mots.default = ", ".join(mots_de(regle))[:4000]
+        self.message.default = message_de(regle)[:MESSAGE_MAX]
+
+    async def on_submit(self, interaction: discord.Interaction):
+        mots = lire_mots(self.mots.value)
+        if not mots:
+            return await interaction.response.send_message(
+                "Gardez au moins un mot-clé, ou supprimez la règle.", ephemeral=True,
+            )
+        try:
+            await modifier(self.regle, mots=mots, message=str(self.message.value or "").strip())
+        except (ValueError, discord.HTTPException) as exc:
+            return await _repondre_erreur(interaction, exc, self.owner.guild.id)
+        await self.owner.rafraichir(interaction)
 
 
 class AjoutModal(discord.ui.Modal, title="Mots bloqués — nouvelle règle"):
@@ -113,17 +248,8 @@ class AjoutModal(discord.ui.Modal, title="Mots bloqués — nouvelle règle"):
             return await interaction.response.send_message("Écrivez au moins un mot-clé.", ephemeral=True)
         try:
             await creer(self.owner.guild, mots, str(self.message.value or "").strip())
-        except ValueError as exc:
-            return await interaction.response.send_message(str(exc), ephemeral=True)
-        except discord.Forbidden:
-            return await interaction.response.send_message(
-                "Il me faut la permission **Gérer le serveur** pour créer la règle.", ephemeral=True,
-            )
-        except discord.HTTPException as exc:
-            logger.warning("Règle de mots bloqués refusée guild=%s : %s", self.owner.guild.id, exc)
-            return await interaction.response.send_message(
-                "Discord a refusé la règle (limite de règles atteinte ou mot invalide).", ephemeral=True,
-            )
+        except (ValueError, discord.HTTPException) as exc:
+            return await _repondre_erreur(interaction, exc, self.owner.guild.id)
         await self.owner.rafraichir(interaction)
 
 
@@ -147,12 +273,16 @@ class MotsBloquesView(discord.ui.View):
         ajouter.callback = self._ajouter
         ajouter.disabled = len(self.regles) >= MAX_REGLES
         self.add_item(ajouter)
+        liens = discord.ui.Button(label="Bloquer les liens", style=discord.ButtonStyle.primary, row=0)
+        liens.callback = self._liens
+        liens.disabled = len(self.regles) >= MAX_REGLES or any(est_regle_liens(r) for r in self.regles)
+        self.add_item(liens)
         if self.regles:
             choix = discord.ui.Select(
                 placeholder="Choisir une règle à modifier",
                 options=[
                     discord.SelectOption(
-                        label=f"Règle {_numero(r.name)} : {', '.join(mots_de(r))}"[:100],
+                        label=f"Règle {_numero(r.name)} : {resume(r)}"[:100],
                         value=str(r.id), default=r.id == self.choisie,
                     )
                     for r in self.regles
@@ -170,6 +300,12 @@ class MotsBloquesView(discord.ui.View):
             )
             salons.callback = self._salons
             self.add_item(salons)
+            changer = discord.ui.Button(
+                label="Modifier les sites autorisés" if est_regle_liens(regle) else "Modifier les mots",
+                style=discord.ButtonStyle.primary, row=3,
+            )
+            changer.callback = self._modifier
+            self.add_item(changer)
             supprimer = discord.ui.Button(label="Supprimer la règle", style=discord.ButtonStyle.danger, row=3)
             supprimer.callback = self._supprimer
             self.add_item(supprimer)
@@ -180,7 +316,8 @@ class MotsBloquesView(discord.ui.View):
             description=(
                 "Un message qui contient un de ces mots n'est **jamais publié** : la personne "
                 "voit seulement votre message. Les administrateurs ne sont pas bloqués.\n"
-                "-# Astuce : `*sab*` bloque aussi « sabotage » ; `sab` seul ne bloque que le mot."
+                "-# Astuce : `*sab*` bloque aussi « sabotage » ; `sab` seul ne bloque que le mot.\n"
+                "-# **Bloquer les liens** : toute adresse web ou invitation, sauf les sites autorisés."
             ),
             colour=discord.Colour.blurple(),
         )
@@ -188,10 +325,15 @@ class MotsBloquesView(discord.ui.View):
             e.add_field(name="Règles", value="Aucune règle pour l'instant.", inline=False)
         for r in self.regles:
             salons = ", ".join(f"<#{c}>" for c in getattr(r, "exempt_channel_ids", ()) or ()) or "aucun"
+            contenu = (
+                f"**Liens bloqués** · sites autorisés : "
+                f"{', '.join(s.strip('*') for s in sites_de(r))[:600] or 'aucun'}"
+                if est_regle_liens(r) else f"**Mots :** {', '.join(mots_de(r))[:700]}"
+            )
             e.add_field(
                 name=f"Règle {_numero(r.name)}",
                 value=(
-                    f"**Mots :** {', '.join(mots_de(r))[:700]}\n"
+                    f"{contenu}\n"
                     f"**Message :** {message_de(r) or '(message Discord par défaut)'}\n"
                     f"**Autorisés dans :** {salons}"
                 )[:1024],
@@ -215,6 +357,17 @@ class MotsBloquesView(discord.ui.View):
 
     async def _ajouter(self, interaction: discord.Interaction):
         await interaction.response.send_modal(AjoutModal(self))
+
+    async def _liens(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(LiensModal(self))
+
+    async def _modifier(self, interaction: discord.Interaction):
+        regle = self._regle()
+        if regle is None:
+            return await interaction.response.defer()
+        if est_regle_liens(regle):
+            return await interaction.response.send_modal(LiensModal(self, regle))
+        await interaction.response.send_modal(ModifierModal(self, regle))
 
     async def _choisir(self, interaction: discord.Interaction):
         self.choisie = int(interaction.data["values"][0])
@@ -262,4 +415,7 @@ async def ouvrir(interaction: discord.Interaction, guild: discord.Guild) -> None
     )
 
 
-__all__ = ["PREFIXE", "MAX_REGLES", "lire_mots", "lister", "creer", "MotsBloquesView", "ouvrir"]
+__all__ = [
+    "PREFIXE", "MAX_REGLES", "MOTIFS_LIENS", "lire_mots", "lire_sites", "lister", "creer", "modifier",
+    "est_regle_liens", "MotsBloquesView", "ouvrir",
+]

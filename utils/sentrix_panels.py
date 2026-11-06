@@ -477,6 +477,29 @@ def poser_bandeau(container, famille: str) -> bool:
     return True
 
 
+def retirer_bandeau(vue) -> None:
+    """Retire le bandeau d'un panneau envoyé en MP (07/11/2026).
+
+    En MP, Discord affiche la pièce jointe de la bannière SOUS la carte : « toujours
+    cette bannière en bas ». La galerie et la pièce jointe partent ensemble, donc
+    aucune référence attachment:// orpheline ne subsiste.
+    """
+    if not getattr(vue, "avec_banniere", False):
+        return
+    for conteneur in list(getattr(vue, "children", ()) or ()):
+        for item in list(getattr(conteneur, "children", ()) or ()):
+            if isinstance(item, discord.ui.MediaGallery) and any(
+                str(getattr(getattr(m, "media", None), "url", "") or "").startswith("attachment://sentrix")
+                or str(getattr(getattr(m, "media", None), "url", "") or "") == f"attachment://{nom_banniere(getattr(vue, 'famille', ''))}"
+                for m in getattr(item, "items", ())
+            ):
+                try:
+                    conteneur.remove_item(item)
+                except Exception:  # noqa: BLE001
+                    continue
+    vue.avec_banniere = False
+
+
 def pieces_jointes_de_famille(famille: str) -> list:
     """Pièces jointes correspondant au bandeau de CETTE famille.
 
@@ -1355,6 +1378,8 @@ async def envoyer(
     except Exception:
         logger.debug("Icônes SentriX non posées sur ce panneau.", exc_info=True)
 
+    if isinstance(destination, (discord.User, discord.Member, discord.DMChannel)):
+        retirer_bandeau(panneau)
     fabrique = getattr(panneau, "fichiers", None)
     fichiers = fabrique() if callable(fabrique) else []
     autorisees = _MENTIONS_SURES
