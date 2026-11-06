@@ -252,6 +252,11 @@ def natural_command_line(
                 candidates.append((len(trigger_normalized), match, command))
 
     for _, match, command in sorted(candidates, key=lambda item: item[0], reverse=True):
+        # 07/11/2026 : « fais-moi la liste de TES permissions » ouvrait +permissions.
+        # Un nom de commande précédé d'un possessif visant SentriX (tes, ton, ta,
+        # vos, votre, your) est une question pour l'IA, pas une commande à lancer.
+        if re.search(r"\b(?:tes|ton|ta|vos|votre|your)\s+$", normalized[:match.start()]):
+            continue
         direct_request = match.start() == 0 or normalized.startswith("commande ")
         if not action_intent and not direct_request:
             continue

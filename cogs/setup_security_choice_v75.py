@@ -598,7 +598,8 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
         await self.refresh(interaction)
 
     admins_bouton.callback = basculer_admins
-    container.add_item(discord.ui.ActionRow(exceptions, diagnostic, admins_bouton))
+    # 07/11/2026 : « enlève Vérifier la configuration » — retiré du panneau.
+    container.add_item(discord.ui.ActionRow(exceptions, admins_bouton))
 
     # Accès direct à CHAQUE règle, inspiré des écrans de réglages par filtre :
     # état réel et configuration explicite. Ce menu ne coche rien et n'active

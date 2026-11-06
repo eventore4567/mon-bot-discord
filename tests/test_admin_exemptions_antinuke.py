@@ -161,7 +161,7 @@ def test_everyone_d_un_admin_une_fois_rien_trois_fois_sanction():
         await cog._everyone_d_un_admin(message(3))
 
     asyncio.run(scenario())
-    assert supprimes == [3]
+    assert supprimes == []   # 07/11 : le message d'un admin n'est pas supprimé
     args = cog._repondre_abus_privilegie.await_args.args
     assert args[1] is admin and args[3] == automod_module.ABUS_PRIVILEGIE_SEUIL
 

@@ -94,7 +94,7 @@ def test_aucun_filtre_n_est_active_d_office_a_l_arrivee():
 
 def test_le_spam_est_sanctionne_des_la_premiere_rafale():
     # 05/11/2026 : avertissement à la première rafale, mute court à la récidive.
-    assert am.SPAM_PREMIER_PALIER == 2  # 1 = rappel, 2 = warn, 3 = mute 5 min
+    assert am.SPAM_PREMIER_PALIER == 1  # 07/11 : rappel, warn, puis mute 5 min
     assert am.SPAM_ESCALATION_RESET_SECONDS <= 3600  # une heure calme remet à zéro
     assert am.SPAM_MUTE_DURATIONS_SECONDS[0] == 300
     assert max(am.SPAM_MUTE_DURATIONS_SECONDS) <= 7200

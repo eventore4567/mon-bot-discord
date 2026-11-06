@@ -573,7 +573,7 @@ def current_is_moderation() -> bool:
 #: log que si la personne qui clique l'avait tapée.
 SUITE_PREFIX = "sx:suite:"
 SUITES: dict[str, tuple[tuple[str, str, str], ...]] = {
-    "warn": (("history", "modhistory", "{target}"), ("timeout", "mute", "{target} 10m Suite de {ref}")),
+    "warn": (("history", "modhistory", "{target}"), ("timeout", "mute", "{target} 10m Récidive après l'avertissement (réf. {ref})")),
     "mute": (("history", "modhistory", "{target}"), ("untimeout", "unmute", "{target} Levée après {ref}")),
     "tempban": (("history", "modhistory", "{target}"), ("unban", "unban", "{target_id} Levée après {ref}")),
     "ban": (("history", "modhistory", "{target}"), ("unban", "unban", "{target_id} Levée après {ref}")),
@@ -584,8 +584,9 @@ SUITES: dict[str, tuple[tuple[str, str, str], ...]] = {
     # un filtre. La raison cite la référence de l'incident : le fil relie les deux.
     "automod": (
         ("history", "modhistory", "{target}"),
-        ("warn", "warn", "{target} Suite de l'incident AutoMod {ref}"),
-        ("timeout", "mute", "{target} 10m Suite de l'incident AutoMod {ref}"),
+        # 07/11/2026 : « Suite de l'incident AutoMod SX-… » était illisible dans le MP.
+        ("warn", "warn", "{target} Comportement relevé par l'AutoMod (réf. {ref})"),
+        ("timeout", "mute", "{target} 10m Comportement relevé par l'AutoMod (réf. {ref})"),
     ),
 }
 SUITE_LABELS = {

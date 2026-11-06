@@ -216,10 +216,20 @@ ABREVIATIONS = {
     "btmr": "baise ta mere", "bztmr": "baise ta mere", "bztm": "baise ta mere",
     "jtbz": "je te baise", "jtb": "je te baise", "tamer": "ta mere", "tamere": "ta mere",
     "nik": "nique", "niq": "nique", "bz": "baise", "pd": "pede", "encul": "encule",
+    # 07/11/2026 : « slp » (salope) passait.
+    "slp": "salope", "slpe": "salope", "cnrd": "connard", "btrd": "batard",
+    "tmlp": "ta mere la pute", "ntmlp": "nique ta mere la pute", "fdpp": "fils de pute",
 }
 
 
 #: Formes développées absentes du dataset d'origine (toujours analysées en contexte).
+#: Insulte « famille » avec des mots intercalés : « ta grand mère c'est ma chienne ».
+GROUPES_COMPLEMENTAIRES = (
+    (4, ("ta", "mere", "chienne")), (4, ("ta", "mere", "pute")), (4, ("ta", "mere", "salope")),
+    (4, ("ta", "soeur", "chienne")), (4, ("ta", "soeur", "pute")), (4, ("ta", "soeur", "salope")),
+    (4, ("ta", "daronne", "pute")), (4, ("ta", "daronne", "chienne")),
+)
+
 PHRASES_COMPLEMENTAIRES = (
     "baise ta mere", "baise ta race", "je te baise", "nique ta grand mere",
     "nique tes morts", "nique ta famille", "ferme ta gueule", "ta mere la pute",
@@ -301,6 +311,8 @@ class MultilingualModerationDataset:
                 self._add_phrase(phrase)
             for phrase in PHRASES_COMPLEMENTAIRES:
                 self._add_phrase(phrase)
+            for ecart, mots in GROUPES_COMPLEMENTAIRES:
+                self._groups.append((ecart, tuple(mots), False))
 
             for raw_gap, raw_tokens in groups:
                 tokens = tuple(
