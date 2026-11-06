@@ -2789,7 +2789,7 @@ class Ai(commands.Cog, name="Ai"):
             # le moteur d'image, même si sa description contient « salon »,
             # « fermer », « visible », « permissions » et autres mots d'action.
             from utils.ai_image_intents import is_image_creation_request
-            image_precedente = await self._description_image(referenced) if reply_to_bot else None
+            image_precedente = await Ai._description_image(self, referenced) if reply_to_bot else None
             if image_precedente and not is_image_creation_request(question):
                 # Réponse à une image de SentriX (« mieux », « plus réaliste ») :
                 # nouvelle version de la même image, avec la demande en plus.
