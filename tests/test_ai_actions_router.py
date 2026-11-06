@@ -360,6 +360,42 @@ def test_multi_action_detection_needs_multiple_actions():
     assert not ai_actions.looks_multi_action("ban Tomioka pour spam")
 
 
+def test_academic_reasoning_prompt_is_not_a_discord_action():
+    # Reproduction du bug réel : le routeur cherchait un membre "Prov_T(x)".
+    question = (
+        "DÉFI EXTRÊME — LOGIQUE MATHÉMATIQUE\\n"
+        "Soit T une théorie cohérente, récursivement axiomatisable et contenant PA. "
+        "On note Prov_T(x) son prédicat standard de démontrabilité.\\n"
+        "1. Démontre rigoureusement le lemme diagonal, puis utilise-le pour établir "
+        "le théorème de Löb à partir des trois conditions de Hilbert-Bernays-Löb.\\n"
+        "2. Déduis le second théorème de Gödel sans raisonnement circulaire.\\n"
+        "3. Définis le prédicat de Rosser et démontre la cohérence au sens de Rosser.\\n"
+        "4. Analyse T + ¬Con(T) et construis un contre-exemple.\\n"
+        "5. Explique si une théorie cohérente peut démontrer une formule fausse."
+    )
+    assert not ai_actions.looks_action_request(question)
+    assert not ai_actions.looks_multi_action(question)
+
+
+def test_academic_prose_with_action_vocabulary_remains_conversation():
+    for question in (
+        "Explique comment fonctionnent le ban et le mute sur Discord.",
+        "Démontre un résultat en logique et explique comment une preuve fonctionne ; puis compare les axiomes.",
+        "Pourquoi un membre pourrait-il recevoir un ban, et que signifie cette sanction ?",
+    ):
+        assert not ai_actions.looks_multi_action(question)
+
+
+def test_explicit_multi_action_still_routes_to_discord():
+    for question in (
+        "ban Tomioka puis mute Alice 10m",
+        "crée une catégorie STAFF puis crée un salon staff-chat",
+        "crée un rôle Staff et mets le rôle Staff en rouge",
+    ):
+        assert ai_actions.looks_action_request(question)
+        assert ai_actions.looks_multi_action(question)
+
+
 @pytest.mark.asyncio
 async def test_multi_action_planner_is_closed_and_ordered(monkeypatch):
     class Result:
