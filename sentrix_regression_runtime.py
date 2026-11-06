@@ -17,6 +17,7 @@ import discord
 from discord.ext import commands
 
 from utils.audit_trail import journaliser
+from utils import sentrix_emojis
 
 logger = logging.getLogger("bot.sentrix-regression-runtime")
 
@@ -348,6 +349,22 @@ class BuilderRolePicker(discord.ui.RoleSelect):
         await self.parent_builder.refresh(interaction)
 
 
+class BuilderChannelPicker(discord.ui.ChannelSelect):
+    def __init__(self, parent: "RolePanelBuilder"):
+        self.parent_builder = parent
+        super().__init__(
+            placeholder="Salon où publier le panneau…",
+            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+            min_values=1, max_values=1,
+            default_values=[parent.guild.get_channel(parent.channel_id)] if parent.channel_id and parent.guild.get_channel(parent.channel_id) else [],
+            custom_id=f"sentrix:rolepanel-builder:channel:{parent.owner_id}",
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        self.parent_builder.channel_id = self.values[0].id
+        await self.parent_builder.refresh(interaction)
+
+
 class BuilderPresetSelect(discord.ui.Select):
     def __init__(self, parent: "RolePanelBuilder"):
         self.parent_builder = parent
@@ -380,8 +397,8 @@ class BuilderModeSelect(discord.ui.Select):
             min_values=1,
             max_values=1,
             options=[
-                discord.SelectOption(label="Menu déroulant", value="dropdown", emoji="📋", description="Les membres choisissent dans un menu.", default=parent.mode == "dropdown"),
-                discord.SelectOption(label="Réactions emoji", value="reaction", emoji="✨", description="Une réaction ajoute ou retire le rôle.", default=parent.mode == "reaction"),
+                discord.SelectOption(label="Menu déroulant", value="dropdown", emoji=sentrix_emojis.partiel("role"), description="Les membres choisissent dans un menu.", default=parent.mode == "dropdown"),
+                discord.SelectOption(label="Réactions emoji", value="reaction", emoji=sentrix_emojis.partiel("role"), description="Une réaction ajoute ou retire le rôle.", default=parent.mode == "reaction"),
             ],
             custom_id=f"sentrix:rolepanel-builder:mode:{parent.owner_id}",
         )
@@ -406,6 +423,7 @@ class RolePanelBuilder(discord.ui.LayoutView):
         self.owner_id = int(owner_id)
         self.mode = mode if mode in {"dropdown", "reaction"} else "dropdown"
         self.selected_role_ids: list[int] = []
+        self.channel_id: int | None = None
         self.erreurs: list[str] = []
         self.message: discord.Message | None = None
         self.rebuild()
@@ -414,20 +432,20 @@ class RolePanelBuilder(discord.ui.LayoutView):
         roles = [self.guild.get_role(role_id) for role_id in self.selected_role_ids]
         roles = [role for role in roles if role is not None]
         selection = "\n".join(f"> {role.mention}" for role in roles) or "> *Aucun rôle pour l'instant.*"
-        mode = "📋 Menu déroulant" if self.mode == "dropdown" else "✨ Réactions emoji"
+        mode = "Menu déroulant" if self.mode == "dropdown" else "Réactions emoji"
         lignes = [
-            "## 🎭 Panneau de rôles",
-            "Choisissez des **rôles existants** ou un **modèle** (SentriX crée seulement les rôles manquants), "
-            "puis le mode et **Créer le panneau**.",
+            "## " + sentrix_emojis.titre("role", "Panneau de rôles"),
+            "Choisissez vos **rôles existants**, le **salon de publication** et le mode, puis **Créer le panneau**.",
             "",
             f"**Mode** · {mode}",
+            f"**Salon** · {f'<#{self.channel_id}>' if self.channel_id else 'À choisir'}",
             f"**Rôles ({len(roles)})**",
             selection,
         ]
         if self.mode == "reaction":
-            lignes.append("-# Emojis attribués automatiquement. Les vôtres : `+rolepanel reaction ✅ @Rôle 🎉 @AutreRôle`.")
+            lignes.append("-# Chaque rôle reçoit un emoji personnalisé SentriX.")
         if self.erreurs:
-            lignes.append("-# ⚠️ " + " · ".join(self.erreurs[:3]))
+            lignes.append("-# " + sentrix_emojis.emoji("warning") + " " + " · ".join(self.erreurs[:3]))
         return "\n".join(lignes)
 
     def rebuild(self) -> None:
@@ -436,12 +454,12 @@ class RolePanelBuilder(discord.ui.LayoutView):
         carte.add_item(discord.ui.TextDisplay(self._texte()))
         carte.add_item(discord.ui.Separator())
         carte.add_item(discord.ui.ActionRow(BuilderRolePicker(self)))
-        carte.add_item(discord.ui.ActionRow(BuilderPresetSelect(self)))
+        carte.add_item(discord.ui.ActionRow(BuilderChannelPicker(self)))
         carte.add_item(discord.ui.ActionRow(BuilderModeSelect(self)))
         create = discord.ui.Button(
-            label="Créer le panneau", emoji="✅", style=discord.ButtonStyle.success,
+            label="Créer le panneau", emoji=sentrix_emojis.partiel("success"), style=discord.ButtonStyle.success,
             custom_id=f"sentrix:rolepanel-builder:create:{self.owner_id}",
-            disabled=not self.selected_role_ids,
+            disabled=not self.selected_role_ids or not self.channel_id,
         )
         cancel = discord.ui.Button(
             label="Annuler", style=discord.ButtonStyle.secondary,
@@ -477,27 +495,45 @@ class RolePanelBuilder(discord.ui.LayoutView):
     async def create_panel(self, interaction: discord.Interaction) -> None:
         if not self.selected_role_ids:
             return await interaction.response.send_message("Sélectionnez au moins un rôle avant de créer le panneau.", ephemeral=True)
+        channel = self.guild.get_channel(self.channel_id) if self.channel_id else None
+        if not isinstance(channel, discord.TextChannel):
+            return await interaction.response.send_message("Choisissez un salon de publication valide.", ephemeral=True)
+        actor = self.guild.get_member(interaction.user.id)
+        if actor is None or not actor.guild_permissions.administrator:
+            return await interaction.response.send_message("Permission Administrateur requise.", ephemeral=True)
+        me = self.guild.me
+        perms = channel.permissions_for(me) if me else None
+        if not perms or not (perms.view_channel and perms.send_messages and perms.embed_links):
+            return await interaction.response.send_message("SentriX doit pouvoir voir le salon, y envoyer des messages et intégrer des liens.", ephemeral=True)
+        if self.mode == "reaction" and not (perms.add_reactions and perms.read_message_history):
+            return await interaction.response.send_message("SentriX doit pouvoir ajouter des réactions et lire l'historique dans ce salon.", ephemeral=True)
         roles, errors = _valid_roles(self.guild, self.selected_role_ids)
         if not roles:
             return await interaction.response.send_message(
                 "Aucun rôle sélectionné n'est modifiable par SentriX.\n" + "\n".join(f"• {item}" for item in errors[:6]),
                 ephemeral=True,
             )
+        reaction_emojis = []
+        if self.mode == "reaction":
+            names = ("role", "notification", "games", "trophy", "ticket", "cards", "user", "users", "calendar", "voice", "video", "support", "tools", "verified", "info", "coin", "wallet", "staff", "bot", "channel")
+            reaction_emojis = [str(icon) for name in names if (icon := sentrix_emojis.partiel(name)) is not None]
+            if len(reaction_emojis) < len(roles):
+                return await interaction.response.send_message("Les emojis personnalisés SentriX ne sont pas encore disponibles en nombre suffisant. Réessayez après leur synchronisation ou choisissez le menu déroulant.", ephemeral=True)
         await interaction.response.defer()
         role_ids = [role.id for role in roles]
 
         try:
             if self.mode == "dropdown":
                 panel = ExistingDropdownPanel(self.guild, role_ids)
-                panel_message = await interaction.channel.send(embed=_dropdown_embed(self.guild, role_ids), view=panel)
+                panel_message = await channel.send(embed=_dropdown_embed(self.guild, role_ids), view=panel)
                 await _save_panel(self.bot, panel_message, mode="dropdown", role_ids=role_ids, mappings=[], creator_id=self.owner_id)
                 self.bot.add_view(ExistingDropdownPanel(self.guild, role_ids), message_id=panel_message.id)
             else:
                 mappings = [
-                    {"emoji": _DEFAULT_REACTION_EMOJIS[index], "key": _emoji_key(_DEFAULT_REACTION_EMOJIS[index]), "role_id": role.id}
-                    for index, role in enumerate(roles[: len(_DEFAULT_REACTION_EMOJIS)])
+                    {"emoji": reaction_emojis[index], "key": _emoji_key(reaction_emojis[index]), "role_id": role.id}
+                    for index, role in enumerate(roles)
                 ]
-                panel_message = await interaction.channel.send(embed=_reaction_embed(self.guild, mappings))
+                panel_message = await channel.send(embed=_reaction_embed(self.guild, mappings))
                 try:
                     for item in mappings:
                         await panel_message.add_reaction(item["emoji"])
@@ -511,7 +547,7 @@ class RolePanelBuilder(discord.ui.LayoutView):
 
             mode = "menu déroulant" if self.mode == "dropdown" else "réactions emoji"
             await interaction.edit_original_response(view=self._carte_finale(
-                "✅ Panneau créé", f"**Mode** · {mode}\n**Rôles** · {len(role_ids)}", 0x2FBF71,
+                sentrix_emojis.titre("success", "Panneau créé"), f"**Mode** · {mode}\n**Rôles** · {len(role_ids)}\n**Salon** · {channel.mention}", 0x2FBF71,
             ))
             self.stop()
         except discord.Forbidden:
