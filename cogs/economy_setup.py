@@ -42,15 +42,6 @@ FIELDS = {
 }
 
 
-PANEL_BANNER = "https://raw.githubusercontent.com/eventore4567/mon-bot-discord/4325aa7d2ce6c309817cf5b5e827b4a9a6105336/assets/banniere/sentrix-banniere-profil.png"
-
-
-def panel_header(box):
-    gallery = discord.ui.MediaGallery()
-    gallery.add_item(media=PANEL_BANNER)
-    box.add_item(gallery)
-
-
 def button(label, callback, *, danger=False):
     item = discord.ui.Button(
         label=label,
@@ -142,7 +133,6 @@ class EconomySetupView(AdminView):
         self.clear_items()
         s = await get_economy_settings(self.bot, self.guild.id)
         box = discord.ui.Container(accent_colour=GOLD)
-        panel_header(box)
         box.add_item(
             discord.ui.TextDisplay(
                 f"## Économie et jeux\n**{'Activée' if s['enabled'] else 'Désactivée'}** · Monnaie : **{s['currency_name']}**\n"
@@ -184,7 +174,6 @@ class EconomyAdvancedView(AdminView):
         s = await get_economy_settings(self.bot, self.guild.id)
         stats = await self.bot.db.get_stats_settings(self.guild.id)
         box = discord.ui.Container(accent_colour=GOLD)
-        panel_header(box)
         work_range = (
             f"{s['work_min']}–{s['work_max']}"
             if (s["work_min"], s["work_max"]) != (50, 250)
@@ -310,7 +299,6 @@ class EconomyFeatureView(AdminView):
             else f"Multiplicateur des gains : ×{s['games_multiplier']:g}"
         )
         box = discord.ui.Container(accent_colour=GOLD)
-        panel_header(box)
         box.add_item(
             discord.ui.TextDisplay(
                 f"## {title}\n**{'Activé' if s[key] else 'Désactivé'}**\n{detail}"
@@ -371,7 +359,6 @@ class JobsView(AdminView):
 
         s = await get_economy_settings(self.bot, self.guild.id)
         box = discord.ui.Container(accent_colour=GOLD)
-        panel_header(box)
         box.add_item(
             discord.ui.TextDisplay(
                 "## Métiers et promotions\n"
@@ -447,7 +434,6 @@ class ChannelPublishView(AdminView):
     def __init__(self, bot, guild, owner_id, kind):
         super().__init__(bot, guild, owner_id)
         box = discord.ui.Container(accent_colour=GOLD)
-        panel_header(box)
         box.add_item(discord.ui.TextDisplay("### Choisissez le salon de publication"))
         picker = discord.ui.ChannelSelect(
             channel_types=[discord.ChannelType.text, discord.ChannelType.news]
@@ -532,7 +518,6 @@ class ShopSetupView(AdminView):
         super().__init__(bot, guild, owner_id)
         self.role = None
         box = discord.ui.Container(accent_colour=GOLD)
-        panel_header(box)
         box.add_item(
             discord.ui.TextDisplay(
                 "## Boutique\nChoisissez un rôle, puis ajoutez-le, retirez-le ou modifiez son prix."
@@ -606,7 +591,6 @@ class ResetEconomyView(AdminView):
         super().__init__(bot, guild, owner_id)
         self.done = False
         box = discord.ui.Container(accent_colour=GOLD)
-        panel_header(box)
         box.add_item(
             discord.ui.TextDisplay(
                 "## Réinitialiser l'économie ?\nTous les soldes portefeuille et banque seront remis à zéro. L'historique d'audit est conservé."

@@ -292,7 +292,7 @@ async def test_economy_page_is_complete_and_fits_discord_components(bot):
         "Réinitialiser l'économie",
     } <= labels
     assert view.total_children_count <= 40
-    assert isinstance(view.children[0].children[0], discord.ui.MediaGallery)
+    assert not any(isinstance(i, discord.ui.MediaGallery) for i in view.walk_children())
 
 
 @pytest.mark.asyncio

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from contextvars import ContextVar
 
 import discord
 
@@ -12,6 +13,32 @@ SCHEMA = """CREATE TABLE IF NOT EXISTS sentrix_reaction_role_options (
  PRIMARY KEY(guild_id,message_id))"""
 WARN_SCHEMA = """CREATE TABLE IF NOT EXISTS sentrix_reaction_role_warnings (
  guild_id BIGINT PRIMARY KEY, notified_at BIGINT NOT NULL)"""
+
+
+# Autorisation locale à la tâche : un retrait demandé par réaction ne devient
+# jamais une exemption générale aux protections du propriétaire.
+_SELF_SERVICE_REMOVAL = ContextVar("sentrix_reaction_role_removal", default=None)
+
+
+def voluntary_removal_allowed(member, roles):
+    from cogs.economy import _self_assignable_role_error
+
+    scope = _SELF_SERVICE_REMOVAL.get()
+    return bool(
+        scope
+        and scope[:2] == (member.guild.id, member.id)
+        and roles
+        and {r.id for r in roles} <= scope[2]
+        and all(_self_assignable_role_error(member.guild, r) is None for r in roles)
+    )
+
+
+async def _remove_self_service_roles(member, roles, *, guild_id, reason):
+    token = _SELF_SERVICE_REMOVAL.set((guild_id, member.id, {r.id for r in roles}))
+    try:
+        await member.remove_roles(*roles, reason=reason)
+    finally:
+        _SELF_SERVICE_REMOVAL.reset(token)
 
 
 async def options(bot, guild_id, message_id):
@@ -117,8 +144,11 @@ async def apply_reaction(bot, payload, row, *, adding):
                     and r in member.roles
                 ]
                 if others:
-                    await member.remove_roles(
-                        *others, reason="Un seul rôle par panneau"
+                    await _remove_self_service_roles(
+                        member,
+                        others,
+                        guild_id=guild.id,
+                        reason="Un seul rôle par panneau",
                     )
                 channel = guild.get_channel(payload.channel_id)
                 if channel:
@@ -128,7 +158,9 @@ async def apply_reaction(bot, payload, row, *, adding):
                             await message.remove_reaction(item["emoji"], member)
             await member.add_roles(role, reason="Rôle sur réaction")
         else:
-            await member.remove_roles(role, reason="Retrait rôle sur réaction")
+            await _remove_self_service_roles(
+                member, [role], guild_id=guild.id, reason="Retrait rôle sur réaction"
+            )
     except discord.Forbidden:
         await warn_owner(bot, guild, role)
     except (discord.HTTPException, discord.NotFound):

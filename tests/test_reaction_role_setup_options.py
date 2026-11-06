@@ -211,3 +211,39 @@ async def test_legacy_reaction_panels_are_manageable_without_double_listeners(st
     state.member.add_roles.assert_not_awaited()  # le listener canonique prend la main
     await Verification(state.bot).on_raw_reaction_add(ev)
     assert state.roles[10] in state.member.roles
+
+
+@pytest.mark.asyncio
+async def test_voluntary_owner_exception_is_limited_to_exact_safe_roles(state):
+    from utils.reaction_role_options import (
+        _SELF_SERVICE_REMOVAL,
+        voluntary_removal_allowed,
+    )
+
+    state.member.guild = state.guild
+    privileged = role(13, administrator=True)
+    allowed = state.roles[10]
+    token = _SELF_SERVICE_REMOVAL.set(
+        (state.guild.id, state.member.id, {allowed.id, privileged.id})
+    )
+    try:
+        assert voluntary_removal_allowed(state.member, [allowed])
+        assert not voluntary_removal_allowed(state.member, [privileged])
+        assert not voluntary_removal_allowed(state.member, [state.roles[11]])
+        other = SimpleNamespace(id=43, guild=state.guild)
+        assert not voluntary_removal_allowed(other, [allowed])
+        assert not voluntary_removal_allowed(state.member, [])
+    finally:
+        _SELF_SERVICE_REMOVAL.reset(token)
+    assert not voluntary_removal_allowed(state.member, [allowed])
+
+
+@pytest.mark.asyncio
+async def test_failed_role_removal_does_not_leave_owner_exception_enabled(state):
+    from utils.reaction_role_options import _SELF_SERVICE_REMOVAL, apply_reaction
+
+    state.member.remove_roles.side_effect = discord.HTTPException(
+        SimpleNamespace(status=500, reason="error"), "Échec simulé"
+    )
+    await apply_reaction(state.bot, event(state), {"role_id": 10}, adding=False)
+    assert _SELF_SERVICE_REMOVAL.get() is None

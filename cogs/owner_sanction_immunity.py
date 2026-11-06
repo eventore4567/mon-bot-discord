@@ -107,7 +107,8 @@ def _install_discord_api_guard() -> None:
         original_remove_roles = discord.Member.remove_roles
         if not getattr(original_remove_roles, "_sentrix_owner_hard_guard", False):
             async def remove_roles_protected(self, *roles, **kwargs):
-                if _is_protected(self):
+                from utils.reaction_role_options import voluntary_removal_allowed
+                if _is_protected(self) and not voluntary_removal_allowed(self, roles):
                     logger.warning(
                         "RETRAIT DE RÔLES BLOQUÉ : SentriX a refusé de derank son propriétaire vérifié sur guild=%s.",
                         self.guild.id,
