@@ -142,7 +142,7 @@ CATALOG: tuple[SlashEntry, ...] = (
     # ---------------------------------------------------------------- Modération
     # Les gestes quotidiens restent à la racine, comme sur la plupart des bots :
     # un modérateur tape /ban, pas /moderation ban.
-    _e("ban", "ban", "Ban a member from the server."),
+    _e("ban", "ban", "Ban a member and optionally delete recent messages."),
     _e("unban", "unban", "Unban a user by their ID."),
     _e("kick", "kick", "Kick a member from the server."),
     _e("timeout", "mute", "Time out a member."),

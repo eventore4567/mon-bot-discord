@@ -27,6 +27,7 @@ import logging
 import re
 import time
 from datetime import timedelta
+from typing import Literal
 
 import discord
 from discord import app_commands
@@ -857,6 +858,7 @@ class Moderation(commands.Cog):
         membre="Membre à bannir",
         raison="Raison du bannissement",
         envoyer_mp="True : envoyer le MP de sanction avant le ban ; False : aucun MP",
+        supprimer_messages="Anciens messages à supprimer : conserver, 15 minutes, 1 heure ou 24 heures.",
     )
     # AUTORISATION -> utils/access_matrix.py (matrice unique).
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
@@ -865,26 +867,20 @@ class Moderation(commands.Cog):
         self, ctx: commands.Context, membre: discord.Member, *,
         raison: str = "Aucune raison fournie",
         envoyer_mp: bool = True,
+        supprimer_messages: Literal["Conserver", "15 minutes", "1 heure", "24 heures"] = "Conserver",
     ):
-        """Le slash ne bannit qu'après la réponse explicite du modérateur."""
+        """Bannit avec le choix de suppression fourni dans les options de la commande."""
         raison = clean_reason(raison)
-        # 30/10/2026 — refuser immédiatement une cible protégée avant le panneau
-        # Oui/Non, même lorsque le moteur de ban revalide au moment d’agir.
         if not await self.check_targetable(ctx, membre):
             return
-        if ctx.interaction is not None:
-            view = _BanPurgeView(self, ctx, membre, raison, envoyer_mp=envoyer_mp)
-            view.message = await ctx.send(
-                f"**Bannissement de {membre.display_name}**\n"
-                "Voulez-vous aussi supprimer ses anciens messages ?",
-                view=view, ephemeral=True, allowed_mentions=_SANS_PING,
+        periods = {"Conserver": 0, "15 minutes": 900, "1 heure": 3600, "24 heures": 86400}
+        if supprimer_messages not in periods:
+            return await self._reply(
+                ctx, "Choisissez Conserver, 15 minutes, 1 heure ou 24 heures.", ephemere=True,
             )
-            return
-
-        # Compatibilité interne : la commande texte conserve le ban sans purge.
         await self._ack(ctx)
         result = await self._perform_ban(
-            ctx, membre, raison, delete_message_seconds=0, send_confirmation=True,
+            ctx, membre, raison, delete_message_seconds=periods[supprimer_messages], send_confirmation=True,
             envoyer_mp=envoyer_mp,
         )
         if result != "success":

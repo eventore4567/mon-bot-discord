@@ -27,9 +27,8 @@ CRITICAL_CONTRACTS = {
     "deposit": ("montant",),
     "withdraw": ("montant",),
     "rps": ("choix",),
-    # 30/10/2026 : les messages se suppriment via le panneau Oui/Non ;
-    # envoyer_mp est le paramètre slash explicite du bannissement.
-    "ban": ("membre", "raison", "envoyer_mp"),
+    # Le /ban expose directement le choix de suppression et le MP facultatif.
+    "ban": ("membre", "raison", "envoyer_mp", "supprimer_messages"),
     "kick": ("membre", "raison"),
     # 04/11/2026 : /mute expose « notifier » (MP facultatif), comme /warn.
     "mute": ("membre", "duree", "raison", "notifier"),
