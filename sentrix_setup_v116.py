@@ -132,8 +132,7 @@ MODULES: tuple[ModuleSpec, ...] = (
         _s("autorole", "Autorôle", "Rôle distribué automatiquement à l'arrivée.", "config:autorole"),
         _s("verification", "Vérification", "Rôle reçu après validation.", "verification"),
         _s("levels", "Rôles de niveau", "Paliers et rôles automatiques liés aux niveaux.", "levels-config"),
-        _s("reaction", "Panneau de rôles", "Choisir les rôles, le salon et publier un panneau de libre-service.", "role-panel"),
-        _s("reaction_manage", "Rôles par réaction", "Gérer les associations, les panneaux et leurs options.", "reaction-setup"),
+        _s("reaction", "Panneaux de rôles", "Menus déroulants ou réactions : configurer un panneau.", "role-panel"),
     )),
     ModuleSpec("verification", "Vérification", "CAPTCHA, rôle, salon et panneau de validation.", (
         _s("role", "Rôle vérifié", "Choisir le rôle attribué après validation.", "verification"),
@@ -792,15 +791,13 @@ async def _run_action(view, interaction: discord.Interaction) -> None:
             subview = await ReactionRoleSetupView(view.bot, interaction.guild, interaction.user.id).build()
         return await interaction.response.send_message(view=subview, ephemeral=True)
     elif action == "role-panel":
-        from sentrix_regression_runtime import RolePanelBuilder
         guild = interaction.guild
         if guild is None or not interaction.user.guild_permissions.administrator:
             return await interaction.response.send_message("Permission Administrateur requise.", ephemeral=True)
         if guild.me is None or not guild.me.guild_permissions.manage_roles:
             return await interaction.response.send_message("SentriX a besoin de la permission Gérer les rôles.", ephemeral=True)
-        builder = RolePanelBuilder(view.bot, guild, interaction.user.id)
-        await interaction.response.send_message(view=builder, ephemeral=True)
-        builder.message = await interaction.original_response()
+        from cogs.reaction_role_setup import RolePanelHubView
+        await interaction.response.send_message(view=RolePanelHubView(view.bot,guild,interaction.user.id),ephemeral=True)
         return
     elif action == "games-config":
         return await _open_games_config(view, interaction)

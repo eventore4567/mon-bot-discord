@@ -427,12 +427,13 @@ class RolePanelBuilder(discord.ui.LayoutView):
     dans la carte, et des modèles prêts à l'emploi (rôles manquants créés).
     """
 
-    def __init__(self, bot: commands.Bot, guild: discord.Guild, owner_id: int, *, mode: str = "dropdown"):
+    def __init__(self, bot: commands.Bot, guild: discord.Guild, owner_id: int, *, mode: str = "dropdown", allow_mode_switch: bool = True):
         super().__init__(timeout=300)
         self.bot = bot
         self.guild = guild
         self.owner_id = int(owner_id)
         self.mode = mode if mode in {"dropdown", "reaction"} else "dropdown"
+        self.allow_mode_switch = allow_mode_switch
         self.selected_role_ids: list[int] = []
         self.channel_id: int | None = None
         self.erreurs: list[str] = []
@@ -466,7 +467,8 @@ class RolePanelBuilder(discord.ui.LayoutView):
         carte.add_item(discord.ui.Separator())
         carte.add_item(discord.ui.ActionRow(BuilderRolePicker(self)))
         carte.add_item(discord.ui.ActionRow(BuilderChannelPicker(self)))
-        carte.add_item(discord.ui.ActionRow(BuilderModeSelect(self)))
+        if self.allow_mode_switch:
+            carte.add_item(discord.ui.ActionRow(BuilderModeSelect(self)))
         create = discord.ui.Button(
             label="Créer le panneau", emoji=sentrix_emojis.partiel("success"), style=discord.ButtonStyle.success,
             custom_id=f"sentrix:rolepanel-builder:create:{self.owner_id}",
@@ -493,8 +495,10 @@ class RolePanelBuilder(discord.ui.LayoutView):
         return False
 
     async def refresh(self, interaction: discord.Interaction) -> None:
+        if not interaction.response.is_done():
+            await interaction.response.defer()
         self.rebuild()
-        await interaction.response.edit_message(view=self)
+        await interaction.edit_original_response(view=self)
 
     def _carte_finale(self, titre: str, texte: str, couleur: int) -> discord.ui.LayoutView:
         vue = discord.ui.LayoutView(timeout=None)
@@ -528,6 +532,11 @@ class RolePanelBuilder(discord.ui.LayoutView):
         if self.mode == "reaction":
             names = ("role", "notification", "games", "trophy", "ticket", "cards", "user", "users", "calendar", "voice", "video", "support", "tools", "verified", "info", "coin", "wallet", "staff", "bot", "channel")
             reaction_emojis = [str(icon) for name in names if (icon := sentrix_emojis.partiel(name)) is not None]
+            custom = list(getattr(self, "custom_emojis", []) or [])
+            if custom:
+                if len(custom) != len(roles) or len({_emoji_key(value) for value in custom}) != len(custom):
+                    return await interaction.response.send_message("Choisissez un emoji différent par rôle sélectionné.", ephemeral=True)
+                reaction_emojis = custom
             if len(reaction_emojis) < len(roles):
                 return await interaction.response.send_message("Les emojis personnalisés SentriX ne sont pas encore disponibles en nombre suffisant. Réessayez après leur synchronisation ou choisissez le menu déroulant.", ephemeral=True)
         await interaction.response.defer()

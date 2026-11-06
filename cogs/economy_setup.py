@@ -169,7 +169,6 @@ class EconomySetupView(AdminView):
             ("jobs", "Métiers"),
             ("bank", "Banque"),
             ("rob", "Vol (rob)"),
-            ("games", "Gains des jeux"),
         ]:
 
             async def edit(i, _kind=kind):
@@ -177,6 +176,13 @@ class EconomySetupView(AdminView):
                     **await get_economy_settings(self.bot, self.guild.id),
                     **await self.bot.db.get_stats_settings(self.guild.id),
                 }
+                if _kind == "rob":
+                    return await i.response.send_message(
+                        view=await EconomyFeatureView(
+                            self.bot, self.guild, self.owner_id, "rob"
+                        ).build(),
+                        ephemeral=True,
+                    )
                 if _kind == "jobs":
                     await i.response.send_message(
                         view=await JobsView(
@@ -191,43 +197,11 @@ class EconomySetupView(AdminView):
 
             actions.append(button(label, edit))
 
-        async def rob_toggle(i):
-            await save_economy_settings(
-                self.bot,
-                self.guild.id,
-                {"rob_enabled": 0 if s["rob_enabled"] else 1},
-                i.user.id,
-            )
-            await self.refresh(i)
-
-        async def game_toggle(i):
-            await save_economy_settings(
-                self.bot,
-                self.guild.id,
-                {"games_pay": 0 if s["games_pay"] else 1},
-                i.user.id,
-            )
-            await self.refresh(i)
-
-        actions.extend(
-            [
-                button("Activer / Désactiver le vol", rob_toggle),
-                button("Les jeux rapportent : oui / non", game_toggle),
-            ]
-        )
-
         async def games(i):
-            cog = self.bot.get_cog("GamesSetup")
-            if cog is None:
-                return await i.response.send_message(
-                    "Réglages des jeux indisponibles.", ephemeral=True
-                )
-            from cogs.games_setup import GamesSetupView
-
-            embed, _ = await cog._build_home(self.guild.id)
             await i.response.send_message(
-                embed=embed,
-                view=GamesSetupView(cog, author_id=i.user.id, guild_id=self.guild.id),
+                view=await EconomyFeatureView(
+                    self.bot, self.guild, self.owner_id, "games"
+                ).build(),
                 ephemeral=True,
             )
 
@@ -258,6 +232,77 @@ class EconomySetupView(AdminView):
         )
         for start in range(0, len(actions), 4):
             box.add_item(discord.ui.ActionRow(*actions[start : start + 4]))
+        self.add_item(box)
+        return self
+
+    async def refresh(self, interaction):
+        await self.build()
+        await interaction.response.edit_message(view=self)
+
+
+class EconomyFeatureView(AdminView):
+    def __init__(self, bot, guild, owner_id, kind):
+        super().__init__(bot, guild, owner_id)
+        self.kind = kind
+
+    async def build(self):
+        self.clear_items()
+        s = await get_economy_settings(self.bot, self.guild.id)
+        is_rob = self.kind == "rob"
+        key = "rob_enabled" if is_rob else "games_pay"
+        title = "Vol" if is_rob else "Jeux et récompenses"
+        detail = (
+            f"Réussite : {s['rob_success']} % · Amende : {s['rob_fine'] if s['rob_fine'] >= 0 else 'aléatoire'}"
+            if is_rob
+            else f"Multiplicateur des gains : ×{s['games_multiplier']:g}"
+        )
+        box = discord.ui.Container(accent_colour=GOLD)
+        box.add_item(
+            discord.ui.TextDisplay(
+                f"## {title}\n**{'Activé' if s[key] else 'Désactivé'}**\n{detail}"
+            )
+        )
+
+        async def toggle(i):
+            await save_economy_settings(
+                self.bot, self.guild.id, {key: 0 if s[key] else 1}, i.user.id
+            )
+            await self.refresh(i)
+
+        async def settings(i):
+            await i.response.send_modal(EconomySettingsModal(self, self.kind, s))
+
+        async def back(i):
+            await i.response.edit_message(
+                view=await EconomySetupView(self.bot, self.guild, self.owner_id).build()
+            )
+
+        row = [
+            button("Activer / Désactiver", toggle),
+            button("Réglages" if is_rob else "Multiplicateur des gains", settings),
+        ]
+        if not is_rob:
+
+            async def configure_games(i):
+                cog = self.bot.get_cog("GamesSetup")
+                if cog is None:
+                    return await i.response.send_message(
+                        "Réglages des jeux indisponibles.", ephemeral=True
+                    )
+                from cogs.games_setup import GamesSetupView
+
+                embed, _ = await cog._build_home(self.guild.id)
+                await i.response.send_message(
+                    embed=embed,
+                    view=GamesSetupView(
+                        cog, author_id=i.user.id, guild_id=self.guild.id
+                    ),
+                    ephemeral=True,
+                )
+
+            row.append(button("Paramètres des jeux", configure_games))
+        row.append(button("Retour économie", back))
+        box.add_item(discord.ui.ActionRow(*row))
         self.add_item(box)
         return self
 

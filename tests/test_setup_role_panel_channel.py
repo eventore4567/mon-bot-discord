@@ -39,7 +39,9 @@ async def test_setup_opens_the_builder_privately():
     await setup._run_action(owner, interaction)
     kwargs = interaction.response.send_message.call_args.kwargs
     assert kwargs["ephemeral"] is True
-    assert isinstance(kwargs["view"], runtime.RolePanelBuilder)
+    from cogs.reaction_role_setup import RolePanelHubView
+
+    assert isinstance(kwargs["view"], RolePanelHubView)
 
 
 @pytest.mark.asyncio
