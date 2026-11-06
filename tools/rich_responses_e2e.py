@@ -46,7 +46,9 @@ async def main() -> int:
     check("Portefeuille : **440**" in t and "all" in t, "montant refusé : ce que le membre possède vraiment", t[:200])
     # +checkin a été retirée le 17/10 (doublon de +daily, jamais utilisée).
     t = await say("+daily")
-    check("**+200**" in t and "Streak quotidien : 1 jour" in t and "<t:" in t,
+    # 07/11/2026 : la série est dans le même panneau (200 + 25 de bonus de série).
+    check("**+225**" in t and "**Série** · 🔥 **1 jour** · +25" in t and "<t:" in t
+          and "Streak quotidien" not in t,
           "daily : gain, série et rendez-vous de demain", t[:240])
     t = await say("+daily")
     check("pas encore disponible" in t and "<t:" in t, "daily déjà pris : quand revenir", t[:200])
