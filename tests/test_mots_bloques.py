@@ -71,3 +71,42 @@ def test_le_bouton_est_dans_setup_securite():
     source = (Path(__file__).resolve().parents[1] / "cogs" / "setup_security_choice_v75.py").read_text(encoding="utf-8")
     assert "mots_bloques.ouvrir(interaction, self.guild)" in source
     assert "discord.ui.ActionRow(exceptions, mots_bloques_bouton, admins_bouton)" in source
+
+
+# --- 07/11/2026 : modifier / retirer des mots, bloquer les liens ---------------------
+
+def test_modifier_remplace_les_mots_et_le_message():
+    regle = _regle(1, ["sab", "trade"], "ancien")
+    regle.edit = AsyncMock()
+    asyncio.run(mb.modifier(regle, mots=["sab"], message="nouveau"))   # « trade » retiré
+    kwargs = regle.edit.await_args.kwargs
+    assert kwargs["trigger"].keyword_filter == ["sab"]
+    assert kwargs["actions"][0].custom_message == "nouveau"
+
+
+def test_regle_de_liens_bloque_les_adresses_sauf_les_sites_autorises():
+    import re
+
+    guild = _guild([])
+    sites = mb.lire_sites("https://youtube.com/, tenor.com, tenor.com")
+    assert sites == ["*youtube.com*", "*tenor.com*"]
+    asyncio.run(mb.creer(guild, [], "Pas de liens ici.", liens=True, sites=sites))
+    trigger = guild.create_automod_rule.await_args.kwargs["trigger"]
+    assert trigger.allow_list == sites and not trigger.keyword_filter
+    for texte in ("va sur https://exemple.com", "rejoins discord.gg/abc", "www.site.fr"):
+        assert any(re.search(m, texte) for m in trigger.regex_patterns), texte
+    assert not any(re.search(m, "salut ça va") for m in trigger.regex_patterns)
+    regle = SimpleNamespace(trigger=trigger)
+    assert mb.est_regle_liens(regle) and "youtube.com" in mb.resume(regle)
+
+
+def test_le_panneau_propose_liens_et_modification():
+    guild = SimpleNamespace(id=1)
+    vue = mb.MotsBloquesView(guild, 5, [_regle(1, ["sab"])])
+    libelles = [getattr(i, "label", None) for i in vue.children]
+    assert "Bloquer les liens" in libelles
+    vue.choisie = 1001
+    vue._construire()
+    assert "Modifier les mots" in [getattr(i, "label", None) for i in vue.children]
+    modal = mb.ModifierModal(vue, vue._regle())
+    assert modal.mots.default == "sab"

@@ -71,6 +71,10 @@ logger = logging.getLogger("bot.ai")
 # publique, ni les wrappers legacy de send_sentrix_reply.
 _PASSIVE_IMAGE_CONTEXT = contextvars.ContextVar("sentrix_passive_images", default=())
 
+#: Délai entre deux images demandées en langage naturel (300 s avant le 07/11 :
+#: « mieux pls » sur une image restait bloqué 5 minutes).
+DELAI_IMAGE_NATURELLE = 60
+
 # Suivi court d'une image demandée par SentriX, lié au serveur/salon/membre.
 _PENDING_IMAGE_FOLLOWUPS: dict[tuple[int, int, int], tuple[float, str]] = {}
 
@@ -2432,10 +2436,10 @@ class Ai(commands.Cog, name="Ai"):
         lock = self._natural_image_locks.setdefault(key, asyncio.Lock())
         async with lock:
             since = time.monotonic() - self._natural_image_recent.get(key, -1e10)
-            if since < 300:
+            if since < DELAI_IMAGE_NATURELLE:
                 await reply(
                     f"Une création d'image est déjà en cours ou récente. "
-                    f"Réessayez dans {int(300 - since) + 1} secondes."
+                    f"Réessayez dans {int(DELAI_IMAGE_NATURELLE - since) + 1} secondes."
                 )
                 return True
             if guild_id is not None:
@@ -2488,7 +2492,15 @@ class Ai(commands.Cog, name="Ai"):
             image_file = discord.File(
                 io.BytesIO(encoded), filename=f"sentrix-image-{width}x{height}.jpg",
             )
-            await reply(f"Image créée · {width} × {height}", file=image_file)
+            envoye = await reply(f"Image créée · {width} × {height}", file=image_file)
+            # 07/11/2026 : répondre « mieux pls » à l'image en relance une version
+            # améliorée : on garde la description de chaque image envoyée.
+            if envoye is not None:
+                memoire = self.__dict__.setdefault("_images_generees", {})
+                memoire[int(envoye.id)] = description[:3000]
+                if len(memoire) > 500:
+                    for ancien in list(memoire)[:250]:
+                        memoire.pop(ancien, None)
             if guild_id is not None:
                 try:
                     await ai_service.record_usage(
@@ -2743,6 +2755,16 @@ class Ai(commands.Cog, name="Ai"):
             # le moteur d'image, même si sa description contient « salon »,
             # « fermer », « visible », « permissions » et autres mots d'action.
             from utils.ai_image_intents import is_image_creation_request
+            image_precedente = self.__dict__.get("_images_generees", {}).get(
+                int(getattr(referenced, "id", 0) or 0)
+            ) if reply_to_bot else None
+            if image_precedente and not is_image_creation_request(question):
+                # Réponse à une image de SentriX (« mieux », « plus réaliste ») :
+                # nouvelle version de la même image, avec la demande en plus.
+                await self._send_generated_image_natural(
+                    message, f"{image_precedente}\nNouvelle version demandée : {question}",
+                )
+                return
             if is_image_creation_request(question):
                 await self._send_generated_image_natural(message, question)
                 return

@@ -30,7 +30,13 @@ BASE_ID = 100000000000007000
 
 async def main() -> int:
     bot = await h.boot(quiet=True)
-    sys.modules["cogs.automod"].INCIDENT_LOG_DELAY_SECONDS = 0.1
+    automod_module = sys.modules["cogs.automod"]
+    automod_module.INCIDENT_LOG_DELAY_SECONDS = 0.1
+    # Les seuils se mesurent à la suppression : les membres du scénario sont traités
+    # comme des comptes récents. La règle « 1re rafale d'un membre établi laissée,
+    # rappel seul » (07/11/2026) a sa propre étape à la fin.
+    etabli_defaut = automod_module.SPAM_ETABLI_SECONDES
+    automod_module.SPAM_ETABLI_SECONDES = 10 ** 12
     guild = await h.setup_world(bot)
     db = bot.db
     automod = bot.get_cog("Automod")
@@ -134,6 +140,13 @@ async def main() -> int:
     check(await burst(4, isolated=False) == 4, "pendant le renfort, 4 messages suffisent même en réactivité normale")
     automod._renfort_jusqua[h.GID] = 0
     check(await burst(4) == 0, "à la fin du renfort, le serveur revient à son niveau (4 messages passent)")
+
+    # Membre établi (arrivé il y a plus de 24 h) : 1re rafale laissée avec un rappel,
+    # la récidive est supprimée.
+    automod_module.SPAM_ETABLI_SECONDES = etabli_defaut
+    habitue = BASE_ID + next(counter)
+    check(await burst(5, author=habitue) == 0, "membre établi : 1re rafale laissée (rappel seul)")
+    check(await burst(5, author=habitue) == 5, "membre établi : la récidive est supprimée")
 
     failed = [r for r in RESULTS if not r[0]]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} étapes réussies.")

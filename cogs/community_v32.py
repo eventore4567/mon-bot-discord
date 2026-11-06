@@ -296,12 +296,13 @@ def _install_ai_instructions(ai_cog) -> None:
     if getattr(current, "_sentrix_v32_no_emoji", False):
         return
 
-    async def build_clean(this, user_id: int | None, author_name: str | None = None):
-        instructions = await current(user_id, author_name)
+    async def build_clean(this, user_id: int | None, *args, **kwargs):
+        # 07/11/2026 : `guild_id` (3e argument) faisait planter la réponse de l'IA
+        # sur le chemin des images (« mieux pls » en réponse à une image).
+        instructions = await current(user_id, *args, **kwargs)
         return instructions + (
-            "\n\nStyle Discord SentriX : n'utilise aucun emoji, aucun pictogramme décoratif "
-            "et évite les introductions inutiles. Réponds comme un assistant professionnel, "
-            "direct et naturel."
+            "\n\nStyle Discord SentriX : pas de pictogramme décoratif ni d'introduction "
+            "inutile. Reste direct et naturel."
         )
 
     build_clean._sentrix_v32_no_emoji = True

@@ -350,7 +350,9 @@ class SecurityHardening(commands.Cog):
         # message.mentions ne couvre pas correctement tous les @roles/@everyone.
         if conf.get("antimention") and await automod.security_filter_applies_to(message, "antimention"):
             total_targets = len(message.mentions) + len(message.role_mentions)
-            if message.mention_everyone or len(message.role_mentions) >= 3 or total_targets >= 5:
+            # @everyone / @here : traité par l'AutoMod (règle Discord avant l'envoi,
+            # avertissements, règle des admins). Ici seulement les rôles et cibles en masse.
+            if not message.mention_everyone and (len(message.role_mentions) >= 3 or total_targets >= 5):
                 self._remember_handled(message.id)
                 return await automod._delete_and_warn(
                     message,

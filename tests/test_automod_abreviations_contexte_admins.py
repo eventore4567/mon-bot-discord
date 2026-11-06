@@ -122,6 +122,6 @@ def test_spam_d_un_admin_une_rafale_compte_une_fois(monkeypatch):
             await cog._incident_admin(_admin_message(n, supprimes), "spam", "antispam")
 
     asyncio.run(scenario())
-    assert len(supprimes) == 10                       # tous supprimés
+    assert supprimes == []                            # rien supprimé avant la sanction
     cog._repondre_abus_privilegie.assert_not_awaited()  # mais 1 seul incident
     assert am.ADMIN_SEUILS == {"antiscam": 1, "spam": 3, "antiinvite": 3}

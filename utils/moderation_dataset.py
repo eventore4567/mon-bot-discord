@@ -219,6 +219,9 @@ ABREVIATIONS = {
     # 07/11/2026 : « slp » (salope) passait.
     "slp": "salope", "slpe": "salope", "cnrd": "connard", "btrd": "batard",
     "tmlp": "ta mere la pute", "ntmlp": "nique ta mere la pute", "fdpp": "fils de pute",
+    # 07/11/2026 : « fpd » et « vas te fair enculer » passaient (faute de frappe).
+    "fpd": "fils de pute", "fdep": "fils de pute", "vas": "va", "fair": "faire",
+    "fer": "faire", "enculer": "encule", "enculé": "encule",
 }
 
 
@@ -233,6 +236,8 @@ GROUPES_COMPLEMENTAIRES = (
 PHRASES_COMPLEMENTAIRES = (
     "baise ta mere", "baise ta race", "je te baise", "nique ta grand mere",
     "nique tes morts", "nique ta famille", "ferme ta gueule", "ta mere la pute",
+    "va te faire encule", "va te faire foutre", "va te faire niquer", "va te faire baiser",
+    "je vais t encule", "je te ez", "je t ai ez", "on t a ez",
 )
 
 
