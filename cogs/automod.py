@@ -5353,6 +5353,19 @@ class AutoMod(commands.Cog, name="Automod"):
         if member.id == getattr(member.guild, "owner_id", None) or can_bypass_message_filters(member):
             return
 
+        # 07/11/2026 : mode raid. Pendant un raid confirmé, chaque arrivant suspect
+        # (bot non autorisé, compte récent, avatar par défaut) est expulsé aussitôt.
+        if conf.get("antiraid"):
+            from cogs import raid_mode
+
+            raid_mode.noter_arrivee(member)
+            if raid_mode.actif(member.guild.id):
+                try:
+                    if await raid_mode.sur_arrivee(self, member):
+                        return
+                except Exception:
+                    logger.exception("Mode raid : arrivée non traitée guild=%s", member.guild.id)
+
         if conf["antibot"] and member.bot:
             if await self._bot_is_allowlisted(member.guild.id, member.id):
                 await self.add_risk_signal(member.guild, member.id, "bot_allowlisted_join", 5, reason="Bot allowlisté ajouté au serveur", target=member)
@@ -5549,6 +5562,17 @@ class AutoMod(commands.Cog, name="Automod"):
                                 ),
                             ),
                         )
+                if raid_rapide:
+                    # Mode raid : la vague entière de comptes suspects est expulsée en
+                    # quelques secondes, puis un rapport part quand la vague retombe.
+                    try:
+                        from cogs import raid_mode
+
+                        await raid_mode.declencher(self, member.guild, mesures=[
+                            "niveau de vérification relevé" if elevated else "vérification déjà au maximum",
+                        ])
+                    except Exception:
+                        logger.exception("Mode raid impossible guild=%s", member.guild.id)
                 # Évite de redéclencher la même alerte à chaque nouvel arrivant tant que le raid dure.
                 self.join_tracker.reinitialiser(member.guild.id)
                 if raid_lent:
@@ -5637,7 +5661,12 @@ class AutoMod(commands.Cog, name="Automod"):
 
     async def record_nuke_action(self, guild: discord.Guild, actor_id: int) -> bool:
         """Retourne True si le seuil d'actions destructrices est dépassé pour cet auteur."""
-        return self.nuke_tracker.ajouter((guild.id, actor_id)) >= NUKE_ACTION_THRESHOLD
+        # 07/11/2026 : pendant un raid (mode raid actif), l'anti-nuke se déclenche plus tôt.
+        from cogs import raid_mode
+
+        return self.nuke_tracker.ajouter((guild.id, actor_id)) >= raid_mode.seuil_nuke(
+            guild.id, NUKE_ACTION_THRESHOLD
+        )
 
     async def get_audit_actor(self, guild: discord.Guild, action: discord.AuditLogAction, target_id: int = None):
         """Retrouve l'auteur d'une action récente via les logs d'audit (nécessite la permission adéquate).
