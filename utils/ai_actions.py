@@ -1287,6 +1287,12 @@ def looks_multi_action(question: str) -> bool:
     text = normalize_text(question)
     if not text or len(text) > 1800:
         return False
+    # Les séparateurs d'un raisonnement ("et", ";", "puis") ne sont pas des
+    # actions Discord. Ne planifier que si la demande EST d'abord une action
+    # explicite. Sinon une question mathématique peut être prise pour une
+    # commande de modération, avec ses variables interprétées comme membres.
+    if not looks_action_request(question):
+        return False
     separators = sum(text.count(token) for token in (" puis ", " ensuite ", ";", " et apres ", " et après "))
     action_words = re.findall(
         r"\b(?:cree|creer|ajoute|donne|retire|renomme|configure|mets|change|deplace|"
