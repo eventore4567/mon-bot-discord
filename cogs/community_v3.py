@@ -280,7 +280,9 @@ async def register_daily_claim(bot: commands.Bot, guild_id: int, user_id: int, *
             "UPDATE member_engagement SET daily_streak=?, longest_streak=?, last_daily_claim=? WHERE guild_id=? AND user_id=?",
             (streak, longest, claimed_at, guild_id, user_id),
         )
-        bonus = min(streak, 7) * 25
+        from utils.economy_progress import bonus_serie
+
+        bonus = bonus_serie(streak)
         await bot.db.add_balance(guild_id, user_id, bonus)
         await bot.db.log_transaction(guild_id, None, user_id, "daily_streak_bonus", bonus, f"Bonus streak quotidien x{streak}")
         await _add_season_xp(bot, guild_id, user_id, 20 + min(streak, 10) * 3)
@@ -699,9 +701,9 @@ async def _on_command_completion(bot: commands.Bot, ctx: commands.Context) -> No
             balance = await bot.db.get_balance(ctx.guild.id, ctx.author.id)
             last_daily = int(balance["last_daily"] or 0) if balance else 0
             if last_daily and abs(int(time.time()) - last_daily) <= 30:
-                streak = await register_daily_claim(bot, ctx.guild.id, ctx.author.id, claimed_at=last_daily)
-                if streak.get("new"):
-                    await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"🔥 **Streak quotidien : {streak['streak']} jour(s)**\nBonus de série : **+{stats_service.format_number(streak['bonus'])} 🪙**\nRecord : **{streak['longest']} jour(s)**")))
+                # 07/11/2026 : la série s'affiche DANS le panneau du +daily (cogs/economy) ;
+                # ici, seulement un filet si le +daily ne l'a pas déjà enregistrée.
+                await register_daily_claim(bot, ctx.guild.id, ctx.author.id, claimed_at=last_daily)
         except Exception:
             logger.exception("V3 : impossible de mettre à jour le streak daily.")
     await _notify_mission_rewards(ctx, rewards)
