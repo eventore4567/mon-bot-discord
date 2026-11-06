@@ -340,8 +340,10 @@ def _install_fast_ai(bot: commands.Bot) -> None:
     if ai_cog is None or getattr(ai_cog, "_sentrix_v34_fast_prepare", False):
         return
 
-    # Le client sera recréé avec les modèles/timeout courants au prochain appel.
-    ai_service.REQUEST_TIMEOUT_SECONDS = 12.0
+    # Ne jamais réduire ici le délai installé par la couche de fiabilité IA. Douze
+    # secondes interrompaient les problèmes mathématiques longs avant que les modèles à
+    # raisonnement aient fini. Le client est tout de même recréé pour reprendre le délai
+    # courant et les modèles compatibles.
     ai_service._TEXT_CLIENT = None
 
     async def fast_prepare(this, *, guild_id, channel_id, user_id, author_name,

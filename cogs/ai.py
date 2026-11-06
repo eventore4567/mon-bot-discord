@@ -35,6 +35,7 @@ dans les logs serveur (logger "bot.ai").
 """
 
 import asyncio
+import contextlib
 import contextvars
 from types import SimpleNamespace
 import copy
@@ -984,6 +985,21 @@ class Ai(commands.Cog, name="Ai"):
             return
         if ctx.interaction:
             await ctx.defer()
+        async def update_slash_progress():
+            if not ctx.interaction:
+                return
+            for delay, text in (
+                (20, "🧠 SentriX analyse la demande…"),
+                (35, "⏳ Le raisonnement prend un peu plus de temps, je continue…"),
+                (50, "🔄 Je termine la réponse…"),
+            ):
+                await asyncio.sleep(delay)
+                try:
+                    await ctx.interaction.edit_original_response(content=text)
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    return
+
+        progress_task = asyncio.create_task(update_slash_progress())
         # ctx.typing() donne un retour immédiat ("SentriX est en train d'écrire...") même
         # en préfixe, pour ne jamais laisser l'utilisateur face à un silence total pendant
         # que l'IA réfléchit (voir REQUEST_TIMEOUT_SECONDS dans ai_service.py : la réponse
@@ -1001,6 +1017,9 @@ class Ai(commands.Cog, name="Ai"):
                 await self.send_sentrix_reply(ctx, ctx.author, question)
         finally:
             ai_conversation.CONTEXTE_SALON.reset(jeton_salon)
+            progress_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await progress_task
 
     @staticmethod
     def _normalize_request(text: str) -> str:
@@ -3109,14 +3128,40 @@ class Ai(commands.Cog, name="Ai"):
             # panneau ici rendait la livraison impossible.
             thinking_msg = await ctx.send('🤖 SentriX réfléchit…')
 
+        async def update_progress():
+            """Un seul statut, édité avec parcimonie pendant les réponses longues."""
+            milestones = (
+                (20, "🧠 SentriX analyse la demande…"),
+                (55, "⏳ Le raisonnement prend un peu plus de temps, je continue…"),
+                (105, "🔄 Je termine la réponse…"),
+            )
+            elapsed = 0
+            for delay, text in milestones:
+                await asyncio.sleep(delay - elapsed)
+                elapsed = delay
+                try:
+                    if thinking_msg is not None:
+                        await thinking_msg.edit(content=text)
+                    elif ctx.interaction:
+                        await ctx.interaction.edit_original_response(content=text)
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    return
+
+        progress_task = asyncio.create_task(update_progress())
+
         ctx_command = getattr(ctx, "command", None)
         command_name = ctx_command.qualified_name if ctx_command else "ai"
-        async with ctx.typing():
-            result = await self._prepare_and_generate(
-                guild_id=guild_id, channel_id=channel_id, user_id=ctx.author.id,
-                author_name=str(ctx.author), question=question, forced_advanced=forced_advanced,
-                command=command_name, force_web_search=force_web_search,
-            )
+        try:
+            async with ctx.typing():
+                result = await self._prepare_and_generate(
+                    guild_id=guild_id, channel_id=channel_id, user_id=ctx.author.id,
+                    author_name=str(ctx.author), question=question, forced_advanced=forced_advanced,
+                    command=command_name, force_web_search=force_web_search,
+                )
+        finally:
+            progress_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await progress_task
 
         if not result["ok"]:
             await _remplacer_attente(ctx, thinking_msg)
