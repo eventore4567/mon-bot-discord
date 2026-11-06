@@ -15,37 +15,11 @@ from utils.reaction_role_options import options, save_options
 PURPLE = 0x9B59B6
 
 
-class RolePanelHubView(AdminView):
-    def __init__(self, bot, guild, owner_id):
-        super().__init__(bot, guild, owner_id)
-        box = discord.ui.Container(accent_colour=PURPLE)
-        box.add_item(
-            discord.ui.TextDisplay(
-                "## Panneaux de rôles\nChoisissez comment les membres prennent leurs rôles."
-            )
-        )
+from cogs.reaction_role_wizard import ReactionRoleWizard
 
-        async def dropdown(i):
-            from sentrix_regression_runtime import RolePanelBuilder
 
-            builder = RolePanelBuilder(
-                bot, guild, owner_id, mode="dropdown", allow_mode_switch=False
-            )
-            await i.response.send_message(view=builder, ephemeral=True)
-            builder.message = await i.original_response()
-
-        async def reactions(i):
-            await i.response.send_message(
-                view=await ReactionRoleSetupView(bot, guild, owner_id).build(),
-                ephemeral=True,
-            )
-
-        box.add_item(
-            discord.ui.ActionRow(
-                button("Menu déroulant", dropdown), button("Réactions emoji", reactions)
-            )
-        )
-        self.add_item(box)
+class RolePanelHubView(ReactionRoleWizard):
+    """Point d'entrée historique, désormais assistant direct sans choix intermédiaire."""
 
 
 class PanelTextModal(discord.ui.Modal, title="Créer un panneau de rôles"):
