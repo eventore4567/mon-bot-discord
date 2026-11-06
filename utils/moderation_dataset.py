@@ -237,8 +237,11 @@ PHRASES_COMPLEMENTAIRES = (
     "baise ta mere", "baise ta race", "je te baise", "nique ta grand mere",
     "nique tes morts", "nique ta famille", "ferme ta gueule", "ta mere la pute",
     "va te faire encule", "va te faire foutre", "va te faire niquer", "va te faire baiser",
-    "je vais t encule", "je te ez", "je t ai ez", "on t a ez",
+    "je vais t encule",
 )
+
+#: « je te baise au foot / à FIFA / en 1v1 » = je te bats : pas une insulte (07/11/2026).
+_BAISE_JEU_RE = re.compile(r"\b(?:je|j|on)\s+(?:te|t|vous|v)\s+(?:baise|bz|nique|ez)\s+(?:au|a|aux|en|sur|dans)\b")
 
 
 def developper_abreviations(normalized: str) -> str:
@@ -248,6 +251,14 @@ def developper_abreviations(normalized: str) -> str:
     mots = normalized.split()
     developpes = [ABREVIATIONS.get(_compacter_repetitions(mot), ABREVIATIONS.get(mot, mot)) for mot in mots]
     return " ".join(developpes)
+
+
+def est_expression_de_jeu(texte: str) -> bool:
+    """« je te baise au foot » : expression de victoire, pas une insulte."""
+    normalise = developper_abreviations(normalize_message(texte))
+    return bool(_BAISE_JEU_RE.search(normalise)) and not re.search(
+        r"\b(?:mere|race|soeur|daronne|famille|morts|pere|grand)\b", normalise
+    )
 
 
 class MultilingualModerationDataset:
@@ -389,6 +400,8 @@ class MultilingualModerationDataset:
         if not normalized:
             return None
         normalized = developper_abreviations(normalized)
+        if est_expression_de_jeu(text):
+            return None
         tokens = tuple(normalized.split())
 
         # Les motifs les plus précis passent avant le mot isolé. Cela permet aux logs

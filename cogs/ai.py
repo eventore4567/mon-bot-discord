@@ -143,6 +143,13 @@ async def _images_from_discord_attachments(attachments) -> list[str]:
     return images
 
 
+#: Demande courte de retouche d'une image (« mieux pls », « encore », « refais »).
+_RETOUCHE_RE = re.compile(
+    r"\b(?:mieu[xs]?|meilleur|encore|refai[st]?|recommence|autre|change|plus\s+\w+|moins\s+\w+|"
+    r"better|again|redo|retouche|ameliore|améliore)\b",
+    re.IGNORECASE,
+)
+
 class AiResponseView(discord.ui.View):
     """Boutons attachés à une réponse +ai/+chat : Régénérer, Plus détaillé, Plus court,
     Nouvelle conversation. Verrouillés à l'auteur de la demande, protégés contre le double
@@ -2637,6 +2644,27 @@ class Ai(commands.Cog, name="Ai"):
             return True
         return await self._invoke_command_line(message, command_line)
 
+    async def _description_image(self, cite) -> str | None:
+        """La demande d'origine d'une image générée par SentriX, même après un
+        redémarrage : mémoire, sinon le message auquel l'image répondait."""
+        if not isinstance(cite, discord.Message):
+            return None
+        connue = self.__dict__.get("_images_generees", {}).get(int(cite.id))
+        if connue:
+            return connue
+        if not any(str(getattr(a, "filename", "")).startswith("sentrix-image-") for a in cite.attachments):
+            return None
+        origine = getattr(cite, "reference", None)
+        demande = getattr(origine, "resolved", None)
+        if not isinstance(demande, discord.Message) and getattr(origine, "message_id", None):
+            try:
+                demande = await cite.channel.fetch_message(int(origine.message_id))
+            except (discord.HTTPException, AttributeError, ValueError):
+                demande = None
+        texte = re.sub(r"<@!?\d+>", "", str(getattr(demande, "content", "") or "")).strip()
+        texte = re.sub(r"^(?:sentrix|ssentrix|sentri|snetri|snentrix)\b[ ,:-]*", "", texte, flags=re.IGNORECASE)
+        return texte[:3000] or "l'image précédente"
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         """Permet de parler au bot sans commande : le mentionner, ou commencer son message
@@ -2669,12 +2697,18 @@ class Ai(commands.Cog, name="Ai"):
             bot_id is not None
             and getattr(getattr(referenced, "author", None), "id", None) == bot_id
         )
-        if (
+        # 07/11/2026 : « mieux pls » en réponse à une image restait sans réponse quand
+        # Discord n'envoyait pas le message cité (cache vide, redémarrage).
+        id_cite = int(getattr(reference, "message_id", 0) or 0)
+        demande_retouche = (
+            not reply_to_bot and id_cite and referenced is None and len(content) <= 200
+            and (id_cite in self.__dict__.get("_images_generees", {}) or _RETOUCHE_RE.search(content))
+        )
+        if bot_id is not None and (demande_retouche or (
             image_attachments
             and not reply_to_bot
-            and bot_id is not None
             and getattr(reference, "message_id", None)
-        ):
+        )):
             # Discord n'inclut pas toujours reference.resolved dans l'événement
             # Gateway (après redémarrage, sur mobile, lorsque le cache est vide).
             # Il faut récupérer LA réponse précise, sinon une capture envoyée
@@ -2755,9 +2789,7 @@ class Ai(commands.Cog, name="Ai"):
             # le moteur d'image, même si sa description contient « salon »,
             # « fermer », « visible », « permissions » et autres mots d'action.
             from utils.ai_image_intents import is_image_creation_request
-            image_precedente = self.__dict__.get("_images_generees", {}).get(
-                int(getattr(referenced, "id", 0) or 0)
-            ) if reply_to_bot else None
+            image_precedente = await self._description_image(referenced) if reply_to_bot else None
             if image_precedente and not is_image_creation_request(question):
                 # Réponse à une image de SentriX (« mieux », « plus réaliste ») :
                 # nouvelle version de la même image, avec la demande en plus.

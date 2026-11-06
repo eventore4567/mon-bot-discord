@@ -18,7 +18,7 @@ from cogs import automod as am  # noqa: E402
 RACINE = Path(__file__).resolve().parents[1]
 
 
-@pytest.mark.parametrize("texte", ["fpd", "je te ez", "vas te fair enculer", "va te faire enculer"])
+@pytest.mark.parametrize("texte", ["fpd", "vas te fair enculer", "va te faire enculer", "je te baise ta mere au foot"])
 def test_les_insultes_non_averties_sont_detectees(texte):
     from utils.moderation_dataset import MultilingualModerationDataset
 
@@ -26,7 +26,10 @@ def test_les_insultes_non_averties_sont_detectees(texte):
     assert trouve is not None and trouve.confidence >= 0.92
 
 
-@pytest.mark.parametrize("texte", ["tu vas bien ?", "je vais faire mes devoirs", "gg ez"])
+@pytest.mark.parametrize("texte", [
+    "tu vas bien ?", "je vais faire mes devoirs", "gg ez", "je te ez",          # « ez » n'est pas une insulte
+    "je te baise au foot mdr", "jte baise a fifa", "on vous nique en 1v1",
+])
 def test_les_phrases_banales_restent_permises(texte):
     from utils.moderation_dataset import MultilingualModerationDataset
 
@@ -146,3 +149,37 @@ def test_repondre_a_une_image_de_sentrix_en_genere_une_nouvelle_version():
     source = (RACINE / "cogs" / "ai.py").read_text(encoding="utf-8")
     assert 'memoire[int(envoye.id)] = description[:3000]' in source
     assert "Nouvelle version demandée : {question}" in source
+
+
+def test_une_regle_de_mots_bloques_peut_muter_sur_choix():
+    from cogs import mots_bloques as mb
+
+    regle = SimpleNamespace(
+        id=5, name=f"{mb.PREFIXE} 1", trigger=SimpleNamespace(keyword_filter=["sab"]),
+        actions=[SimpleNamespace(custom_message="non")], exempt_channel_ids=[], edit=AsyncMock(),
+    )
+    assert mb.mute_de(regle) == 0                     # par défaut : aucun mute
+    asyncio.run(mb.changer_mute(regle, 600))
+    nouvelles = regle.edit.await_args.kwargs["actions"]
+    assert nouvelles[0].custom_message == "non"
+    assert nouvelles[1].duration.total_seconds() == 600
+    assert mb.mute_de(SimpleNamespace(actions=nouvelles)) == 600
+    asyncio.run(mb.changer_mute(regle, 0))
+    assert len(regle.edit.await_args.kwargs["actions"]) == 1
+
+
+def test_mieux_pls_retrouve_l_image_meme_apres_un_redemarrage():
+    from cogs import ai as ai_module
+
+    assert ai_module._RETOUCHE_RE.search("mieux pls") and ai_module._RETOUCHE_RE.search("mieu stp")
+    assert not ai_module._RETOUCHE_RE.search("merci")
+    classe = next(v for v in vars(ai_module).values() if isinstance(v, type) and hasattr(v, "_description_image"))
+    cog = classe.__new__(classe)
+    demande = SimpleNamespace(content="sentrix dessine un chat")
+    cite_ns = SimpleNamespace(
+        id=1, attachments=[SimpleNamespace(filename="sentrix-image-1024x1024.jpg")],
+        reference=SimpleNamespace(resolved=demande, message_id=2), channel=None,
+    )
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(ai_module.discord, "Message", SimpleNamespace)
+        assert asyncio.run(cog._description_image(cite_ns)) == "dessine un chat"

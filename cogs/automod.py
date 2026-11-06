@@ -4013,7 +4013,9 @@ class AutoMod(commands.Cog, name="Automod"):
             # 07/11/2026 : « je te baise au foot mdr » était censuré, « ntmmm » ne
             # sanctionnait rien. Le contexte décide d'abord ; une vraie insulte est
             # sanctionnée (mute) au lieu d'être seulement censurée.
-            if await self._insulte_selon_contexte(message) is False:
+            from utils.moderation_dataset import est_expression_de_jeu
+
+            if est_expression_de_jeu(message.content) or await self._insulte_selon_contexte(message) is False:
                 return None
             insulte = self.moderation_dataset.match(message.content)
             if insulte is not None and insulte.confidence >= 0.92:
@@ -5304,7 +5306,8 @@ class AutoMod(commands.Cog, name="Automod"):
                  "Vérifiez la permission Modérer les membres et la hiérarchie des rôles."
         )
         try:
-            note = await panels.envoyer(message.channel, panels.depuis_embed(embeds.warning(f'{message.author.mention}, votre message a été supprimé.\nRaison : contenu offensant détecté.\n{public_status}')))
+            # 07/11/2026 : « la bannière aux avertissements » — avertissement sans bannière.
+            note = await panels.envoyer(message.channel, panels.depuis_embed(embeds.warning(f'{message.author.mention}, votre message a été supprimé.\nRaison : contenu offensant détecté.\n{public_status}'), banniere=False))
             await note.delete(delay=8)
         except discord.HTTPException:
             pass

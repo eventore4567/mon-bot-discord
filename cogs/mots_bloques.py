@@ -38,6 +38,9 @@ MOTIFS_LIENS = [
     r"(?i)\bdiscord(?:app)?\.(?:gg|com/invite)/\S+",
 ]
 SITES_MAX = 100
+#: 07/11/2026 : « choisir si on veut mute ou pas » — sans choix, aucun mute.
+DUREES_MUTE = (("Aucune (bloquer seulement)", 0), ("Mute 1 minute", 60), ("Mute 5 minutes", 300),
+               ("Mute 10 minutes", 600), ("Mute 1 heure", 3600), ("Mute 1 jour", 86400))
 
 
 def lire_mots(texte: str) -> list[str]:
@@ -105,6 +108,24 @@ def declencheur(mots: list[str] | None = None, *, liens: bool = False, sites: li
     return discord.AutoModTrigger(keyword_filter=list(mots or []))
 
 
+def mute_de(regle) -> int:
+    """Durée du mute ajouté par la règle (0 = aucun)."""
+    for action in getattr(regle, "actions", None) or ():
+        duree = getattr(action, "duration", None)
+        if duree:
+            return int(duree.total_seconds())
+    return 0
+
+
+def actions(message: str, mute: int = 0) -> list:
+    liste = [discord.AutoModRuleAction(custom_message=message[:MESSAGE_MAX] or None)]
+    if mute:
+        from datetime import timedelta
+
+        liste.append(discord.AutoModRuleAction(duration=timedelta(seconds=int(mute))))
+    return liste
+
+
 def message_de(regle) -> str:
     for action in getattr(regle, "actions", None) or ():
         texte = getattr(action, "custom_message", None)
@@ -126,7 +147,7 @@ async def creer(
         name=f"{PREFIXE} {numero}",
         event_type=discord.AutoModRuleEventType.message_send,
         trigger=declencheur(mots, liens=liens, sites=sites),
-        actions=[discord.AutoModRuleAction(custom_message=message[:MESSAGE_MAX] or None)],
+        actions=actions(message),
         enabled=True,
         reason=RAISON,
     )
@@ -138,9 +159,14 @@ async def modifier(regle, *, mots: list[str] | None = None, message: str = "",
     liens = est_regle_liens(regle)
     return await regle.edit(
         trigger=declencheur(mots, liens=liens, sites=sites),
-        actions=[discord.AutoModRuleAction(custom_message=message[:MESSAGE_MAX] or None)],
+        actions=actions(message, mute_de(regle)),
         reason=RAISON,
     )
+
+
+async def changer_mute(regle, secondes: int):
+    """Garde mots et message, change seulement la sanction (0 = pas de mute)."""
+    return await regle.edit(actions=actions(message_de(regle), secondes), reason=RAISON)
 
 
 async def _repondre_erreur(interaction: discord.Interaction, exc: Exception, guild_id: int) -> None:
@@ -300,13 +326,24 @@ class MotsBloquesView(discord.ui.View):
             )
             salons.callback = self._salons
             self.add_item(salons)
+            actuel = mute_de(regle)
+            sanction = discord.ui.Select(
+                placeholder="Sanction en plus du blocage",
+                options=[
+                    discord.SelectOption(label=nom, value=str(sec), default=sec == actuel)
+                    for nom, sec in DUREES_MUTE
+                ],
+                row=3,
+            )
+            sanction.callback = self._sanction
+            self.add_item(sanction)
             changer = discord.ui.Button(
                 label="Modifier les sites autorisés" if est_regle_liens(regle) else "Modifier les mots",
-                style=discord.ButtonStyle.primary, row=3,
+                style=discord.ButtonStyle.primary, row=4,
             )
             changer.callback = self._modifier
             self.add_item(changer)
-            supprimer = discord.ui.Button(label="Supprimer la règle", style=discord.ButtonStyle.danger, row=3)
+            supprimer = discord.ui.Button(label="Supprimer la règle", style=discord.ButtonStyle.danger, row=4)
             supprimer.callback = self._supprimer
             self.add_item(supprimer)
 
@@ -334,6 +371,7 @@ class MotsBloquesView(discord.ui.View):
                 name=f"Règle {_numero(r.name)}",
                 value=(
                     f"{contenu}\n"
+                    f"**Sanction :** {dict((s, n) for n, s in DUREES_MUTE).get(mute_de(r), f'mute {mute_de(r)} s')}\n"
                     f"**Message :** {message_de(r) or '(message Discord par défaut)'}\n"
                     f"**Autorisés dans :** {salons}"
                 )[:1024],
@@ -357,6 +395,18 @@ class MotsBloquesView(discord.ui.View):
 
     async def _ajouter(self, interaction: discord.Interaction):
         await interaction.response.send_modal(AjoutModal(self))
+
+    async def _sanction(self, interaction: discord.Interaction):
+        regle = self._regle()
+        if regle is None:
+            return await interaction.response.defer()
+        try:
+            await changer_mute(regle, int(interaction.data["values"][0]))
+        except (discord.Forbidden, discord.HTTPException):
+            return await interaction.response.send_message(
+                "Discord a refusé : il me faut **Modérer les membres** pour muter.", ephemeral=True,
+            )
+        await self.rafraichir(interaction)
 
     async def _liens(self, interaction: discord.Interaction):
         await interaction.response.send_modal(LiensModal(self))
