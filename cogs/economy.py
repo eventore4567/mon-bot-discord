@@ -30,6 +30,7 @@ from utils.audit_trail import journaliser
 from utils import sentrix_panels as sx_panels
 from database.db import now
 from services import economy as economy_service
+from utils import economy_progress as progression
 
 DAILY_AMOUNT = 200
 WEEKLY_AMOUNT = 1000
@@ -323,9 +324,42 @@ class Economy(commands.Cog, name="Economy"):
                 )
             ]
 
+        # 07/11/2026 : la progression — métier, série, et quand revenir.
+        carriere: list[sx_panels.Ligne] = []
+        try:
+            travaux = await progression.nombre_de_travaux(self.bot.db, ctx.guild.id, membre.id)
+            metier = progression.metier_pour(travaux)
+            mot = "travail" if travaux <= 1 else "travaux"
+            carriere.append(sx_panels.Ligne("Métier", f"{metier.emoji} {metier.nom} · {travaux} {mot}"))
+            carriere.append(sx_panels.Ligne("Carrière", progression.progression_metier(travaux)))
+        except Exception:
+            pass
+        try:
+            from cogs import community_v3
+
+            engagement = await community_v3._engagement_row(self.bot, ctx.guild.id, membre.id)
+            jours = int(engagement["daily_streak"] or 0)
+            dernier = int(engagement["last_daily_claim"] or 0)
+            if dernier and time.time() - dernier > 48 * 3600:
+                jours = 0
+            carriere.append(sx_panels.Ligne("Série", f"{progression.flammes(jours)} {jours} jour(s)"))
+        except Exception:
+            pass
+        if membre.id == ctx.author.id:
+            try:
+                compte = await self.bot.db.get_balance(ctx.guild.id, membre.id)
+                for libelle, champ, delai in (("Daily", "last_daily", DAILY_COOLDOWN), ("Work", "last_work", WORK_COOLDOWN)):
+                    pret = int(compte[champ] or 0) + delai if compte else 0
+                    carriere.append(sx_panels.Ligne(
+                        f"`+{libelle.lower()}`", "✅ disponible" if pret <= time.time() else f"<t:{pret}:R>",
+                    ))
+            except Exception:
+                pass
+
         sections = [
             sx_panels.Section("Avoirs", avoirs, aligne=True),
             sx_panels.Section("Sur ce serveur", situation, aligne=True),
+            *([sx_panels.Section("Progression", carriere)] if carriere else []),
             *boost_section,
             sx_panels.Section(
                 "Gagner plus",
@@ -389,14 +423,38 @@ class Economy(commands.Cog, name="Economy"):
         amount, boost = await temporary_boosts.apply_money_boost(
             self.bot.db, ctx.guild.id, ctx.author.id, DAILY_AMOUNT
         )
+        # 07/11/2026 : 1 % d'intérêts sur la banque (plafonnés), versés avec le daily.
+        try:
+            compte = await self.bot.db.get_balance(ctx.guild.id, ctx.author.id)
+            interet = progression.interets(int(compte["bank"] or 0) if compte else 0)
+        except Exception:
+            interet = 0
         ok, remaining = await self.bot.db.claim_timed_reward(
-            ctx.guild.id, ctx.author.id, "last_daily", amount, DAILY_COOLDOWN, "daily"
+            ctx.guild.id, ctx.author.id, "last_daily", amount + interet, DAILY_COOLDOWN, "daily"
         )
         if not ok:
             return await self._panneau_attente(
                 ctx, titre="Récompense quotidienne", restant=remaining, commande="daily"
             )
         details = []
+        if interet:
+            details.append(sx_panels.Ligne("Intérêts de la banque", f"+{stats_service.format_number(interet)} (1 %)"))
+        # La série dans le MÊME panneau (avant : un second message à part).
+        try:
+            from cogs import community_v3
+
+            serie = await community_v3.register_daily_claim(self.bot, ctx.guild.id, ctx.author.id)
+        except Exception:
+            serie = None
+        if serie and serie.get("new"):
+            jours = int(serie["streak"])
+            amount += int(serie.get("bonus") or 0)
+            details.append(sx_panels.Ligne(
+                "Série", f"{progression.flammes(jours)} **{jours} jour(s)** · +{stats_service.format_number(serie['bonus'])}"
+                + (" · 🎉 palier !" if jours % progression.SERIE_PALIER_JOURS == 0 else ""),
+            ))
+            details.append(sx_panels.Ligne("Record", f"{serie.get('longest', jours)} jour(s) · revenez dans les 48 h"))
+        amount += interet
         if boost is not None:
             details.append(
                 sx_panels.Ligne(
@@ -444,7 +502,9 @@ class Economy(commands.Cog, name="Economy"):
 
     @commands.hybrid_command(name="work", description="Travailler pour gagner de l'argent.")
     async def work(self, ctx: commands.Context):
-        base_amount = random.randint(WORK_MIN, WORK_MAX)
+        # 07/11/2026 : vrai métier avec promotions, tâche du jour et événements.
+        travaux = await progression.nombre_de_travaux(self.bot.db, ctx.guild.id, ctx.author.id)
+        base_amount, evenement, metier, tache = progression.tirer_salaire(travaux)
         amount, boost = await temporary_boosts.apply_money_boost(
             self.bot.db, ctx.guild.id, ctx.author.id, base_amount
         )
@@ -455,9 +515,16 @@ class Economy(commands.Cog, name="Economy"):
             return await self._panneau_attente(
                 ctx, titre="Travail", restant=remaining, commande="work"
             )
-        metiers = ["développeur", "livreur", "chef cuisinier", "streamer", "modérateur", "vendeur"]
-        metier = random.choice(metiers)
-        details = [sx_panels.Ligne("Métier", metier.capitalize())]
+        details = [sx_panels.Ligne("Métier", f"{metier.emoji} {metier.nom}")]
+        if evenement:
+            details.append(sx_panels.Ligne("Événement", evenement))
+        apres = progression.metier_pour(travaux + 1)
+        if apres.nom != metier.nom:
+            details.append(sx_panels.Ligne(
+                "🎉 Promotion", f"Vous devenez **{apres.emoji} {apres.nom}** "
+                f"({apres.salaire_min}–{apres.salaire_max} par travail)",
+            ))
+        details.append(sx_panels.Ligne("Carrière", progression.progression_metier(travaux + 1)))
         if boost is not None:
             details.append(
                 sx_panels.Ligne(
@@ -468,7 +535,7 @@ class Economy(commands.Cog, name="Economy"):
         await self._panneau_gain(
             ctx,
             titre="Travail",
-            resume=f"{ctx.author.mention} a travaillé comme **{metier}**.",
+            resume=f"{ctx.author.mention} {tache}.",
             montant=amount,
             cooldown=WORK_COOLDOWN,
             details=details,
