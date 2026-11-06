@@ -725,10 +725,8 @@ class SentriXSetupV74(v73.SentriXSetupV73):
 
         rules = (
             ("verify_role", "Vérification", "donné quand un membre réussit la vérification"),
-            ("member_role", "Membre principal", "le rôle « membre » de référence du serveur"),
             ("warn_role", "Avertissement", "donné à un membre averti, retiré quand il n'a plus d'avertissement"),
             ("mute_role", "Mute", "donné pendant un mute, retiré à la fin du mute"),
-            ("giveaway_block_role", "Exclusion des giveaways", "donné à l'exclusion, retiré quand elle est levée"),
         )
         lines = [
             f"**Arrivée** → {' '.join(mention(i) for i in arrival_ids) or 'Aucun'} · donné à chaque nouveau membre",

@@ -83,8 +83,10 @@ async def main() -> int:
     view = await build(bot, guild, "roles")
     text = "\n".join(str(getattr(i, "content", "")) for top in view.children for i in walk(top)
                      if isinstance(i, discord.ui.TextDisplay))
-    for label in ("Arrivée", "Vérification", "Avertissement", "Mute", "Exclusion des giveaways", "Récompenses de niveau"):
+    for label in ("Arrivée", "Vérification", "Avertissement", "Mute", "Récompenses de niveau"):
         check(f"**{label}**" in text, f"la page montre la règle « {label} »")
+    for label in ("Membre principal", "Exclusion des giveaways"):
+        check(label not in text, f"la page ne montre plus le réglage retiré « {label} »")
 
     shown = await choose("Avertissement", h.ADMIN_ROLE_ID)
     conf = await bot.db.get_guild_config(h.GID)

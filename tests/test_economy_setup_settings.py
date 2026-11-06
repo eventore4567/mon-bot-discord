@@ -10,7 +10,12 @@ import pytest_asyncio
 
 os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 from cogs.economy import Economy
-from cogs.economy_setup import EconomyPublicView, EconomySettingsModal, EconomySetupView
+from cogs.economy_setup import (
+    EconomyAdvancedView,
+    EconomyPublicView,
+    EconomySettingsModal,
+    EconomySetupView,
+)
 from database.db import Database
 from utils import game_rewards
 from utils.economy_settings import (
@@ -266,7 +271,7 @@ async def test_setup_component_admin_rejects_member(bot):
 
 @pytest.mark.asyncio
 async def test_economy_page_is_complete_and_fits_discord_components(bot):
-    view = await EconomySetupView(bot, SimpleNamespace(id=1), 42).build()
+    view = await EconomyAdvancedView(bot, SimpleNamespace(id=1), 42).build()
     assert int(view.children[0].accent_colour) == 0xF1C40F
     labels = {
         item.label
@@ -287,9 +292,7 @@ async def test_economy_page_is_complete_and_fits_discord_components(bot):
         "Réinitialiser l'économie",
     } <= labels
     assert view.total_children_count <= 40
-    assert not any(
-        isinstance(item, discord.ui.MediaGallery) for item in view.walk_children()
-    )
+    assert isinstance(view.children[0].children[0], discord.ui.MediaGallery)
 
 
 @pytest.mark.asyncio
@@ -385,7 +388,12 @@ async def test_confirmed_reset_uses_existing_retention_context(bot):
         patch("cogs.economy.journaliser", new_callable=AsyncMock),
         patch("cogs.economy.sx_panels.envoyer", new_callable=AsyncMock),
     ):
-        await view.children[0].children[1].children[0].callback(interaction)
+        await next(
+            item
+            for item in view.walk_children()
+            if isinstance(item, discord.ui.Button)
+            and item.label == "Oui, tout remettre à zéro"
+        ).callback(interaction)
     row = await bot.db.fetchone("SELECT * FROM economy WHERE guild_id=1 AND user_id=42")
     assert row is None
     # Le reset explicite ne laisse pas la garde désactivée après le clic.

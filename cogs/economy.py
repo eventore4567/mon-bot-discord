@@ -194,6 +194,8 @@ class Economy(commands.Cog, name="Economy"):
             self.bot._sentrix_shop_view_registered = True
         from cogs.economy_setup import EconomyPublicView
         self.bot.add_view(EconomyPublicView(self.bot))
+        from cogs.economy_panel_builder import restore_activity_panels
+        await restore_activity_panels(self.bot)
         self._shop_panel_refresh_task = asyncio.create_task(self._refresh_shop_panels_after_ready())
 
     async def cog_unload(self):

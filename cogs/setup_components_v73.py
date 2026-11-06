@@ -246,13 +246,21 @@ def pieces_jointes_banniere() -> list:
     return [fichier] if fichier is not None else []
 
 
+def _banniere_distante(vue) -> bool:
+    if not isinstance(vue, discord.ui.LayoutView):
+        return False
+    medias = [str(item.media.url) for child in vue.walk_children()
+              if isinstance(child, discord.ui.MediaGallery) for item in child.items]
+    return bool(medias) and all(url.startswith("https://") for url in medias)
+
+
 def joindre_banniere(kwargs: dict) -> dict:
     """Ajoute ``file=`` aux arguments d'envoi — ou les laisse intacts.
 
     Tout envoi d'une vue portant un bandeau DOIT passer par ici, sinon la
     galerie référence une pièce jointe absente et Discord refuse le message.
     """
-    if not banniere_disponible():
+    if not banniere_disponible() or _banniere_distante(kwargs.get("view")):
         return kwargs
     fichier = fichier_banniere()
     if fichier is not None:
@@ -438,7 +446,7 @@ class SentriXSetupV73(discord.ui.LayoutView):
         Un fichier neuf est créé à chaque appel : discord.File est consommé après
         un envoi et ne doit jamais être réutilisé.
         """
-        return pieces_jointes_banniere()
+        return [] if _banniere_distante(self) else pieces_jointes_banniere()
 
     async def refresh(self, interaction: discord.Interaction) -> None:
         # Les opérations Setup peuvent inclure SQL/API Discord. ACK immédiat pour éviter
@@ -453,7 +461,7 @@ class SentriXSetupV73(discord.ui.LayoutView):
         # l'image, elle fait REFUSER le message entier par Discord.
         await interaction.edit_original_response(content=None,
             embed=None,
-            attachments=pieces_jointes_banniere(),
+            attachments=[] if _banniere_distante(self) else pieces_jointes_banniere(),
             view=self, allowed_mentions=_SANS_PING)
 
     async def rebuild(self) -> None:
