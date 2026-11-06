@@ -52,6 +52,7 @@ class EtatRaid:
     arrivees: int = 0
     expulses: list = field(default_factory=list)      # (id, nom, motif)
     echecs: list = field(default_factory=list)        # (id, nom, erreur)
+    neutralises: list = field(default_factory=list)   # expulsion refusée, mute appliqué
     epargnes: int = 0
     mesures: list = field(default_factory=list)
     rapport_tache: asyncio.Task | None = None
@@ -131,7 +132,25 @@ async def _expulser(automod, etat: EtatRaid, member, motif: str, verrou: asyncio
         except discord.NotFound:
             pass  # déjà parti
         except discord.HTTPException as exc:
-            etat.echecs.append((member.id, str(member), f"refus Discord ({exc.status})"))
+            # Solution de repli : mute (Discord ou SentriX) pendant le raid, et UN
+            # MP au propriétaire avec la permission à donner.
+            repli = "mute_failed"
+            muter = getattr(automod, "_muter", None)
+            if callable(muter):
+                try:
+                    repli = await muter(member.guild, member, RAID_MODE_DUREE, f"{RAISON} ({motif})")
+                except Exception:  # noqa: BLE001
+                    repli = "mute_failed"
+            alerter = getattr(automod, "_alerter_permission_manquante", None)
+            if callable(alerter):
+                try:
+                    await alerter(member.guild, "kick")
+                except Exception:  # noqa: BLE001
+                    pass
+            if repli != "mute_failed":
+                etat.neutralises.append((member.id, str(member), motif))
+            else:
+                etat.echecs.append((member.id, str(member), f"refus Discord ({exc.status})"))
 
 
 def _verrou(automod) -> asyncio.Semaphore:
@@ -224,6 +243,10 @@ def champs_rapport(etat: EtatRaid) -> dict:
         "Expulsés": str(len(etat.expulses)),
         "Épargnés (comptes anciens, staff, bots autorisés)": str(etat.epargnes),
     }
+    if etat.neutralises:
+        champs["Rendus muets (expulsion refusée)"] = (
+            f"{len(etat.neutralises)} — leurs messages sont bloqués ; donne-moi **Expulser des membres**"
+        )
     if etat.echecs:
         champs["Échecs"] = f"{len(etat.echecs)} — rôle de SentriX trop bas ou permission Expulser manquante"
     champs["Mesures"] = " · ".join(
@@ -235,10 +258,12 @@ def champs_rapport(etat: EtatRaid) -> dict:
 
 
 def fichier_rapport(etat: EtatRaid) -> discord.File | None:
-    if not etat.expulses and not etat.echecs:
+    if not etat.expulses and not etat.echecs and not etat.neutralises:
         return None
     lignes = ["Rapport du mode raid SentriX", "", "Expulsés :"]
     lignes += [f"{i}\t{nom}\t{motif}" for i, nom, motif in etat.expulses]
+    if etat.neutralises:
+        lignes += ["", "Rendus muets (expulsion refusée) :"] + [f"{i}\t{nom}\t{m}" for i, nom, m in etat.neutralises]
     if etat.echecs:
         lignes += ["", "Non expulsés :"] + [f"{i}\t{nom}\t{err}" for i, nom, err in etat.echecs]
     return discord.File(io.BytesIO("\n".join(lignes).encode("utf-8")), filename="rapport-raid.txt")
