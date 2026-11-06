@@ -499,6 +499,16 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
 
     exceptions.callback = open_exceptions
 
+    # 07/11/2026 : mots-clés bloqués AVANT l'envoi, avec le message de son choix.
+    mots_bloques_bouton = discord.ui.Button(label="Mots bloqués", style=discord.ButtonStyle.secondary)
+
+    async def open_mots_bloques(interaction: discord.Interaction):
+        from . import mots_bloques
+
+        await mots_bloques.ouvrir(interaction, self.guild)
+
+    mots_bloques_bouton.callback = open_mots_bloques
+
     diagnostic = discord.ui.Button(
         label="Vérifier la configuration", style=discord.ButtonStyle.secondary,
     )
@@ -599,7 +609,7 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
 
     admins_bouton.callback = basculer_admins
     # 07/11/2026 : « enlève Vérifier la configuration » — retiré du panneau.
-    container.add_item(discord.ui.ActionRow(exceptions, admins_bouton))
+    container.add_item(discord.ui.ActionRow(exceptions, mots_bloques_bouton, admins_bouton))
 
     # Accès direct à CHAQUE règle, inspiré des écrans de réglages par filtre :
     # état réel et configuration explicite. Ce menu ne coche rien et n'active
