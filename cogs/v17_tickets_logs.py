@@ -136,6 +136,15 @@ async def _audit_actor_map(guild: discord.Guild, event_key: str, target_ids: set
 
 def _line_from_embed(embed: discord.Embed, target_id: int | None, actor) -> str:
     desc = str(embed.description or "").replace("\n", " — ").strip()
+    if not desc:
+        # 07/11/2026 : « Salon créé » n'a que des champs (Salon, Type, Responsable) :
+        # la ligne groupée sortait vide. On reprend le premier champ, le nom.
+        champs = [
+            f"**{f.name}** · {str(f.value).strip()}"
+            for f in list(getattr(embed, "fields", []) or [])[:2]
+            if str(getattr(f, "value", "") or "").strip()
+        ]
+        desc = " — ".join(champs)
     desc = desc[:500] if desc else (f"`{target_id}`" if target_id else "Événement Discord")
     actor_text = f" par {getattr(actor, 'mention', str(actor))} (`{actor.id}`)" if actor is not None else ""
     return f"• {desc}{actor_text}"

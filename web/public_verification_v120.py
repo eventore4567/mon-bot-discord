@@ -595,6 +595,10 @@ def _landing_channel(member: discord.Member):
     return None
 
 
+class _PasDeLog(Exception):
+    """Interrompt l'envoi du log de vérification (vérification Discord)."""
+
+
 async def _send_success_dm(
     bot,
     member: discord.Member,
@@ -613,42 +617,27 @@ async def _send_success_dm(
         language = "fr"
     english = language == "en"
 
-    top = discord.Embed(
-        title=(
-            f"Verification successful on {guild.name}"
-            if english
-            else f"Vérification réussie sur {guild.name}"
-        ),
-        colour=discord.Colour.green(),
-    )
-    body = discord.Embed(
-        description=(
-            "**Your Discord account has been verified successfully.**\n"
-            "SentriX completed the security checks and unlocked your server access."
-            if english
-            else
-            "**Ton compte Discord a été vérifié avec succès.**\n"
-            "SentriX a terminé les contrôles de sécurité et débloqué ton accès au serveur."
-        ),
-        colour=discord.Colour.green(),
-    )
-    body.set_footer(
-        text="SentriX • Web Verification" if english else "SentriX • Vérification web"
-    )
-
-    view = discord.ui.View(timeout=None)
-    view.add_item(
-        discord.ui.Button(
-            label="Open server" if english else "Ouvrir le serveur",
-            url=destination,
-        )
-    )
+    # 07/11/2026 : « le MP est moche » — une seule carte verte, un bouton, sans
+    # double embed ni « Vérification web » (la vérification se fait dans Discord).
+    vue = discord.ui.LayoutView(timeout=None)
+    carte = discord.ui.Container(accent_colour=discord.Colour(0x57F287))
+    carte.add_item(discord.ui.TextDisplay(
+        (f"### ✅ You are verified on {guild.name}\nYou now have access to the server. Welcome!")
+        if english else
+        (f"### ✅ Vous êtes vérifié sur {guild.name}\nVous avez maintenant accès au serveur. Bienvenue !")
+    ))
+    carte.add_item(discord.ui.ActionRow(discord.ui.Button(
+        label="Open the server" if english else "Ouvrir le serveur", url=destination,
+    )))
+    vue.add_item(carte)
     try:
-        await member.send(
-            embeds=[top, body],
-            view=view,
-            allowed_mentions=discord.AllowedMentions.none(),
-        )
+        from utils import sentrix_emojis
+
+        sentrix_emojis.appliquer_a_la_vue(vue)
+    except Exception:  # noqa: BLE001 — habillage seulement
+        pass
+    try:
+        await member.send(view=vue, allowed_mentions=discord.AllowedMentions.none())
         return True
     except (discord.Forbidden, discord.HTTPException):
         return False
@@ -882,6 +871,10 @@ async def _complete_verification(
 
     try:
         from utils import log_service
+        # 07/11/2026 : « enlève les logs de vérif, c'est moche » — plus de carte
+        # « Membre vérifié » pour la vérification Discord.
+        if methode.startswith("discord"):
+            raise _PasDeLog
         log_embed = discord.Embed(
             title=(
                 "Membre vérifié — Discord" if methode.startswith("discord")
@@ -907,6 +900,8 @@ async def _complete_verification(
             log_embed,
             event_key=f"verification_web:{guild.id}:{member.id}:{int(time.time())}",
         )
+    except _PasDeLog:
+        pass
     except Exception:
         logger.debug("Web verification log skipped.", exc_info=True)
 

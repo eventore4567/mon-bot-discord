@@ -126,7 +126,7 @@ def test_une_rafale_juste_apres_l_avertissement_ne_mute_pas_encore(monkeypatch):
 
     cog = _am.AutoMod.__new__(_am.AutoMod)
     cog.bot = _NS(db=_NS(get_guild_config=_AM(return_value=None)))
-    etapes = iter([1, 2])
+    etapes = iter([2, 3])  # 2 = avertissement (palier de départ 1 depuis le 07/11)
     cog._next_spam_stage = _AM(side_effect=lambda *_: next(etapes))
     monkeypatch.setattr(_am.moderation_service, "warn", _AM(return_value=_NS(executed=True)))
     guild = _NS(id=1, me=_NS(id=9), name="Serveur", owner_id=2)

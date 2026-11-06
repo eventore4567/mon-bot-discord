@@ -123,6 +123,7 @@ def _callbacks(test):
 def test_la_bonne_reponse_lance_les_controles_du_site_et_verifie(monkeypatch):
     complete = AsyncMock(return_value=({"already_verified": False, "channel_id": "42"}, None))
     test, web_verif = _test(monkeypatch, complete=complete)
+    test.etape = verification_discord.ETAPES       # dernière étape du double test
     interaction = _interaction()
     asyncio.run(_callbacks(test)[test.attendu[1]](interaction))
     args, kwargs = complete.await_args
@@ -137,6 +138,7 @@ def test_un_refus_des_controles_est_explique(monkeypatch):
 
     erreur = web.json_response({"ok": False, "error": "Ton compte Discord est trop récent."}, status=429)
     test, _ = _test(monkeypatch, complete=AsyncMock(return_value=(None, erreur)))
+    test.etape = verification_discord.ETAPES
     interaction = _interaction()
     asyncio.run(_callbacks(test)[test.attendu[1]](interaction))
     vue = interaction.edit_original_response.await_args.kwargs["view"]
@@ -264,3 +266,31 @@ def test_la_consigne_de_securite_est_dans_le_prompt():
 
     assert "Ne donne JAMAIS de recette" in ai_service.SYSTEM_PROMPT
     assert "répète après moi" in ai_safety.CONSIGNE_SECURITE
+
+
+
+def test_double_controle_deux_emojis_a_la_suite(monkeypatch):
+    # 07/11/2026 : « rends la vérif mieux, comme un double contrôle ».
+    complete = AsyncMock(return_value=({"already_verified": False, "channel_id": None}, None))
+    test, web_verif = _test(monkeypatch, complete=complete)
+    assert verification_discord.ETAPES == 2 and test.etape == 1
+    interaction = _interaction()
+    asyncio.run(_callbacks(test)[test.attendu[1]](interaction))
+    complete.assert_not_awaited()                      # 1re bonne réponse : étape 2
+    vue = interaction.response.edit_message.await_args.kwargs["view"]
+    assert "Étape 2/2" in vue.children[0].children[0].content
+    suivant = vue.test
+    interaction2 = _interaction()
+    asyncio.run(_callbacks(suivant)[suivant.attendu[1]](interaction2))
+    complete.assert_awaited_once()
+
+
+def test_une_erreur_fait_recommencer_a_l_etape_1(monkeypatch):
+    test, _ = _test(monkeypatch)
+    test.etape = 2
+    mauvais = next(nom for _e, nom in test.propositions if nom != test.attendu[1])
+    interaction = _interaction()
+    asyncio.run(_callbacks(test)[mauvais](interaction))
+    vue = interaction.response.edit_message.await_args.kwargs["view"]
+    assert "Étape 1/2" in vue.children[0].children[0].content
+    assert "2 minutes pour répondre" in vue.children[0].children[0].content

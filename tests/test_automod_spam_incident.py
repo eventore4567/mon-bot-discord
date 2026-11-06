@@ -118,8 +118,8 @@ async def _rafale(cog, member, nombre: int):
 
 @pytest.mark.asyncio
 async def test_une_rafale_de_30_messages_produit_une_seule_sanction_un_avertissement_un_log():
-    # 05/11/2026 : la première rafale vaut un AVERTISSEMENT (pas de mute), puis
-    # 5 min, 10 min, 30 min… à la récidive ; la rafale reste UN seul incident.
+    # 07/11/2026 : rappel, avertissement, puis 5 min, 10 min… à la récidive ; la
+    # rafale reste UN seul incident.
     cog = _cog(conf={"antispam": 1, "escalation": 1})
     member = _member()
     messages, court = await _rafale(cog, member, 30)
@@ -131,7 +131,7 @@ async def test_une_rafale_de_30_messages_produit_une_seule_sanction_un_avertisse
     assert sum(1 for m in messages if m.delete.await_count) == 30
     fields = {f.name: f.value for f in cog.log_action.await_args.args[1].fields}
     assert fields["Messages supprimés"] == "30", fields
-    assert fields["Niveau anti-spam"] == "2"
+    assert fields["Niveau anti-spam"] == "1"
     note = court.await_args.args[1]
     assert "<@7>" in note and "spam" in note
 
@@ -148,9 +148,9 @@ async def test_la_recidive_de_spam_mute_une_seule_fois():
     assert cog.log_action.await_count == 1
     fields = {f.name: f.value for f in cog.log_action.await_args.args[1].fields}
     assert "Exclusion temporaire" in fields["Action"], fields
-    # Deux rafales déjà comptées : la troisième vaut le palier 4 (mute 10 min).
-    assert fields["Durée"].startswith("10 min"), fields
-    assert fields["Niveau anti-spam"] == "4"
+    # Deux rafales déjà comptées (rappel puis avertissement) : la troisième mute 5 min.
+    assert fields["Durée"].startswith("5 min"), fields
+    assert fields["Niveau anti-spam"] == "3"
     assert "mute" in court.await_args.args[1]
 
 
@@ -249,7 +249,7 @@ def test_censure_clone_masque_mot_interdit_sans_toucher_au_reste():
         "salut idiot comment ça va",
         blocked_word="idiot",
     )
-    assert result == "salut ████ (mot censuré) comment ça va"
+    assert result == r"salut \*\*\* comment ça va"  # 07/11 : plus de case blanche
     assert "idiot" not in result
 
 
@@ -262,8 +262,9 @@ def test_censure_clone_masque_lien_et_mot_dans_le_meme_message():
     assert result is not None
     assert "idiot" not in result
     assert "evil.example" not in result
-    assert "mot censuré" in result
-    assert "lien censuré" in result
+    # 07/11/2026 : plus de cases blanches — « *** » et « (lien retiré) ».
+    assert r"\*\*\*" in result
+    assert "lien retiré" in result
 
 
 def test_censure_clone_refuse_de_republier_si_le_terme_detecte_ne_peut_pas_etre_masque():

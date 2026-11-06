@@ -148,9 +148,11 @@ def test_clear_and_clearwarnings_no_longer_double_confirm():
 
 
 def test_success_dm_matches_requested_green_verification_style():
-    assert 'Verification successful on {guild.name}' in WEB_SOURCE
-    assert "discord.Colour.green()" in WEB_SOURCE
-    assert 'label="Open server"' in WEB_SOURCE
+    # 07/11/2026 : une seule carte verte (plus deux embeds « Vérification web »).
+    assert "Vous êtes vérifié sur {guild.name}" in WEB_SOURCE
+    assert "discord.Colour(0x57F287)" in WEB_SOURCE
+    assert '"Ouvrir le serveur"' in WEB_SOURCE
+    assert "SentriX • Vérification web" not in WEB_SOURCE
 
 
 def test_adaptive_v5_is_web_gated_and_can_refresh_existing_panels():

@@ -35,6 +35,7 @@ privé de ses rôles dangereux et expulsé, et le propriétaire du serveur est a
 """
 
 import asyncio
+import inspect
 import logging
 import re
 import time
@@ -486,6 +487,15 @@ NATIVE_ANTISCAM_RULE_NAME = "SentriX • Anti-arnaque"
 NATIVE_ANTISCAM_CUSTOM_MESSAGE = "Ce message ressemble à une arnaque interdite par ce serveur."
 NATIVE_ANTIMENTION_RULE_NAME = "SentriX • Anti-mentions"
 NATIVE_ANTIMENTION_CUSTOM_MESSAGE = "Ce message contient trop de mentions."
+#: 07/11/2026 : « même si ça supprime, ça ping quand même » — la seule façon d'empêcher
+#: le ping est que Discord bloque le message AVANT l'envoi. Discord exempte déjà de ses
+#: règles AutoMod les membres avec Administrateur ou Gérer le serveur.
+NATIVE_ANTIEVERYONE_RULE_NAME = "SentriX • Anti-@everyone"
+NATIVE_ANTIEVERYONE_CUSTOM_MESSAGE = "Les mentions @everyone et @here sont bloquées sur ce serveur."
+NATIVE_ANTIEVERYONE_TASK = "automod-anti-everyone-v1"
+#: @everyone / @here d'un membre : avertissement, avertissement, puis mute d'1 h.
+EVERYONE_FENETRE = 3600
+EVERYONE_MUTE_SECONDES = 3600
 NATIVE_HARMFUL_RULE_NAME = "SentriX • Contenu sensible"
 NATIVE_HARMFUL_CUSTOM_MESSAGE = "Ce contenu est bloqué par la modération du serveur."
 NATIVE_INVITE_REGEX_PATTERNS = (
@@ -600,7 +610,8 @@ SPAM_MUTE_DURATIONS_SECONDS = (300, 600, 1800, 3600, 7200)
 SPAM_TIMEOUT_SECONDS = SPAM_MUTE_DURATIONS_SECONDS[0]
 #: Palier de la première rafale : 1 = rappel, 2 = avertissement, 3 = mute 5 min.
 #: 05/11/2026 : avertissement d'abord, mute seulement à la récidive.
-SPAM_PREMIER_PALIER = 2
+# 07/11/2026 : « je veux 2 avertissements puis le mute » — rappel, avertissement, mute.
+SPAM_PREMIER_PALIER = 1
 #: Spam soutenu : messages ÷ fenêtre longue (2× le seuil de rafale en 20 s).
 SPAM_FENETRE_LONGUE = 20
 #: Majuscules : dès 5 lettres (« WWWWW », « # WWWWWW »), plus de 70 % en capitales.
@@ -613,6 +624,34 @@ PINGS_TOTAL = 6
 _JETONS_NON_TEXTE = re.compile(r"<a?:\w+:\d+>|<[@#][!&]?\d+>|<t:\d+(?::\w)?>|https?://\S+")
 
 
+async def _mp_vue(destinataire, vue) -> None:
+    """Envoie une carte en MP ; un destinataire sans MP possible est ignoré."""
+    envoi = getattr(destinataire, "send", None)
+    if envoi is None:
+        return
+    resultat = envoi(view=vue, allowed_mentions=discord.AllowedMentions.none())
+    if inspect.isawaitable(resultat):
+        await resultat
+
+
+def carte_mp_simple(titre: str, texte: str, couleur: int):
+    """Carte de MP sans bannière : en MP, la bannière s'affichait en pièce jointe sous
+    la carte (« la bannière violette en bas », 07/11/2026)."""
+    vue = discord.ui.LayoutView(timeout=None)
+    carte = discord.ui.Container(accent_colour=discord.Colour(couleur))
+    carte.add_item(discord.ui.TextDisplay(f"### {titre}"[:3900]))
+    carte.add_item(discord.ui.Separator())
+    carte.add_item(discord.ui.TextDisplay(texte[:3900]))
+    vue.add_item(carte)
+    try:
+        from utils import sentrix_emojis
+
+        sentrix_emojis.appliquer_a_la_vue(vue)
+    except Exception:  # noqa: BLE001 — habillage seulement
+        pass
+    return vue
+
+
 def carte_alerte_admin(guild, admin):
     """MP au propriétaire : un admin a enchaîné des actions destructrices.
 
@@ -623,6 +662,8 @@ def carte_alerte_admin(guild, admin):
         titre="Un administrateur a fait des actions dangereuses",
         sous_titre=f"Sur {getattr(guild, 'name', 'votre serveur')}",
         kind="warning",
+        # En MP, la bannière arrive en pièce jointe SOUS la carte : pas de bannière.
+        banniere=False,
         sections=(
             panels.Section(
                 "Ce qui s'est passé",
@@ -769,7 +810,8 @@ def _censor_blacklist_word(content: str, word: str | None) -> str | None:
     )
     redacted, count = re.subn(
         pattern,
-        "████ (mot censuré)",
+        # 07/11/2026 : « j'aime pas la censure en case blanche ».
+        r"\*\*\*",
         str(content or ""),
         flags=re.IGNORECASE,
     )
@@ -778,7 +820,7 @@ def _censor_blacklist_word(content: str, word: str | None) -> str | None:
 
 def _censor_links(content: str) -> str | None:
     """Masque les liens visibles d'un message destiné au repost webhook."""
-    redacted, count = LINK_RE.subn("████ (lien censuré)", str(content or ""))
+    redacted, count = LINK_RE.subn("*(lien retiré)*", str(content or ""))
     return redacted if count else None
 
 
@@ -812,7 +854,7 @@ def _censor_scam(content: str) -> str | None:
     for keyword in sorted(SCAM_KEYWORDS, key=len, reverse=True):
         redacted, hits = re.subn(
             re.escape(keyword),
-            "████ (contenu censuré)",
+            r"\*\*\*",
             redacted,
             flags=re.IGNORECASE,
         )
@@ -1532,6 +1574,13 @@ class AutoMod(commands.Cog, name="Automod"):
             # Migration ponctuelle : un serveur nettoyé ne l'est plus à chaque démarrage
             # (un appel Discord par serveur et par redémarrage, mesuré).
             by_id = {g.id: g for g in list(self.bot.guilds)}
+            for guild_id in await once_per_guild.restants(self.bot, NATIVE_ANTIEVERYONE_TASK, by_id):
+                try:
+                    if await self._sync_native_antieveryone_rule(by_id[guild_id]):
+                        await once_per_guild.marquer(self.bot, NATIVE_ANTIEVERYONE_TASK, guild_id)
+                except Exception:  # noqa: BLE001 — un serveur n'empêche pas les autres
+                    logger.debug("Anti-@everyone non posé guild=%s", guild_id, exc_info=True)
+                await asyncio.sleep(0.25)
             for guild_id in await once_per_guild.restants(self.bot, NATIVE_CLEANUP_TASK, by_id):
                 result = await self._sync_native_suite(by_id[guild_id])
                 if result is not None:
@@ -1551,6 +1600,24 @@ class AutoMod(commands.Cog, name="Automod"):
         except Exception:
             logger.exception("Bootstrap de nettoyage AutoMod interrompu")
 
+    async def _nom_regle_native(self, guild_id: int, rule_id: int) -> str | None:
+        cache = self.__dict__.setdefault("_native_rule_details", {})
+        connu = cache.get((guild_id, rule_id))
+        if connu is not None:
+            return connu[0]
+        guild = self.bot.get_guild(guild_id)
+        if guild is None:
+            return None
+        try:
+            regle = await guild.fetch_automod_rule(rule_id)
+        except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+            return None
+        details = (str(getattr(regle, "name", "inconnue"))[:90], getattr(regle, "creator_id", None))
+        if len(cache) > 1000:
+            cache.clear()
+        cache[(guild_id, rule_id)] = details
+        return details[0]
+
     @commands.Cog.listener()
     async def on_automod_action(self, execution: discord.AutoModAction) -> None:
         """Identifier les blocages exécutés par Discord AVANT le moteur Python.
@@ -1567,6 +1634,18 @@ class AutoMod(commands.Cog, name="Automod"):
         user_id = int(getattr(execution, "user_id", 0) or 0)
         if not guild_id or not rule_id or not user_id:
             return
+        # 07/11/2026 : @everyone / @here bloqué par la règle SentriX — chaque essai
+        # compte (avertissement, avertissement, mute d'1 h), avant l'anti-doublon.
+        try:
+            if await self._nom_regle_native(guild_id, rule_id) == NATIVE_ANTIEVERYONE_RULE_NAME:
+                guild = self.bot.get_guild(guild_id)
+                member = guild.get_member(user_id) if guild is not None else None
+                if member is not None:
+                    salon = guild.get_channel(int(getattr(execution, "channel_id", 0) or 0))
+                    await self._sanction_everyone(guild, member, salon)
+                return
+        except Exception:  # noqa: BLE001 — le journal du blocage continue
+            logger.debug("Sanction @everyone native impossible guild=%s", guild_id, exc_info=True)
         seen_key = (guild_id, rule_id, user_id)
         now = time.monotonic()
         if now - self._native_block_last_seen.get(seen_key, -9999.0) < 30:
@@ -1658,6 +1737,7 @@ class AutoMod(commands.Cog, name="Automod"):
             await self._sync_native_antiscam_rule(guild)
         elif field == "antimention":
             await self._sync_native_antimention_rule(guild)
+            await self._sync_native_antieveryone_rule(guild)
         elif field == "antiinsult":
             await self._sync_native_harmful_rule(guild)
 
@@ -1799,6 +1879,104 @@ class AutoMod(commands.Cog, name="Automod"):
         localement par SentriX, selon leurs réglages de serveur.
         """
         return await self._remove_owned_native_rule(guild, name)
+
+    async def _sync_native_antieveryone_rule(self, guild: discord.Guild) -> bool:
+        """Règle Discord qui bloque @everyone / @here avant l'envoi (pas de ping)."""
+        me = getattr(guild, "me", None)
+        if me is None or not me.guild_permissions.manage_guild:
+            return False
+        conf = await self.bot.db.get_automod(guild.id)
+        actif = bool(conf and conf["antimention"])
+        try:
+            regles = await guild.fetch_automod_rules()
+        except (discord.Forbidden, discord.HTTPException):
+            return False
+        existante = next(
+            (r for r in regles if r.name == NATIVE_ANTIEVERYONE_RULE_NAME
+             and int(getattr(r, "creator_id", 0) or 0) == me.id),
+            None,
+        )
+        raison = "SentriX : blocage de @everyone / @here avant l'envoi"
+        try:
+            if not actif:
+                if existante is not None:
+                    await existante.delete(reason=raison)
+                return True
+            exemptions = await self._native_policy_exemptions(guild, "antimention")
+            roles, salons = exemptions if exemptions else ([], [])
+            declencheur = discord.AutoModTrigger(regex_patterns=[r"@(everyone|here)"])
+            actions = [discord.AutoModRuleAction(custom_message=NATIVE_ANTIEVERYONE_CUSTOM_MESSAGE)]
+            if existante is not None:
+                await existante.edit(
+                    trigger=declencheur, actions=actions, enabled=True,
+                    exempt_roles=roles[:20], exempt_channels=salons[:50], reason=raison,
+                )
+            else:
+                await guild.create_automod_rule(
+                    name=NATIVE_ANTIEVERYONE_RULE_NAME,
+                    event_type=discord.AutoModRuleEventType.message_send,
+                    trigger=declencheur, actions=actions, enabled=True,
+                    exempt_roles=roles[:20], exempt_channels=salons[:50], reason=raison,
+                )
+            return True
+        except (discord.Forbidden, discord.HTTPException):
+            logger.warning("Règle anti-@everyone impossible guild=%s", guild.id, exc_info=True)
+            return False
+
+    async def _sanction_everyone(self, guild: discord.Guild, member, channel=None) -> str:
+        """@everyone / @here d'un membre : avertissement, avertissement, puis mute d'1 h."""
+        suivi = self.__dict__.get("_everyone_membres")
+        if suivi is None:
+            suivi = self.__dict__["_everyone_membres"] = FenetreGlissante(
+                fenetre=EVERYONE_FENETRE, purge_toutes=500,
+            )
+        cle = (guild.id, member.id)
+        nombre = suivi.ajouter(cle, time.time())
+        if nombre < 3:
+            try:
+                await moderation_service.warn(
+                    self.bot, guild=guild, actor=guild.me, target=member,
+                    reason=f"AutoMod : @everyone / @here ({nombre}/3)",
+                    dm_text=(
+                        f"Avertissement {nombre}/2 sur {guild.name} : les mentions @everyone et @here "
+                        "sont interdites. Au 3e essai, vous serez rendu muet 1 heure."
+                    ),
+                    warn_role=None, ban_threshold=0,
+                )
+            except Exception:  # noqa: BLE001
+                logger.debug("Avertissement @everyone impossible guild=%s", guild.id, exc_info=True)
+            if channel is not None:
+                try:
+                    await panels.texte_court(
+                        channel,
+                        f"{member.mention}, @everyone et @here sont interdits ici "
+                        f"(avertissement {nombre}/2).",
+                        supprimer_apres=8,
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+            return "warn"
+        suivi.reinitialiser(cle)
+        me = guild.me
+        if (
+            me is None or not me.guild_permissions.moderate_members
+            or member.id == guild.owner_id or member.top_role >= me.top_role
+        ):
+            return "mute_failed"
+        try:
+            log_service.mark_sanction(guild.id, member.id, "timeout")
+            await member.timeout(
+                discord.utils.utcnow() + timedelta(seconds=EVERYONE_MUTE_SECONDES),
+                reason="AutoMod : @everyone / @here répété (3 fois)",
+            )
+        except (discord.Forbidden, discord.HTTPException):
+            return "mute_failed"
+        await self._mp_sanction_automod(
+            member, guild,
+            f"Vous avez été rendu muet sur {guild.name} pendant 1 heure.\n"
+            "Raison : @everyone / @here répété malgré 2 avertissements.",
+        )
+        return "mute"
 
     async def _sync_native_target_links_rule(self, guild: discord.Guild) -> bool:
         rows = await self.bot.db.fetchall(
@@ -2562,12 +2740,29 @@ class AutoMod(commands.Cog, name="Automod"):
             },
         )
         await self.log_action(guild, carte)
+        # 07/11/2026 : MP en carte simple, sans la bannière qui tombait en bas du MP.
         try:
             proprietaire = guild.owner or await guild.fetch_member(guild.owner_id)
             if proprietaire:
-                await panels.envoyer(proprietaire, panels.depuis_embed(carte))
+                await _mp_vue(proprietaire, carte_mp_simple(
+                    f"🚨 Abus d'un membre privilégié sur {guild.name}",
+                    f"{member.mention} (`{member.id}`)\n**Raison :** {reason}\n"
+                    f"**Action :** {action}",
+                    0xED4245,
+                ))
         except (discord.Forbidden, discord.HTTPException, AttributeError):
             pass
+        if retires:
+            try:
+                await _mp_vue(member, carte_mp_simple(
+                    f"🛑 Vos rôles ont été retirés sur {guild.name}",
+                    f"**Raison :** {reason}\n**Rôles retirés :** "
+                    + ", ".join(r.name for r in retires)
+                    + "\n-# Le propriétaire du serveur a été prévenu.",
+                    0xED4245,
+                ))
+            except (discord.Forbidden, discord.HTTPException, AttributeError):
+                pass
 
         if retires:
             self.infraction_tracker.reinitialiser((guild.id, member.id))
@@ -3688,6 +3883,15 @@ class AutoMod(commands.Cog, name="Automod"):
                 if getattr(message, "mention_everyone", False) is True:
                     return await self._everyone_d_un_admin(message)
                 return
+            if getattr(message, "mention_everyone", False) is True:
+                # Règle Discord absente (permission manquante) : même progression,
+                # avertissement, avertissement, puis mute d'1 h.
+                try:
+                    await message.delete()
+                except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+                    pass
+                await self._sanction_everyone(message.guild, message.author, message.channel)
+                return
             return await self._delete_and_warn(message, MOTIF_MENTION_MASSIVE, "antimention")
 
         # 04/11/2026 (« j'ai ping un mec 5 fois, aucun anti-ping ») : les mentions
@@ -3762,6 +3966,18 @@ class AutoMod(commands.Cog, name="Automod"):
             )
 
         if word_applies:
+            # 07/11/2026 : « je te baise au foot mdr » était censuré, « ntmmm » ne
+            # sanctionnait rien. Le contexte décide d'abord ; une vraie insulte est
+            # sanctionnée (mute) au lieu d'être seulement censurée.
+            if await self._insulte_selon_contexte(message) is False:
+                return None
+            insulte = self.moderation_dataset.match(message.content)
+            if insulte is not None and insulte.confidence >= 0.92:
+                return await self._delete_and_timeout(
+                    message,
+                    f"Contenu offensant confirmé ({insulte.reason}, confiance {insulte.confidence:.0%}).",
+                    detection_kind=insulte.kind,
+                )
             return await self._delete_and_warn(
                 message,
                 "Mot interdit détecté.",
@@ -4119,10 +4335,8 @@ class AutoMod(commands.Cog, name="Automod"):
         if suivi.ajouter(cle, message.id) < ADMIN_EVERYONE_SEUIL:
             return  # une ou deux fois : rien du tout
         suivi.reinitialiser(cle)
-        try:
-            await message.delete()
-        except (discord.Forbidden, discord.NotFound, discord.HTTPException):
-            pass
+        # 07/11/2026 : le message d'un admin n'est pas supprimé (ce n'est pas du spam) ;
+        # ses rôles à risque sont retirés et il reçoit un MP qui explique pourquoi.
         membre = _as_member(message.author, message.guild)
         if isinstance(membre, discord.Member):
             await self._repondre_abus_privilegie(
