@@ -45,6 +45,7 @@ from services.tickets import count_genuinely_open_tickets
 from services import tickets as tickets_service
 from utils import embeds, checks, helpers, design_system
 from utils import sentrix_panels as sx_panels
+from utils.ticket_panel_design import SlimTicketPanel
 from database.db import now
 
 # Logs techniques dédiés aux tickets (diagnostic de "L'application ne répond plus" :
@@ -439,7 +440,7 @@ class TicketOpenSelect(discord.ui.Select):
             for t in types[:25]
         ]
         super().__init__(
-            placeholder="🎫 Choisissez une catégorie pour ouvrir un ticket...",
+            placeholder="Choisir une catégorie",
             options=options, custom_id=f"ticket_open_select:{panel_id}", min_values=1, max_values=1,
         )
 
@@ -630,6 +631,23 @@ class PanelEditView(discord.ui.View):
         await self.cog.bot.db.execute("UPDATE ticket_panels_v2 SET style = ? WHERE id = ?", (new_style, self.panel_id))
         label = "boutons" if new_style == "button" else "menu déroulant"
         await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.success(f'Le panel affichera désormais un **{label}**.')), ephemere=True)
+
+    @discord.ui.button(label="Bannière : ON / OFF", style=discord.ButtonStyle.secondary, row=1)
+    async def toggle_banner(self, interaction: discord.Interaction, button: discord.ui.Button):
+        panel = await self.cog.get_panel(self.panel_id)
+        enabled = 0 if panel["banner_enabled"] else 1
+        await self.cog.bot.db.execute(
+            "UPDATE ticket_panels_v2 SET banner_enabled=? WHERE id=? AND guild_id=?",
+            (enabled, self.panel_id, interaction.guild.id),
+        )
+        status = "activée" if enabled else "désactivée"
+        await sx_panels.envoyer(
+            interaction.response,
+            sx_panels.depuis_embed(embeds.success(
+                f"Bannière ultra-fine {status}. Utilisez Envoyer / mettre à jour pour appliquer."
+            )),
+            ephemere=True,
+        )
 
     @discord.ui.button(label="Aperçu", style=discord.ButtonStyle.primary, emoji="👁️", row=1)
     async def preview(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -965,6 +983,10 @@ class Tickets(commands.Cog):
 
     # ---------------------------------------------------------------- OUVERTURE
 
+    def build_panel_layout(self, panel, types: list) -> discord.ui.LayoutView:
+        """Rendu compact du panneau public ; les champs restent ceux enregistrés en DB."""
+        return sx_panels.avec_composants(SlimTicketPanel(panel), TicketPanelView(panel, types))
+
     def build_panel_embed(self, panel) -> discord.Embed:
         e = embeds.brand(panel["title"] or "🎫 Support", panel["description"] or "")
         if panel["color"]:
@@ -982,30 +1004,34 @@ class Tickets(commands.Cog):
         types = await self.get_panel_types(panel_id)
         if not types:
             return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.warning("Ce panel n’a aucun type de ticket. Ajoutez-en depuis l’éditeur du panel dans `+ticketsetup`.")), ephemere=True)
-        await sx_panels.envoyer(interaction.response, sx_panels.avec_composants(sx_panels.depuis_embed(self.build_panel_embed(panel)), TicketPanelView(panel, types)), ephemere=True)
+        await sx_panels.envoyer(interaction.response, self.build_panel_layout(panel, types), ephemere=True)
 
     async def send_panel(self, interaction: discord.Interaction, panel_id: int):
         panel = await self.get_panel(panel_id)
-        types = await self.get_panel_types(panel_id)
-        if not panel["channel_id"]:
-            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error("Choisissez d'abord un salon de destination (menu déroulant du dessus).")), ephemere=True)
-        if not types:
-            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error("Ce panel n’a aucun type de ticket. Ajoutez-en depuis l’éditeur du panel dans `+ticketsetup` avant de l’envoyer.")), ephemere=True)
-        channel = interaction.guild.get_channel(panel["channel_id"])
-        if not channel:
-            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error("Le salon configuré n'existe plus.")), ephemere=True)
-
+        if not panel or not panel["channel_id"]:
+            return await sx_panels.envoyer(
+                interaction.response,
+                sx_panels.depuis_embed(embeds.error("Choisissez un salon de destination.")),
+                ephemere=True,
+            )
+        service = self.bot.get_cog("PanelsRefresh")
+        if service is None:
+            return await interaction.response.send_message(
+                "Actualisation des panneaux indisponible.", ephemeral=True
+            )
         await interaction.response.defer(ephemeral=True)
-        old_message_id = panel["message_id"]
-        if old_message_id:
-            try:
-                old = await channel.fetch_message(old_message_id)
-                await old.delete()
-            except discord.HTTPException:
-                pass
-        msg = await sx_panels.envoyer(channel, sx_panels.avec_composants(sx_panels.depuis_embed(self.build_panel_embed(panel)), TicketPanelView(panel, types)))
-        await self.bot.db.execute("UPDATE ticket_panels_v2 SET message_id = ?, channel_id = ? WHERE id = ?", (msg.id, channel.id, panel_id))
-        await sx_panels.envoyer(interaction.followup, sx_panels.depuis_embed(embeds.success(f'📤 Panel envoyé dans {channel.mention}.')), ephemere=True)
+        try:
+            status, message = await service.refresh_one(interaction.guild, panel, allow_new=True)
+        except (discord.HTTPException, RuntimeError) as exc:
+            return await interaction.followup.send(f"Impossible de publier le panneau : {exc}", ephemeral=True)
+        if message is None:
+            return await interaction.followup.send(
+                "Panneau non publié : vérifiez qu'il est actif, que le module Tickets est actif et qu'au moins un type est configuré.",
+                ephemeral=True,
+            )
+        return await interaction.followup.send(
+            f"Panneau {status} dans {message.channel.mention}.", ephemeral=True
+        )
 
     async def start_ticket_flow(self, interaction: discord.Interaction, type_id: int):
         started = time.monotonic()
@@ -1560,7 +1586,7 @@ class Tickets(commands.Cog):
 
         if len(available) == 1:
             panel, types = available[0]
-            return await sx_panels.envoyer(ctx, sx_panels.avec_composants(sx_panels.depuis_embed(self.build_panel_embed(panel)), TicketPanelView(panel, types)), ephemeral=True if ctx.interaction else False)
+            return await sx_panels.envoyer(ctx, self.build_panel_layout(panel, types), ephemeral=True if ctx.interaction else False)
 
         # Plusieurs panels actifs sur ce serveur : on laisse d'abord choisir la catégorie
         # (les options du menu viennent toutes de la DB, jamais du code).
@@ -1700,7 +1726,7 @@ class Tickets(commands.Cog):
         types = await self.get_panel_types(panel["id"])
         if not types:
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.warning("Ce panel n'a aucun type de ticket.")))
-        await sx_panels.envoyer(ctx, sx_panels.avec_composants(sx_panels.depuis_embed(self.build_panel_embed(panel)), TicketPanelView(panel, types)), ephemeral=True if ctx.interaction else False)
+        await sx_panels.envoyer(ctx, self.build_panel_layout(panel, types), ephemeral=True if ctx.interaction else False)
 
     @ticketpanel.command(name="send", description="Envoyer (ou mettre à jour) un panel dans son salon configuré.")
     @app_commands.describe(nom="Le nom du panel à envoyer")
@@ -1717,10 +1743,18 @@ class Tickets(commands.Cog):
             types = await self.get_panel_types(panel["id"])
             if not types:
                 return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Ce panel n'a aucun type de ticket.")))
-            channel = ctx.guild.get_channel(panel["channel_id"])
-            msg = await sx_panels.envoyer(channel, sx_panels.avec_composants(sx_panels.depuis_embed(self.build_panel_embed(panel)), TicketPanelView(panel, types)))
-            await self.bot.db.execute("UPDATE ticket_panels_v2 SET message_id = ? WHERE id = ?", (msg.id, panel["id"]))
-            await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'📤 Panel envoyé dans {channel.mention}.')))
+            service = self.bot.get_cog("PanelsRefresh")
+            if service is None:
+                return await ctx.send("Actualisation des panneaux indisponible.")
+            try:
+                status, msg = await service.refresh_one(ctx.guild, panel, allow_new=True)
+            except (discord.HTTPException, RuntimeError) as exc:
+                return await ctx.send(f"Impossible de publier le panneau : {exc}")
+            if msg is None:
+                return await ctx.send("Panneau désactivé, salon absent ou module Tickets désactivé.")
+            await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(
+                f"Panneau {status} dans {msg.channel.mention}."
+            )))
 
     @ticketpanel.command(name="duplicate", description="Dupliquer un panel existant (avec ses types de tickets).")
     @app_commands.describe(nom="Le nom du panel à dupliquer", nouveau_nom="Le nom du panel dupliqué")
