@@ -36,7 +36,7 @@ class PanelRefreshScopeTests(unittest.IsolatedAsyncioTestCase):
             {"guild_id": 10}, {"guild_id": 20}, {"guild_id": 30}
         ]
         self.cog.refresh_guild = AsyncMock(
-            side_effect=lambda guild, **kwargs: self._result(guild, **kwargs)
+            side_effect=self._result
         )
         await self._execute("all")
         seen = [
