@@ -859,70 +859,6 @@ class TicketSetupHubView(discord.ui.View):
 # =============================================================================
 
 
-class TicketPanelRepairApprovalView(discord.ui.View):
-    """One-time owner approval. Requesters receive no server permissions."""
-
-    def __init__(self, cog: "Tickets", guild_id: int, panel_id: int, owner_id: int, requester_id: int):
-        super().__init__(timeout=300)
-        self.cog = cog
-        self.guild_id = guild_id
-        self.panel_id = panel_id
-        self.owner_id = owner_id
-        self.requester_id = requester_id
-        self.handled = False
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        guild = self.cog.bot.get_guild(self.guild_id)
-        if interaction.user.id != self.owner_id or not guild or guild.owner_id != self.owner_id:
-            await interaction.response.send_message(
-                "Seul le propriétaire actuel du serveur peut valider cette réparation.", ephemeral=True
-            )
-            return False
-        return True
-
-    @discord.ui.button(label="Approuver la réparation", style=discord.ButtonStyle.success)
-    async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if self.handled:
-            return await interaction.response.send_message("Cette demande a déjà été traitée.", ephemeral=True)
-        self.handled = True
-        await interaction.response.defer()
-        try:
-            message, old_removed = await self.cog.repair_published_ticket_panel(self.guild_id, self.panel_id)
-        except Exception:
-            logger.exception("Réparation du panel #%s échouée (serveur %s)", self.panel_id, self.guild_id)
-            await interaction.edit_original_response(
-                content="Réparation impossible. Aucune configuration de ticket n'a été supprimée. "
-                        "Vérifiez les permissions de SentriX et ses journaux d'erreur.",
-                view=None,
-            )
-        else:
-            suffix = "" if old_removed else " L'ancien message n'a pas pu être effacé : vérifiez le salon."
-            await interaction.edit_original_response(
-                content=f"Panel réparé : {message.jump_url}. Configuration conservée.{suffix}",
-                view=None,
-            )
-            requester = self.cog.bot.get_user(self.requester_id)
-            if requester:
-                try:
-                    await requester.send(
-                        f"Le propriétaire a approuvé la réparation du panneau : {message.jump_url}",
-                        allowed_mentions=discord.AllowedMentions.none(),
-                    )
-                except discord.HTTPException:
-                    pass
-        finally:
-            self.stop()
-
-    @discord.ui.button(label="Refuser", style=discord.ButtonStyle.secondary)
-    async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if self.handled:
-            return await interaction.response.send_message("Cette demande a déjà été traitée.", ephemeral=True)
-        self.handled = True
-        await interaction.response.edit_message(
-            content="Demande refusée. Aucun message ni réglage n'a été modifié.", view=None
-        )
-        self.stop()
-
 class Tickets(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -1738,7 +1674,20 @@ class Tickets(commands.Cog):
     @commands.command(name="ticketrepair")
     @commands.guild_only()
     async def ticketrepair(self, ctx: commands.Context, *, nom: str | None = None):
-        """Anyone can request a repair, but only the guild owner may approve it."""
+        """Repair directly for the guild owner or a registered SentriX creator.
+
+        This command does not require Discord admin permissions, and it never
+        grants any permissions to the caller or changes ticket configuration.
+        """
+        is_guild_owner = ctx.author.id == ctx.guild.owner_id
+        is_bot_creator = await self.bot.db.is_bot_creator(ctx.author.id)
+        if not (is_guild_owner or is_bot_creator):
+            return await ctx.reply(
+                "Cette commande est réservée au propriétaire du serveur ou "
+                "aux créateurs officiels de SentriX.",
+                mention_author=False,
+            )
+
         panels = await self.bot.db.fetchall(
             "SELECT * FROM ticket_panels_v2 WHERE guild_id=? AND enabled=1 ORDER BY id",
             (ctx.guild.id,),
@@ -1759,47 +1708,45 @@ class Tickets(commands.Cog):
                 mention_author=False,
             )
 
-        if not ctx.guild.owner_id:
-            return await ctx.reply("Le propriétaire du serveur n'est pas identifiable.", mention_author=False)
-
         last_request = self._ticket_repair_requests.get(ctx.guild.id, 0)
-        if time.monotonic() - last_request < 120:
+        if time.monotonic() - last_request < 90:
             return await ctx.reply(
-                "Une demande de réparation a déjà été envoyée récemment sur ce serveur.",
+                "Ce serveur vient déjà de réparer un panneau. Réessayez dans un instant.",
                 mention_author=False,
             )
-        owner = self.bot.get_user(ctx.guild.owner_id)
-        if owner is None:
-            try:
-                owner = await self.bot.fetch_user(ctx.guild.owner_id)
-            except discord.HTTPException:
-                owner = None
-        if owner is None:
-            return await ctx.reply("Impossible de contacter le propriétaire du serveur.", mention_author=False)
 
-        view = TicketPanelRepairApprovalView(
-            self, ctx.guild.id, panel["id"], ctx.guild.owner_id, ctx.author.id
-        )
+        # The lock prevents concurrent requests from affecting the same message.
+        self._ticket_repair_requests[ctx.guild.id] = time.monotonic()
         try:
-            await owner.send(
-                f"Demande de réparation SentriX dans {ctx.guild.name}. "
-                f"Demandée par {ctx.author} pour le panneau « {panel['name']} ». "
-                "Cette opération recrée le message du panneau avec les mêmes réglages. "
-                "Elle ne donne aucune permission au demandeur. Validez ou refusez sous 5 minutes.",
-                view=view,
-                allowed_mentions=discord.AllowedMentions.none(),
+            message, old_removed = await self.repair_published_ticket_panel(
+                ctx.guild.id, panel["id"]
             )
-        except discord.HTTPException:
+        except (ValueError, RuntimeError) as exc:
+            self._ticket_repair_requests.pop(ctx.guild.id, None)
+            return await ctx.reply(f"Réparation impossible : {exc}", mention_author=False)
+        except discord.Forbidden:
+            self._ticket_repair_requests.pop(ctx.guild.id, None)
             return await ctx.reply(
-                "Les messages privés du propriétaire sont fermés. "
-                "Il peut gérer son panneau depuis +ticketsetup sans vous donner de permissions.",
+                "SentriX doit pouvoir lire, envoyer et supprimer des messages dans "
+                "le salon du panneau.",
                 mention_author=False,
             )
-        self._ticket_repair_requests[ctx.guild.id] = time.monotonic()
+        except Exception:
+            self._ticket_repair_requests.pop(ctx.guild.id, None)
+            logger.exception(
+                "Échec de réparation directe du panneau #%s (serveur %s)",
+                panel["id"], ctx.guild.id,
+            )
+            return await ctx.reply(
+                "Réparation impossible. Configuration conservée. Vérifiez les logs SentriX.",
+                mention_author=False,
+            )
+
+        suffix = "" if old_removed else " L'ancien panneau n'a pas pu être supprimé."
         await ctx.reply(
-            "Demande envoyée au propriétaire en message privé. "
-            "Le panneau ne changera que s'il approuve.",
+            f"Panel réparé : {message.jump_url}. Tous les réglages sont conservés.{suffix}",
             mention_author=False,
+            allowed_mentions=discord.AllowedMentions.none(),
         )
 
     @commands.hybrid_group(name="ticketpanel", description="Gérer les panels de tickets.")
