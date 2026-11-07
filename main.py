@@ -104,6 +104,7 @@ EXTENSIONS = [
     # message posté tout seul dans les journaux (25/10). L'analyse reste
     # servie à la demande par +security-check et la page sécurité de /setup.
     "cogs.tickets",
+    "cogs.panels_refresh",
     # Fournit +logs, +logevent et +logsearch, que HELP_VISIBLE_EXTRA_COMMANDS
     # déclare visibles dans l'aide, plus le pipeline de journalisation V17. Il
     # n'avait qu'un install() suspendu à l'enveloppe morte de cogs/__init__ :
@@ -324,7 +325,7 @@ OWNER_ONLY_COMMANDS = frozenset({
     "status-rotate", "footer", "theme", "set-bot", "bot-servers", "bot-leave",
     # Core V2, Phase 1 (docs/core-v2-plan.md) : panneau d'observabilité globale
     # au processus, jamais scopé par serveur — pas adapté à un accès admin.
-    "health", "corediag",
+    "health", "corediag", "panels",
     # docs/core-v2-audit-technical-debt.md §16 : présent dans la copie canonique
     # (utils/access_matrix.py::OWNER_ONLY_COMMANDS) depuis le début, mais absent
     # ici — cette liste-ci n'est lue que par des outils d'audit/log (aucun
