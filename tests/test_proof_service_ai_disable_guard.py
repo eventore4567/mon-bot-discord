@@ -39,7 +39,14 @@ def _fake_bot(*, ai_enabled: bool):
         "language": None,
         "logs_enabled": 0,
     }
-    return SimpleNamespace(db=SimpleNamespace(fetchone=AsyncMock(return_value=row)))
+    # This fake supplies lookup rows only; mark schema as prepared to prevent
+    # the runtime schema bootstrap from issuing CREATE TABLE on the mock.
+    from cogs import setup_v2_core
+    setup_v2_core.invalidate_module_cache(999, "ai")
+    return SimpleNamespace(
+        db=SimpleNamespace(fetchone=AsyncMock(return_value=row)),
+        _sentrix_v2_schema_ready=True,
+    )
 
 
 def _fake_openai_response(payload: str):
