@@ -143,7 +143,7 @@ PUBLIC_COMMANDS = frozenset({
     "stats", "me", "level", "rank", "leaderboard", "leaderboard-levels", "level-roles",
     "profile", "set-bio", "rep", "reputation", "repleaderboard", "voice-time",
     # Tickets, événements et invitations accessibles aux membres
-    "ticket", "giveaway-list", "event-join", "event-leave", "event-list",
+    "ticket", "ticketrepair", "giveaway-list", "event-join", "event-leave", "event-list",
     "tournament-join", "tournament-list", "invites", "invite-leaderboard",
     "invited-by",
     # Statistiques publiques
