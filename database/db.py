@@ -834,6 +834,7 @@ CREATE TABLE IF NOT EXISTS ticket_panels_v2 (
     style TEXT DEFAULT 'select',
     max_per_member INTEGER DEFAULT 1,
     enabled INTEGER DEFAULT 1,
+    banner_enabled INTEGER NOT NULL DEFAULT 1,
     created_at INTEGER
 );
 
@@ -1706,6 +1707,13 @@ class Database:
         for column, col_type in REACTION_ROLES_NEW_COLUMNS.items():
             if column not in existing_reaction_roles:
                 await self._conn.execute(f"ALTER TABLE reaction_roles ADD COLUMN {column} {col_type}")
+
+        # Paramètre visuel ADDITIF des anciens panneaux. Aucun champ existant supprimé.
+        ticket_panel_columns = await self._table_columns("ticket_panels_v2")
+        if "banner_enabled" not in ticket_panel_columns:
+            await self._conn.execute(
+                "ALTER TABLE ticket_panels_v2 ADD COLUMN banner_enabled INTEGER NOT NULL DEFAULT 1"
+            )
 
         await self._migrate_logs()
 
