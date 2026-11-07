@@ -1,9 +1,11 @@
-"""Owner-only command to refresh published ticket panels without resetting their settings.
+"""Owner-only commands to refresh saved ticket panels without resetting settings.
 
-Usage: +panels restart
-Only previously published panels in the invoking guild are touched.
++panels restart      refresh saved published ticket panels in the current guild
++panels restart all  refresh published ticket panels in every accessible guild
+Other panel systems are deliberately excluded until they can be safely rebuilt.
 """
 
+import asyncio
 import logging
 
 import discord
@@ -20,6 +22,8 @@ logger = logging.getLogger("bot.panel-refresh")
 class PanelsRefresh(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self._running_guilds: set[int] = set()
+        self._global_running = False
 
     async def refresh_one(self, guild: discord.Guild, panel, *, allow_new: bool = False):
         """Return (status, message). Never changes enabled, title, types or other settings."""
@@ -79,6 +83,43 @@ class PanelsRefresh(commands.Cog):
         )
         return "recreated", replacement
 
+    @staticmethod
+    def _new_stats() -> dict[str, int]:
+        return {
+            "updated": 0, "migrated": 0, "recreated": 0, "disabled": 0,
+            "no-channel": 0, "no-types": 0, "not-published": 0, "errors": 0,
+        }
+
+    async def refresh_guild(self, guild: discord.Guild, *, published_only: bool = False):
+        """Refresh a single guild without copying another guild's config.
+
+        The SELECT is scoped to this guild. Each message is rebuilt from its
+        own saved panel settings and related ticket_types rows.
+        """
+        where = " AND message_id IS NOT NULL" if published_only else ""
+        rows = await self.bot.db.fetchall(
+            "SELECT * FROM ticket_panels_v2 WHERE guild_id=?" + where + " ORDER BY id",
+            (guild.id,),
+        )
+        stats = self._new_stats()
+        errors = []
+        for panel in rows:
+            try:
+                result, _message = await self.refresh_one(guild, panel)
+                stats[result] += 1
+            except (discord.HTTPException, RuntimeError, ValueError) as exc:
+                stats["errors"] += 1
+                logger.warning("Panel %s on guild %s: %s", panel["id"], guild.id, exc)
+                errors.append(f"Panel #{panel['id']}: {str(exc)[:80]}")
+            except Exception:
+                stats["errors"] += 1
+                logger.exception("Unexpected refresh error for panel %s / guild %s", panel["id"], guild.id)
+                errors.append(f"Panel #{panel['id']}: erreur technique")
+            # The Discord library obeys rate limits; space out global edits.
+            if published_only:
+                await asyncio.sleep(0.20)
+        return stats, errors, len(rows)
+
     @commands.group(name="panels", invoke_without_command=True)
     @checks.is_bot_owner()
     async def panels(self, ctx: commands.Context):
@@ -86,63 +127,112 @@ class PanelsRefresh(commands.Cog):
             ctx, sx_panels.depuis_embed(
                 embeds.neutral(
                     "Panneaux SentriX",
-                    "Utilise +panels restart pour mettre à jour les panneaux de tickets déjà publiés sur ce serveur sans réinitialiser leurs réglages.",
+                    "Utilise +panels restart pour le serveur actuel ou "
+                    "+panels restart all pour tous les serveurs accessibles. "
+                    "Les catégories, réglages et tickets existants sont conservés.",
                 )
             ),
         )
 
     @panels.command(name="restart")
     @checks.is_bot_owner()
-    async def restart(self, ctx: commands.Context):
-        if ctx.guild is None:
+    async def restart(self, ctx: commands.Context, scope: str = "server"):
+        """Owner-only, opt-in global refresh; 'all' never runs implicitly."""
+        scope = scope.strip().casefold()
+        if scope not in {"server", "all"}:
+            return await ctx.send("Syntaxe : +panels restart ou +panels restart all.")
+        if scope == "server" and ctx.guild is None:
             return await ctx.send("Utilise cette commande dans un serveur.")
-        if getattr(self, "_running_guilds", None) is None:
-            self._running_guilds = set()
-        guild = ctx.guild
-        if guild.id in self._running_guilds:
+        if self._global_running:
+            return await ctx.send("Une actualisation globale est déjà en cours.")
+        if scope == "server" and ctx.guild.id in self._running_guilds:
             return await ctx.send("Une actualisation est déjà en cours sur ce serveur.")
-
-        self._running_guilds.add(guild.id)
-        stats = {
-            "updated": 0, "migrated": 0, "recreated": 0,
-            "disabled": 0, "no-channel": 0, "no-types": 0,
-            "not-published": 0, "errors": 0,
-        }
-        issues = []
-        try:
-            rows = await self.bot.db.fetchall(
-                "SELECT * FROM ticket_panels_v2 WHERE guild_id=? ORDER BY id",
-                (guild.id,),
+        if scope == "all" and self._running_guilds:
+            return await ctx.send(
+                "Une actualisation locale est en cours. Réessaie lorsqu'elle sera terminée."
             )
-            for panel in rows:
+
+        global_mode = scope == "all"
+        if global_mode:
+            self._global_running = True
+        else:
+            self._running_guilds.add(ctx.guild.id)
+
+        totals = self._new_stats()
+        errors: list[str] = []
+        guilds_seen = 0
+        guilds_with_panels = 0
+        inaccessible = 0
+
+        try:
+            if global_mode:
+                # All persisted published guilds, not just the invoking server.
+                published = await self.bot.db.fetchall(
+                    "SELECT DISTINCT guild_id FROM ticket_panels_v2 "
+                    "WHERE message_id IS NOT NULL ORDER BY guild_id"
+                )
+                guilds = []
+                for row in published:
+                    guild = self.bot.get_guild(int(row["guild_id"]))
+                    if guild is None:
+                        inaccessible += 1
+                    else:
+                        guilds.append(guild)
+                await ctx.send(
+                    f"Actualisation lancée pour {len(guilds)} serveur(s) accessibles "
+                    "avec des panneaux de tickets publiés. Aucun réglage ne sera réinitialisé."
+                )
+            else:
+                guilds = [ctx.guild]
+
+            for guild in guilds:
+                guilds_seen += 1
                 try:
-                    status, _ = await self.refresh_one(guild, panel)
-                    stats[status] += 1
-                except (discord.HTTPException, RuntimeError, ValueError) as exc:
-                    stats["errors"] += 1
-                    logger.warning("Refresh panel %s / guild %s: %s", panel["id"], guild.id, exc)
-                    issues.append(f"{panel['name']}: {str(exc)[:120]}")
+                    partial, guild_errors, count = await self.refresh_guild(
+                        guild, published_only=global_mode
+                    )
                 except Exception:
-                    stats["errors"] += 1
-                    logger.exception("Unexpected ticket panel refresh error: %s", panel["id"])
-                    issues.append(f"{panel['name']}: erreur technique")
+                    logger.exception("Unable to read ticket panel config for guild %s", guild.id)
+                    totals["errors"] += 1
+                    errors.append(f"Serveur {guild.id}: erreur de lecture")
+                    continue
+                if count:
+                    guilds_with_panels += 1
+                for key, value in partial.items():
+                    totals[key] += value
+                errors.extend(guild_errors[:3])
+                if global_mode:
+                    await asyncio.sleep(0.30)
         finally:
-            self._running_guilds.discard(guild.id)
+            if global_mode:
+                self._global_running = False
+            else:
+                self._running_guilds.discard(ctx.guild.id)
 
         details = (
-            f"Mis à jour : **{stats['updated']}**\n"
-            f"Anciens panneaux migrés : **{stats['migrated']}**\n"
-            f"Messages disparus recréés : **{stats['recreated']}**\n"
-            f"Ignorés (désactivés) : **{stats['disabled']}**\n"
-            f"Non publiés ou incomplets : **{stats['not-published'] + stats['no-channel'] + stats['no-types']}**\n"
-            f"Erreurs : **{stats['errors']}**\n\n"
-            "Aucun ticket, type, rôle, salon ou paramètre n'a été réinitialisé."
+            f"Portée : **{'tous les serveurs accessibles' if global_mode else 'ce serveur'}**\n"
+            f"Serveurs examinés : **{guilds_seen}**\n"
+            f"Serveurs avec panneaux : **{guilds_with_panels}**\n"
+            f"Panneaux actualisés : **{totals['updated']}**\n"
+            f"Anciens panneaux migrés : **{totals['migrated']}**\n"
+            f"Panneaux publiés recréés : **{totals['recreated']}**\n"
+            f"Ignorés (désactivés) : **{totals['disabled']}**\n"
+            f"Non publiés / configuration incomplète : "
+            f"**{totals['not-published'] + totals['no-channel'] + totals['no-types']}**\n"
+            f"Erreurs : **{totals['errors']}**"
         )
-        if issues:
-            details += "\n\n" + "\n".join(f"- {item}" for item in issues[:5])
-        details += "\n\nSeuls les panneaux de tickets enregistrés sont concernés ; les panneaux de suggestions, rôles et vérification restent inchangés."
+        if inaccessible:
+            details += f"\nServeurs absents de cette instance : **{inaccessible}** (non modifiés)"
+        if errors:
+            details += "\n\nDétails dans les logs SentriX (aucune configuration supprimée)."
+        details += (
+            "\n\n**Conservé :** titres, descriptions, menus, types, couleurs, salons, "
+            "rôles, emojis, formulaires, états ON/OFF et tickets existants."
+            "\n**Périmètre sûr :** panneaux de tickets publiés uniquement. "
+            "Suggestions, vérification et rôles ne sont pas modifiés."
+        )
         await sx_panels.envoyer(
-            ctx, sx_panels.depuis_embed(embeds.neutral("Actualisation des panneaux", details))
+            ctx, sx_panels.depuis_embed(embeds.neutral("Actualisation terminée", details))
         )
 
 
