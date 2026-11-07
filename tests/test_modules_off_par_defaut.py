@@ -49,10 +49,13 @@ class ModulesOffParDefautTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(module=module):
                 self.assertFalse(await core.module_enabled(self.bot, NEW_GUILD, module))
                 self.assertEqual(await core.module_state(self.bot, NEW_GUILD, module), core.MODULE_STATE_NOT_CONFIGURED)
-        # Les protections restent actives.
-        for module in ("moderation", "security", "ai"):
+        # Les protections restent actives, mais l’IA requiert une activation
+        # explicite pour ne pas envoyer de requêtes AI sur un serveur neuf.
+        for module in ("moderation", "security"):
             with self.subTest(module=module):
                 self.assertTrue(await core.module_enabled(self.bot, NEW_GUILD, module))
+        self.assertFalse(await core.module_enabled(self.bot, NEW_GUILD, "ai"))
+        self.assertEqual(await core.module_state(self.bot, NEW_GUILD, "ai"), core.MODULE_STATE_NOT_CONFIGURED)
 
     async def test_un_serveur_neuf_a_l_automod_inactif(self):
         conf = await self.db.get_automod(NEW_GUILD)
