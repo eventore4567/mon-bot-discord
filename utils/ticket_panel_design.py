@@ -52,10 +52,10 @@ class SlimTicketPanel(discord.ui.LayoutView):
             container.add_item(banner)
 
         title = (panel["title"] or "").strip()
-        if not title or title in {"🎫 Support", "🎫 Tickets", "🎟️ Tickets"}:
+        if not title:
             title = "Centre de tickets"
         description = (panel["description"] or "").strip()
-        if not description or description in _DEFAULT_DESCRIPTIONS:
+        if description in _DEFAULT_DESCRIPTIONS:
             description = "Choisissez une catégorie pour contacter notre équipe."
 
         header = discord.ui.TextDisplay(f"## {title}\n{description}")

@@ -140,7 +140,7 @@ class PanelsRefresh(commands.Cog):
             ctx, sx_panels.depuis_embed(
                 embeds.neutral(
                     "Panneaux SentriX",
-                    "Utilise +panels restart pour le serveur actuel ou "
+                    "Utilisez +panels restart pour le serveur actuel ou "
                     "+panels restart all pour tous les serveurs accessibles. "
                     "Les catégories, réglages et tickets existants sont conservés.",
                 )
@@ -155,14 +155,14 @@ class PanelsRefresh(commands.Cog):
         if scope not in {"server", "all"}:
             return await ctx.send("Syntaxe : +panels restart ou +panels restart all.")
         if scope == "server" and ctx.guild is None:
-            return await ctx.send("Utilise cette commande dans un serveur.")
+            return await ctx.send("Utilisez cette commande dans un serveur.")
         if self._global_running:
             return await ctx.send("Une actualisation globale est déjà en cours.")
         if scope == "server" and ctx.guild.id in self._running_guilds:
             return await ctx.send("Une actualisation est déjà en cours sur ce serveur.")
         if scope == "all" and self._running_guilds:
             return await ctx.send(
-                "Une actualisation locale est en cours. Réessaie lorsqu'elle sera terminée."
+                "Une actualisation locale est en cours. Réessayez lorsqu'elle sera terminée."
             )
 
         global_mode = scope == "all"
