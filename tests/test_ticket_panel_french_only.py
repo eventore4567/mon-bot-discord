@@ -5,6 +5,9 @@ from pathlib import Path
 from types import SimpleNamespace
 import unittest
 
+import discord
+from utils.ticket_panel_design import SlimTicketPanel
+
 
 SOURCE = Path(__file__).resolve().parents[1] / "cogs" / "tickets.py"
 
@@ -15,6 +18,7 @@ def _renderer():
     render = next(n for n in ticket_class.body if isinstance(n, ast.AsyncFunctionDef)
                   and n.name == "build_public_panel")
     scope = {
+        "SlimTicketPanel": lambda panel: SlimTicketPanel({"color": 0x7658E8, "banner_enabled": 0, **panel}),
         "language_runtime": SimpleNamespace(
             LANG_FR="fr", LANG_EN="en",
             get_language=lambda *_args: _language()
@@ -44,9 +48,8 @@ class TicketPanelLocalized(unittest.TestCase):
         types = [{"name": "Assistance"}, {"name": "Signalement"}]
         renderer = _renderer()
         public, view = asyncio.run(renderer(SimpleNamespace(bot=object()), panel, types))
-        self.assertEqual(public["sous_titre"], panel["description"])
-        self.assertEqual(public["sections"], [])
-        self.assertEqual(public["titre"], panel["title"])
+        text = [x.content for x in public.walk_children() if isinstance(x, discord.ui.TextDisplay)]
+        self.assertEqual(text, [f"## {panel['title']}\n{panel['description']}"])
         self.assertEqual(view[1], types)
 
     def test_empty_description_is_preserved_exactly(self):
@@ -55,8 +58,8 @@ class TicketPanelLocalized(unittest.TestCase):
             "description": "", "thumbnail_url": None, "image_url": None, "footer_text": None,
         }
         public, _view = asyncio.run(_renderer()(SimpleNamespace(bot=object()), panel, []))
-        self.assertEqual(public["sous_titre"], "")
-        self.assertEqual(public["sections"], [])
+        text = [x.content for x in public.walk_children() if isinstance(x, discord.ui.TextDisplay)]
+        self.assertEqual(text, ["## Tickets\n"])
 
     def test_select_placeholder_follows_configured_language(self):
         tree = ast.parse(SOURCE.read_text(encoding="utf-8"))
@@ -71,7 +74,7 @@ class TicketPanelLocalized(unittest.TestCase):
         self.assertEqual(len(placeholders), 1)
         source = ast.unparse(placeholders[0])
         self.assertIn("Choose a category", source)
-        self.assertIn("Choisissez une catégorie", source)
+        self.assertIn("Choisir une catégorie", source)
         self.assertIn("LANG_EN", source)
 
 

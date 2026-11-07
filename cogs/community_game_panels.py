@@ -7,7 +7,7 @@ import logging
 
 import discord
 
-from cogs.complete_setup_common import button, heading
+from cogs.complete_setup_common import button, heading, setting_line
 from utils import game_rewards
 from utils.component_context import ComponentContext
 
@@ -149,20 +149,32 @@ class CommunityLobby(discord.ui.LayoutView):
             f"**{self.label}** · {states[self.state]}\nHôte : <@{self.host_id}>\n\n**Joueurs inscrits ({len(self.players)}/20)**\n"
             + " · ".join(f"<@{ident}>" for ident in self.players)
         )
-        text += "\n\nÉvénement ouvert au salon : les autres membres autorisés peuvent aussi participer pendant la manche. Les inscriptions servent à se réunir avant le lancement."
+        text += "\n\nPartie ouverte au salon : les autres membres autorisés peuvent aussi jouer."
         box = heading("Jouer ensemble", text)
         if self.state == "waiting":
+            box.add_item(discord.ui.Separator())
+            join_button = button("Rejoindre", self.join)
+            join_button.style = discord.ButtonStyle.primary
+            start_button = button("Lancer la partie", self.start)
+            start_button.style = discord.ButtonStyle.success
+            setting_line(
+                box, "1 · Rejoindre", "Inscrivez-vous pour jouer ensemble.", join_button
+            )
+            setting_line(
+                box,
+                "2 · Lancer",
+                "L’hôte lance dès que 2 joueurs sont inscrits.",
+                start_button,
+            )
+            box.add_item(discord.ui.Separator())
             box.add_item(
                 discord.ui.ActionRow(
-                    button("Rejoindre", self.join),
-                    button("Quitter", self.leave),
-                    button("Lancer la partie", self.start),
-                    button("Annuler", self.cancel, danger=True),
+                    button("Quitter", self.leave), button("Annuler", self.cancel)
                 )
             )
             box.add_item(
                 discord.ui.TextDisplay(
-                    "-# Deux joueurs inscrits minimum. Seul l’hôte lance ou annule. Le salon d’attente expire après 3 minutes d’inactivité."
+                    "-# Seul l’hôte peut annuler. Expiration après 3 min d’inactivité."
                 )
             )
         self.add_item(box)

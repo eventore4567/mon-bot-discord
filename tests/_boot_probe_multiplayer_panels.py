@@ -53,6 +53,9 @@ async def main():
     assert len(ACTIONS) == 25 and view.is_persistent()
     pickers = [i for i in view.walk_children() if isinstance(i, discord.ui.Select)]
     assert len(pickers) == 4
+    copy = "\n".join(x.content for x in view.walk_children() if isinstance(x, discord.ui.TextDisplay))
+    assert all(title in copy for title in ("En solo", "À deux", "En groupe"))
+    assert view.total_children_count <= 40
     captured_private = []
     captured_public = []
     edited = []
