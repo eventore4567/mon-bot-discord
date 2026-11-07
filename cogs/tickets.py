@@ -858,9 +858,76 @@ class TicketSetupHubView(discord.ui.View):
 # COG
 # =============================================================================
 
+
+class TicketPanelRepairApprovalView(discord.ui.View):
+    """One-time owner approval. Requesters receive no server permissions."""
+
+    def __init__(self, cog: "Tickets", guild_id: int, panel_id: int, owner_id: int, requester_id: int):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.guild_id = guild_id
+        self.panel_id = panel_id
+        self.owner_id = owner_id
+        self.requester_id = requester_id
+        self.handled = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        guild = self.cog.bot.get_guild(self.guild_id)
+        if interaction.user.id != self.owner_id or not guild or guild.owner_id != self.owner_id:
+            await interaction.response.send_message(
+                "Seul le propriétaire actuel du serveur peut valider cette réparation.", ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Approuver la réparation", style=discord.ButtonStyle.success)
+    async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.handled:
+            return await interaction.response.send_message("Cette demande a déjà été traitée.", ephemeral=True)
+        self.handled = True
+        await interaction.response.defer()
+        try:
+            message, old_removed = await self.cog.repair_published_ticket_panel(self.guild_id, self.panel_id)
+        except Exception:
+            logger.exception("Réparation du panel #%s échouée (serveur %s)", self.panel_id, self.guild_id)
+            await interaction.edit_original_response(
+                content="Réparation impossible. Aucune configuration de ticket n'a été supprimée. "
+                        "Vérifiez les permissions de SentriX et ses journaux d'erreur.",
+                view=None,
+            )
+        else:
+            suffix = "" if old_removed else " L'ancien message n'a pas pu être effacé : vérifiez le salon."
+            await interaction.edit_original_response(
+                content=f"Panel réparé : {message.jump_url}. Configuration conservée.{suffix}",
+                view=None,
+            )
+            requester = self.cog.bot.get_user(self.requester_id)
+            if requester:
+                try:
+                    await requester.send(
+                        f"Le propriétaire a approuvé la réparation du panneau : {message.jump_url}",
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
+                except discord.HTTPException:
+                    pass
+        finally:
+            self.stop()
+
+    @discord.ui.button(label="Refuser", style=discord.ButtonStyle.secondary)
+    async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.handled:
+            return await interaction.response.send_message("Cette demande a déjà été traitée.", ephemeral=True)
+        self.handled = True
+        await interaction.response.edit_message(
+            content="Demande refusée. Aucun message ni réglage n'a été modifié.", view=None
+        )
+        self.stop()
+
 class Tickets(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self._ticket_repair_locks = {}
+        self._ticket_repair_requests = {}
         self.check_autoclose.start()
 
     def cog_unload(self):
@@ -1006,6 +1073,73 @@ class Tickets(commands.Cog):
         msg = await sx_panels.envoyer(channel, sx_panels.avec_composants(sx_panels.depuis_embed(self.build_panel_embed(panel)), TicketPanelView(panel, types)))
         await self.bot.db.execute("UPDATE ticket_panels_v2 SET message_id = ?, channel_id = ? WHERE id = ?", (msg.id, channel.id, panel_id))
         await sx_panels.envoyer(interaction.followup, sx_panels.depuis_embed(embeds.success(f'📤 Panel envoyé dans {channel.mention}.')), ephemere=True)
+
+
+    async def repair_published_ticket_panel(self, guild_id: int, panel_id: int):
+        """Replace only the published Discord message, never the saved panel/type settings."""
+        lock = self._ticket_repair_locks.setdefault(guild_id, asyncio.Lock())
+        async with lock:
+            guild = self.bot.get_guild(guild_id)
+            panel = await self.get_panel(panel_id)
+            if not guild or not panel or panel["guild_id"] != guild_id or not panel["enabled"]:
+                raise ValueError("Panel désactivé ou introuvable sur ce serveur.")
+            types = await self.get_panel_types(panel_id)
+            channel = guild.get_channel(panel["channel_id"]) if panel["channel_id"] else None
+            if not types or not isinstance(channel, discord.TextChannel):
+                raise ValueError("Types de tickets ou salon du panel manquants.")
+
+            old_id = panel["message_id"]
+            old_message = None
+            if old_id:
+                try:
+                    old_message = await channel.fetch_message(old_id)
+                except discord.NotFound:
+                    pass  # The old panel may have been removed manually.
+                except discord.Forbidden as exc:
+                    raise RuntimeError("SentriX doit pouvoir lire l'historique du salon.") from exc
+                if old_message and old_message.author.id != self.bot.user.id:
+                    raise RuntimeError("Le message enregistré n'appartient pas à SentriX.")
+
+            # Never delete the old message first. A failed send leaves the panel intact.
+            new_message = await sx_panels.envoyer(
+                channel,
+                sx_panels.avec_composants(
+                    sx_panels.depuis_embed(self.build_panel_embed(panel)),
+                    TicketPanelView(panel, types),
+                ),
+            )
+            updated = False
+            try:
+                cursor = await self.bot.db.execute(
+                    "UPDATE ticket_panels_v2 SET message_id=? "
+                    "WHERE id=? AND guild_id=? AND message_id IS ?",
+                    (new_message.id, panel_id, guild_id, old_id),
+                )
+                if cursor.rowcount != 1:
+                    raise RuntimeError("Le panel a changé pendant la réparation : opération annulée.")
+                updated = True
+                self.bot.add_view(TicketPanelView(panel, types), message_id=new_message.id)
+            except Exception:
+                if updated:
+                    await self.bot.db.execute(
+                        "UPDATE ticket_panels_v2 SET message_id=? "
+                        "WHERE id=? AND guild_id=? AND message_id=?",
+                        (old_id, panel_id, guild_id, new_message.id),
+                    )
+                try:
+                    await new_message.delete()
+                except discord.HTTPException:
+                    logger.warning("Impossible de nettoyer le nouveau panel après échec", exc_info=True)
+                raise
+
+            removed = True
+            if old_message:
+                try:
+                    await old_message.delete()
+                except discord.HTTPException:
+                    removed = False
+                    logger.warning("Ancien panel #%s non supprimé après remplacement", old_id, exc_info=True)
+            return new_message, removed
 
     async def start_ticket_flow(self, interaction: discord.Interaction, type_id: int):
         started = time.monotonic()
@@ -1599,6 +1733,74 @@ class Tickets(commands.Cog):
         await sx_panels.envoyer(ctx, sx_panels.avec_composants(sx_panels.depuis_embed(e), TicketSetupHubView(self, ctx.author.id)), ephemeral=True if ctx.interaction else False)
 
     # ---------------------------------------------------------------- COMMANDES : PANELS
+
+
+    @commands.command(name="ticketrepair")
+    @commands.guild_only()
+    async def ticketrepair(self, ctx: commands.Context, *, nom: str | None = None):
+        """Anyone can request a repair, but only the guild owner may approve it."""
+        panels = await self.bot.db.fetchall(
+            "SELECT * FROM ticket_panels_v2 WHERE guild_id=? AND enabled=1 ORDER BY id",
+            (ctx.guild.id,),
+        )
+        if not panels:
+            return await ctx.reply("Aucun panneau de tickets actif sur ce serveur.", mention_author=False)
+
+        if nom:
+            panel = next((p for p in panels if p["name"].casefold() == nom.strip().casefold()), None)
+            if panel is None:
+                return await ctx.reply("Panneau introuvable. Vérifiez son nom.", mention_author=False)
+        elif len(panels) == 1:
+            panel = panels[0]
+        else:
+            names = ", ".join(p["name"] for p in panels[:10])
+            return await ctx.reply(
+                f"Plusieurs panneaux existent : {names}. Utilisez +ticketrepair NOM_DU_PANEL.",
+                mention_author=False,
+            )
+
+        if not ctx.guild.owner_id:
+            return await ctx.reply("Le propriétaire du serveur n'est pas identifiable.", mention_author=False)
+
+        last_request = self._ticket_repair_requests.get(ctx.guild.id, 0)
+        if time.monotonic() - last_request < 120:
+            return await ctx.reply(
+                "Une demande de réparation a déjà été envoyée récemment sur ce serveur.",
+                mention_author=False,
+            )
+        owner = self.bot.get_user(ctx.guild.owner_id)
+        if owner is None:
+            try:
+                owner = await self.bot.fetch_user(ctx.guild.owner_id)
+            except discord.HTTPException:
+                owner = None
+        if owner is None:
+            return await ctx.reply("Impossible de contacter le propriétaire du serveur.", mention_author=False)
+
+        view = TicketPanelRepairApprovalView(
+            self, ctx.guild.id, panel["id"], ctx.guild.owner_id, ctx.author.id
+        )
+        try:
+            await owner.send(
+                f"Demande de réparation SentriX dans {ctx.guild.name}. "
+                f"Demandée par {ctx.author} pour le panneau « {panel['name']} ». "
+                "Cette opération recrée le message du panneau avec les mêmes réglages. "
+                "Elle ne donne aucune permission au demandeur. Validez ou refusez sous 5 minutes.",
+                view=view,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except discord.HTTPException:
+            return await ctx.reply(
+                "Les messages privés du propriétaire sont fermés. "
+                "Il peut gérer son panneau depuis +ticketsetup sans vous donner de permissions.",
+                mention_author=False,
+            )
+        self._ticket_repair_requests[ctx.guild.id] = time.monotonic()
+        await ctx.reply(
+            "Demande envoyée au propriétaire en message privé. "
+            "Le panneau ne changera que s'il approuve.",
+            mention_author=False,
+        )
 
     @commands.hybrid_group(name="ticketpanel", description="Gérer les panels de tickets.")
     @checks.is_owner_or_admin_for("tickets")
