@@ -43,7 +43,7 @@ async def main() -> int:
 
     def select_of(view):
         return next(i for i in items(view) if isinstance(i, discord.ui.Select)
-                    and "protections" in str(i.placeholder or ""))
+                    and "protection" in str(i.placeholder or ""))
 
     def button(view, text: str):
         return next((i for i in items(view) if isinstance(i, discord.ui.Button) and text in str(i.label or "")), None)
@@ -55,7 +55,7 @@ async def main() -> int:
     values = [o.value for o in select_of(view).options]
     check("honeypot" not in values and "verification" not in values,
           "sans système de vérification, le menu ne propose ni Salon piège ni Vérification", str(values))
-    check("demandent d'installer la vérification" in texts(view) and button(view, "Ouvrir l'installation") is not None,
+    check("demandent d'installer la vérification" in texts(view) and button(view, "Ouvrir l’installation") is not None,
           "la page explique pourquoi et propose « Ouvrir l'installation de la vérification »")
     check(sum(1 for _ in items(view)) <= 40, f"la page tient dans la limite Discord ({len(items(view))} composants)")
 
@@ -71,7 +71,7 @@ async def main() -> int:
     await v71.update_setting(bot, h.GID, "honeypot_enabled", 1, h.ADMIN_ID)
     await v71.update_setting(bot, h.GID, "verification_enabled", 1, h.ADMIN_ID)
     view = await build(bot, guild, "security")
-    defaults = [o.value for o in select_of(view).options if o.default]
+    defaults = [o.value for o in select_of(view).options if str(o.description or "").startswith("Activé")]
     # La liste « Actuellement : … » est devenue un compteur (28/10/2026) : le
     # menu (options cochées) est la seule source de ce qui est actif.
     check("honeypot" not in defaults and "verification" not in defaults,
@@ -89,7 +89,7 @@ async def main() -> int:
     try:
         view = await build(bot, guild, "security")
         values = [o.value for o in select_of(view).options]
-        defaults = [o.value for o in select_of(view).options if o.default]
+        defaults = [o.value for o in select_of(view).options if str(o.description or "").startswith("Activé")]
         check("honeypot" in values and "verification" in values and button(view, "Installer") is None,
               "système installé : les deux sont proposées, sans bouton d'installation", str(values))
         check({"honeypot", "verification"} <= set(defaults), "et leur état réel est affiché", str(defaults))
@@ -107,7 +107,7 @@ async def main() -> int:
     _install_capture()
     opened = len(CAPTURE)
     since = len(h.CALLS)
-    await button(view, "Ouvrir l'installation").callback(interaction(bot))
+    await button(view, "Ouvrir l’installation").callback(interaction(bot))
     await h.settle(idle=0.2, maximum=3)
     check(await flags() == (False, False) and not any(m == "POST" and p.endswith("/channels") for m, p, _ in h.CALLS[since:]),
           "ouvrir l'installateur ne crée rien et n'active rien")

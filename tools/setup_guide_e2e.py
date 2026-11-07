@@ -15,6 +15,7 @@ import asyncio
 import os
 import pathlib
 import sys
+from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -46,8 +47,16 @@ async def cliquer(view, debut: str) -> None:
     b = bouton(view, debut)
     if b is None:
         raise AssertionError(f"bouton « {debut} » absent sur la page {view.page!r}")
-    await b.callback(interaction(view.bot))
+    original = discord.Interaction.edit_original_response
+    rendered = []
+    async def capture(i, **kwargs):
+        if kwargs.get("view") is not None:
+            rendered.append(kwargs["view"])
+        return await original(i, **kwargs)
+    with patch.object(discord.Interaction, "edit_original_response", capture):
+        await b.callback(interaction(view.bot))
     await h.settle(idle=0.2, maximum=2)
+    return rendered[-1] if rendered else view
 
 
 async def main() -> int:
@@ -69,7 +78,7 @@ async def main() -> int:
         await menu.callback(interaction(bot))
         await h.settle(idle=0.2, maximum=2)
         check(view.page == page and bouton(view, "Retour") is not None, f"le menu ouvre la page {page}")
-        await cliquer(view, "Retour")
+        view = await cliquer(view, "Retour")
         check(view.page is None, f"« Retour » ramène à l'accueil depuis {page}")
 
     apres = {m: await core.module_state(bot, h.GID, m) for m in avant}

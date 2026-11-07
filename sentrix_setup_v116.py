@@ -50,14 +50,15 @@ def _s(key: str, label: str, description: str, action: str) -> SectionSpec:
 MODULES: tuple[ModuleSpec, ...] = (
     ModuleSpec("security", "Sécurité", "AutoMod, anti-raid, anti-nuke et protections avancées.", (
         _s("automod", "Protections", "Activer et régler précisément toutes les protections AutoMod.", "security"),
-        _s("raid", "Anti-Raid", "Renforcer les protections contre les arrivées et actions massives.", "security"),
-        _s("nuke", "Anti-Nuke", "Protéger les salons, rôles, webhooks et actions critiques.", "security"),
-        _s("vanity", "Vanity URL", "Détecter et restaurer les changements suspects du lien vanity.", "security"),
-        _s("prune", "Member Prune", "Détecter les prunes massifs via le journal d'audit.", "security"),
-        _s("permissions", "Permissions dangereuses", "Bloquer les élévations critiques de rôles et salons.", "security"),
-        _s("join_gate", "Join Gate", "Combiner âge du compte, avatar et vitesse d'arrivée.", "security"),
-        _s("risk", "Risk Score", "Combiner plusieurs signaux de risque avec décroissance temporelle.", "security"),
-        _s("exceptions", "Exceptions", "Choisir les rôles et salons qui doivent être ignorés.", "security"),
+        _s("raid", "Anti-Raid", "Renforcer les protections contre les arrivées et actions massives.", "security-filter:antiraid"),
+        _s("nuke", "Anti-Nuke", "Protéger les salons, rôles, webhooks et actions critiques.", "security-filter:antinuke"),
+        _s("vanity", "Lien personnalisé", "Détecter et restaurer les changements suspects du lien vanity.", "security-filter:security_vanity"),
+        _s("prune", "Expulsions massives", "Détecter les prunes massifs via le journal d'audit.", "security-filter:security_prune"),
+        _s("permissions", "Permissions dangereuses", "Bloquer les élévations critiques de rôles et salons.", "security-filter:security_permissions"),
+        _s("join_gate", "Filtre des arrivées", "Combiner âge du compte, avatar et vitesse d'arrivée.", "security-filter:join_gate"),
+        _s("risk", "Analyse des risques", "Combiner plusieurs signaux de risque avec décroissance temporelle.", "security-filter:risk_engine"),
+        _s("exceptions", "Exceptions", "Choisir les rôles et salons qui doivent être ignorés.", "security-exceptions"),
+        _s("backups", "Sauvegardes et restauration", "Créer, consulter et restaurer les sauvegardes du serveur.", "backup-center"),
         _s("diagnostic", "Diagnostic", "Vérifier permissions, hiérarchie et protections manquantes.", "diagnostic"),
     )),
     ModuleSpec("moderation", "Modération", "Sanctions, staff, historique et automatisations.", (
@@ -75,8 +76,8 @@ MODULES: tuple[ModuleSpec, ...] = (
         _s("system", "Système musique", "Activer ou désactiver la musique et choisir le vocal qui héberge le lecteur.", "music-config"),
     )),
     ModuleSpec("members", "Bienvenue & Départ", "Arrivées, départs, vérification et rôles choisis manuellement.", (
-        _s("welcome", "Bienvenue", "Salon et paramètres d'accueil des nouveaux membres.", "config:welcome_channel"),
-        _s("goodbye", "Départ", "Salon et comportement lors du départ d'un membre.", "config:goodbye_channel"),
+        _s("welcome", "Bienvenue", "Salon, message, format et options de notification.", "welcome-center"),
+        _s("goodbye", "Départ", "Salon, message et présentation des départs.", "goodbye-center"),
         _s("verify", "Rôle vérifié", "Choisir le rôle attribué après vérification.", "verification"),
         _s("verify_portal", "Portail de vérification", "Activer ou réparer verification et stay-muted avec leurs panneaux SentriX.", "internal:verification"),
         _s("autorole", "Autorôle", "Rôle distribué automatiquement à l'arrivée.", "config:autorole"),
@@ -756,7 +757,23 @@ async def _run_action(view, interaction: discord.Interaction) -> None:
     section = next(s for s in module.sections if s.key == view._v116_section)
     action = section.action
 
-    if action == "security":
+    if action.startswith("security-filter:") or action in {"security-exceptions", "backup-center", "welcome-center", "goodbye-center"}:
+        if action == "backup-center" and not interaction.user.guild_permissions.administrator:
+            return await interaction.response.send_message("Les sauvegardes nécessitent la permission Administrateur.", ephemeral=True)
+        await interaction.response.defer()
+        if action == "backup-center":
+            from cogs.complete_backup_setup import BackupSetupView
+            subview = BackupSetupView(view.bot, interaction.guild, interaction.user.id)
+        elif action in {"welcome-center", "goodbye-center"}:
+            from cogs.complete_welcome_setup import WelcomeSetupView
+            subview = WelcomeSetupView(view.bot, interaction.guild, interaction.user.id, action.split("-")[0])
+        else:
+            from cogs.complete_security_setup import SecurityCenterView
+            subview = SecurityCenterView(view.bot, interaction.guild, interaction.user.id, action.split(":", 1)[1] if ":" in action else None)
+            if action == "security-exceptions":
+                subview.section = "global"
+        return await interaction.edit_original_response(view=await subview.build(), attachments=[])
+    elif action == "security":
         view.page = v4.PAGE_SECURITY
     elif action == "logs":
         view.page = v4.PAGE_LOGS

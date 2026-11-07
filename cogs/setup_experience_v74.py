@@ -647,6 +647,9 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         self.add_item(container)
 
     async def _build_page(self, page: str) -> None:
+        if page in {"welcome", "goodbye"}:
+            from .complete_welcome_setup import build_welcome_page
+            return await build_welcome_page(self, page)
         if page in {"snippets", "word_reactions", "recurring_messages"}:
             from . import setup_automation_extras
             return await setup_automation_extras.build_page(self, page)
