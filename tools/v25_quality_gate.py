@@ -206,7 +206,11 @@ async def _runtime_checks(errors: list[str]) -> None:
         roots = {str(command.name).casefold() for command in bot.tree.get_commands()}
         if len(roots) > slash_command_budget.GLOBAL_CHAT_INPUT_BUDGET:
             errors.append(f"budget slash dépassé: {len(roots)}/100")
-        for name in ("help", "balance", "rps", "ban", "mute"):
+        # Les 45 mini-jeux sont publiés derrière /jeux par la surface groupée
+        # V95 au moment de la synchronisation, pas forcément en /rps à la racine.
+        # Le contrat de +rps (présence + paramètre choix) est déjà vérifié via
+        # CRITICAL_CONTRACTS. Exiger /rps ici contredit le budget de 100 racines.
+        for name in ("help", "balance", "ban", "mute"):
             if name not in roots:
                 errors.append(f"commande slash critique absente: /{name}")
 
