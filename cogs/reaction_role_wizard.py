@@ -6,6 +6,8 @@ import logging
 
 import discord
 
+from utils.sentrix_panel_style import banner
+
 from cogs.economy_setup import AdminView, button
 from utils import config_journal
 from utils.reaction_role_options import save_options
@@ -99,6 +101,7 @@ class ReactionRoleWizard(AdminView):
     def public_view(self):
         view = discord.ui.LayoutView(timeout=None)
         box = discord.ui.Container(accent_colour=PURPLE)
+        banner(box)
         box.add_item(discord.ui.TextDisplay(f"## {self.title}\n{self.text}"))
         box.add_item(discord.ui.Separator())
         box.add_item(
@@ -118,6 +121,7 @@ class ReactionRoleWizard(AdminView):
     def build(self):
         self.clear_items()
         box = discord.ui.Container(accent_colour=PURPLE)
+        banner(box)
         summary = "\n".join(f"{emoji} → <@&{rid}>" for _, emoji, rid in self.mappings)
         box.add_item(
             discord.ui.TextDisplay(
@@ -321,6 +325,7 @@ class ReactionRoleWizard(AdminView):
         self.publishing = False
         self.clear_items()
         box = discord.ui.Container(accent_colour=PURPLE)
+        banner(box)
         box.add_item(discord.ui.TextDisplay("## Panneau publié\n" + message.jump_url))
         self.add_item(box)
         await i.edit_original_response(view=self)

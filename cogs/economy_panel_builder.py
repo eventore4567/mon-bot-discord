@@ -8,8 +8,10 @@ import logging
 import discord
 
 from cogs.economy_setup import GOLD, AdminView, button
+from utils import sentrix_emojis as icons
 from utils.component_context import ComponentContext
 from utils.economy_settings import enabled_or_reply
+from utils.sentrix_panel_style import banner, decorate_controls
 
 log = logging.getLogger(__name__)
 SCHEMA = """CREATE TABLE IF NOT EXISTS sentrix_public_activity_panels (
@@ -49,7 +51,12 @@ class ActivityPublicView(discord.ui.LayoutView):
         super().__init__(timeout=None)
         self.bot, self.config = bot, config
         box = discord.ui.Container(accent_colour=0x5865F2)
-        box.add_item(discord.ui.TextDisplay(f"## {config['title']}\n{config['text']}"))
+        banner(box)
+        box.add_item(
+            discord.ui.TextDisplay(
+                f"## {icons.titre('gamepad', config['title'])}\n{config['text']}"
+            )
+        )
         for group in ("Economy", "GamesRapides", "Duels", "GamesCommunity"):
             names = [
                 n
@@ -74,8 +81,16 @@ class ActivityPublicView(discord.ui.LayoutView):
                 ),
             }
             title, help_text = titles[group]
-            box.add_item(discord.ui.Separator(spacing=discord.SeparatorSpacing.large))
-            box.add_item(discord.ui.TextDisplay(f"### {title}\n{help_text}"))
+            icon = {
+                "Economy": "wallet",
+                "GamesRapides": "gamepad",
+                "Duels": "users",
+                "GamesCommunity": "party",
+            }[group]
+            box.add_item(discord.ui.Separator(spacing=discord.SeparatorSpacing.small))
+            box.add_item(
+                discord.ui.TextDisplay(f"**{icons.titre(icon, title)}** · {help_text}")
+            )
             picker = discord.ui.Select(
                 placeholder={
                     "Economy": "Mon économie",
@@ -85,7 +100,10 @@ class ActivityPublicView(discord.ui.LayoutView):
                 }[group],
                 custom_id="sentrix:activity:" + group,
                 options=[
-                    discord.SelectOption(label=ACTIONS[n][0], value=n) for n in names
+                    discord.SelectOption(
+                        label=ACTIONS[n][0], value=n, emoji=icons.partiel(icon)
+                    )
+                    for n in names
                 ],
             )
 
@@ -172,6 +190,7 @@ class ActivityPublicView(discord.ui.LayoutView):
                 tools.append(item)
             box.add_item(discord.ui.ActionRow(*tools))
         self.add_item(box)
+        decorate_controls(self)
 
 
 async def restore_activity_panels(bot):
@@ -246,6 +265,7 @@ class EconomyPanelBuilder(AdminView):
     def build(self):
         self.clear_items()
         box = discord.ui.Container(accent_colour=GOLD)
+        banner(box)
         box.add_item(
             discord.ui.TextDisplay(
                 "## Créer un panneau\nChoisissez le contenu, personnalisez le texte puis publiez dans un salon."
@@ -400,6 +420,7 @@ class EconomyPanelBuilder(AdminView):
         self.busy = False
         self.clear_items()
         box = discord.ui.Container(accent_colour=GOLD)
+        banner(box)
         box.add_item(discord.ui.TextDisplay("## Panneau publié\n" + message.jump_url))
         self.add_item(box)
         await i.edit_original_response(view=self)

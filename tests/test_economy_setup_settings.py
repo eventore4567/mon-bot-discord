@@ -182,7 +182,7 @@ async def test_persistent_public_buttons_call_real_commands_privately(bot):
     bot.get_cog = lambda name: cog
     view = EconomyPublicView(bot)
     assert view.is_persistent()
-    row = view.children[0].children[1]
+    row = next(x for x in view.walk_children() if isinstance(x, discord.ui.ActionRow))
     assert [x.custom_id for x in row.children] == [
         "sentrix:economy:public:" + n
         for n in ("daily", "work", "balance", "shop", "economyleaderboard")
@@ -292,7 +292,9 @@ async def test_economy_page_is_complete_and_fits_discord_components(bot):
         "Réinitialiser l'économie",
     } <= labels
     assert view.total_children_count <= 40
-    assert not any(isinstance(i, discord.ui.MediaGallery) for i in view.walk_children())
+    galleries = [i for i in view.walk_children() if isinstance(i, discord.ui.MediaGallery)]
+    assert len(galleries) == 1
+    assert all(str(m.media.url).endswith("/ui-strip-v1.png") for m in galleries[0].items)
 
 
 @pytest.mark.asyncio

@@ -14,6 +14,14 @@ from cogs.complete_setup_common import (
 from utils import config_journal, spam_sensitivity
 from utils import sentrix_emojis as icons
 
+GROUP_ICONS = {
+    "Messages": "message",
+    "Arrivées": "member_join",
+    "Serveur": "security",
+    "Réponse": "mod",
+    "Avancé": "settings",
+}
+
 
 def specs():
     from cogs.setup_v2_ui import SECURITY_CENTER_PROTECTIONS
@@ -139,7 +147,7 @@ class SecurityCenterView(CompleteView):
             for group in ("Messages", "Arrivées", "Serveur", "Réponse", "Avancé"):
                 entries = [x for x in available if x[2] == group]
                 lines.append(
-                    f"**{group}** · {sum(bool(states[x[0]]) for x in entries)}/{len(entries)} actives"
+                    f"**{icons.titre(GROUP_ICONS[group], group)}** · {sum(bool(states[x[0]]) for x in entries)}/{len(entries)} actives"
                 )
             box = heading(
                 icons.titre("security", "Sécurité"),
@@ -166,6 +174,7 @@ class SecurityCenterView(CompleteView):
                     discord.SelectOption(
                         label=label,
                         value=key,
+                        emoji=icons.partiel(GROUP_ICONS[group]),
                         description=f"{'Activé' if states[key] else 'Désactivé'} · {group}"[
                             :100
                         ],

@@ -32,6 +32,7 @@ from utils import spam_sensitivity
 
 def valid(view):
     assert view.total_children_count <= 40, view.total_children_count
+    assert any(isinstance(x, discord.ui.MediaGallery) and any(str(m.media.url).endswith("/ui-strip-v1.png") for m in x.items) for x in view.walk_children())
     assert all(c["type"] in {1, 9, 10, 12, 13, 14, 17} for c in view.to_components())
     assert not any(
         isinstance(i, discord.ui.MediaGallery)
