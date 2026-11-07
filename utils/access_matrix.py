@@ -65,7 +65,7 @@ PUBLIC_COMMANDS = frozenset({
     # strictes que cette racine — sans lui, TOUT +giveaway (y compris +giveaway
     # create) était bloqué aux membres normaux, alors que +giveaway-list restait
     # public : incohérence confirmée par exécution (utils/access_matrix.py::evaluate).
-    "ticket", "giveaway-list", "giveaway", "event-join", "event-leave",
+    "ticket", "ticketrepair", "giveaway-list", "giveaway", "event-join", "event-leave",
     "event-list", "tournament-join", "tournament-list", "invites",
     "invite-leaderboard", "invited-by",
     # Statistiques publiques
@@ -516,7 +516,7 @@ def module_for_command(name: str) -> str | None:
                     "image", "image-prompt", "explain", "rewrite", "fact-check",
                     "ai", "improve", "correct", "ai-translate", "code"}:
             return "ai"
-        if name == "ticket":
+        if name in {"ticket", "ticketrepair"}:
             return "tickets"
     return None
 
