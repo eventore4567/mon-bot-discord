@@ -51,6 +51,13 @@ async def main():
     view = ActivityPublicView(bot, config)
     valid(view)
     assert len(ACTIONS) == 25 and view.is_persistent()
+    assert any(isinstance(x, discord.ui.MediaGallery) and any(str(m.media.url).endswith("/ui-strip-v1.png") for m in x.items) for x in view.walk_children())
+    with patch("utils.sentrix_emojis._resolu", return_value="<:sentrix_gamepad:123456789012345678>"):
+        styled = ActivityPublicView(bot, config)
+        options = [o for x in styled.walk_children() if isinstance(x, discord.ui.Select) for o in x.options]
+        assert all(o.emoji and o.emoji.id for o in options)
+        assert all(x.emoji and x.emoji.id for x in styled.walk_children() if isinstance(x, discord.ui.Button))
+        assert styled.total_children_count <= 40
     pickers = [i for i in view.walk_children() if isinstance(i, discord.ui.Select)]
     assert len(pickers) == 4
     copy = "\n".join(x.content for x in view.walk_children() if isinstance(x, discord.ui.TextDisplay))

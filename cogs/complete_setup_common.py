@@ -69,6 +69,9 @@ class CompleteView(AdminView):
             )
         )
         self.add_item(box)
+        from utils.sentrix_panel_style import decorate_controls
+
+        decorate_controls(self)
         # Le premier rendu peut être intégré à la façade /setup : vérifier aussi
         # l'administrateur ici, avant toute mutation, puis conserver la vue privée.
         for item in self.walk_children():
@@ -114,7 +117,10 @@ def setting_line(box, title, description, action):
 
 
 def heading(title, text, *, colour=None):
+    from utils.sentrix_panel_style import banner
+
     box = discord.ui.Container(accent_colour=0x5865F2 if colour is None else colour)
+    banner(box)
     box.add_item(discord.ui.TextDisplay(f"## {title}\n{text}"))
     return box
 

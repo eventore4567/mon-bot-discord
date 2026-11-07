@@ -9,7 +9,9 @@ import discord
 
 from cogs.complete_setup_common import button, heading, setting_line
 from utils import game_rewards
+from utils import sentrix_emojis as icons
 from utils.component_context import ComponentContext
+from utils.sentrix_panel_style import decorate_controls
 
 log = logging.getLogger(__name__)
 
@@ -150,7 +152,7 @@ class CommunityLobby(discord.ui.LayoutView):
             + " · ".join(f"<@{ident}>" for ident in self.players)
         )
         text += "\n\nPartie ouverte au salon : les autres membres autorisés peuvent aussi jouer."
-        box = heading("Jouer ensemble", text)
+        box = heading(icons.titre("users", "Jouer ensemble"), text)
         if self.state == "waiting":
             box.add_item(discord.ui.Separator())
             join_button = button("Rejoindre", self.join)
@@ -178,6 +180,7 @@ class CommunityLobby(discord.ui.LayoutView):
                 )
             )
         self.add_item(box)
+        decorate_controls(self)
         return self
 
     async def interaction_check(self, i):
