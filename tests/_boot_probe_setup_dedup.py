@@ -296,9 +296,9 @@ async def main():
             for method, path, data in h.CALLS[before:]
         )
     for view in (home, wizard, composer, public):
-        assert not any(
-            isinstance(i, discord.ui.MediaGallery) for i in view.walk_children()
-        )
+        galleries = [i for i in view.walk_children() if isinstance(i, discord.ui.MediaGallery)]
+        assert len(galleries) == 1
+        assert all(str(m.media.url).endswith("/ui-strip-v1.png") for m in galleries[0].items)
     print(
         json.dumps(
             {
