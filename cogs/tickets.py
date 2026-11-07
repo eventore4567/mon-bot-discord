@@ -51,6 +51,7 @@ from services import ticket_panels_v3
 from utils import embeds, checks, helpers, design_system
 from utils import cluster
 from utils import sentrix_panels as sx_panels
+from utils.ticket_panel_design import SlimTicketPanel
 from database.db import now
 
 # Logs techniques dédiés aux tickets (diagnostic de "L'application ne répond plus" :
@@ -564,9 +565,8 @@ class TicketOpenSelect(discord.ui.Select):
         ]
         super().__init__(
             placeholder=(
-                "🎫 Choose a category to open a ticket..."
-                if language == language_runtime.LANG_EN
-                else "🎫 Choisissez une catégorie pour ouvrir un ticket..."
+                "Choose a category" if language == language_runtime.LANG_EN
+                else "Choisir une catégorie"
             ),
             options=options, custom_id=f"ticket_open_select:{panel_id}", min_values=1, max_values=1,
         )
@@ -875,6 +875,23 @@ class PanelEditView(discord.ui.View):
         await self.cog.bot.db.execute("UPDATE ticket_panels_v2 SET style = ? WHERE id = ?", (new_style, self.panel_id))
         label = "boutons" if new_style == "button" else "menu déroulant"
         await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.success(f'Le panel affichera désormais un **{label}**.')), ephemere=True)
+
+    @discord.ui.button(label="Bannière : ON / OFF", style=discord.ButtonStyle.secondary, row=1)
+    async def toggle_banner(self, interaction: discord.Interaction, button: discord.ui.Button):
+        panel = await self.cog.get_panel(self.panel_id)
+        enabled = 0 if panel["banner_enabled"] else 1
+        await self.cog.bot.db.execute(
+            "UPDATE ticket_panels_v2 SET banner_enabled=? WHERE id=? AND guild_id=?",
+            (enabled, self.panel_id, interaction.guild.id),
+        )
+        status = "activée" if enabled else "désactivée"
+        await sx_panels.envoyer(
+            interaction.response,
+            sx_panels.depuis_embed(embeds.success(
+                f"Bannière ultra-fine {status}. Utilisez Envoyer / mettre à jour pour appliquer."
+            )),
+            ephemere=True,
+        )
 
     @discord.ui.button(label="Aperçu", style=discord.ButtonStyle.primary, emoji="👁️", row=1)
     async def preview(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1285,27 +1302,12 @@ class Tickets(commands.Cog):
     # ---------------------------------------------------------------- OUVERTURE
 
     async def build_public_panel(self, panel, types):
-        """Publier seulement le contenu choisi par les administrateurs.
-
-        Ne pas ajouter automatiquement « How it works » ni la liste des
-        catégories : le menu déroulant (ou les boutons) porte déjà les choix.
-        Le texte structurel de SentriX suit la langue configurée du serveur ;
-        le titre et la description restent, eux, exactement ceux de l'admin.
-        """
+        """Rendu compact Components V2 ; aucun paramètre du serveur n'est remplacé."""
         language = await language_runtime.get_language(self.bot, int(panel["guild_id"]))
-        title = str(panel["title"] or "")
-        description = str(panel["description"] or "")
-
-        public = sx_panels.Panneau(
-            titre=title,
-            sous_titre=description,
-            sections=[],  # L'admin contrôle tout le texte visible, sans bloc ajouté.
-            kind="tickets",
-            vignette=panel["thumbnail_url"] or None,
-            image=panel["image_url"] or None,
-            pied=panel["footer_text"] or "SentriX",
+        public = SlimTicketPanel(panel)
+        return sx_panels.avec_composants(
+            public, TicketPanelView(panel, types, language)
         )
-        return sx_panels.avec_composants(public, TicketPanelView(panel, types, language))
 
     async def refresh_public_panels(self, guild_id: int) -> int:
         guild = self.bot.get_guild(int(guild_id))
@@ -2700,10 +2702,10 @@ class Tickets(commands.Cog):
         if await self.get_panel_by_name(ctx.guild.id, nouveau_nom):
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Un panel nommé « {nouveau_nom} » existe déjà.')))
         cur = await self.bot.db.execute(
-            "INSERT INTO ticket_panels_v2 (guild_id, name, title, description, color, image_url, thumbnail_url, footer_text, style, max_per_member, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO ticket_panels_v2 (guild_id, name, title, description, color, image_url, thumbnail_url, footer_text, style, max_per_member, banner_enabled, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (ctx.guild.id, nouveau_nom, panel["title"], panel["description"], panel["color"], panel["image_url"],
-             panel["thumbnail_url"], panel["footer_text"], panel["style"], panel["max_per_member"], now()),
+             panel["thumbnail_url"], panel["footer_text"], panel["style"], panel["max_per_member"], panel["banner_enabled"], now()),
         )
         new_panel_id = cur.lastrowid
         types = await self.get_panel_types(panel["id"])
