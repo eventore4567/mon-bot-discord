@@ -137,7 +137,7 @@ HELP_VISIBLE_EXTRA_COMMANDS = frozenset({
     # (setup_ticket_autoconfig_v72.py) ; un serveur voulant plusieurs types de tickets
     # n'avait aucun chemin découvrable. Les sous-commandes du hub (ticketpanel,
     # tickettype...) restent masquées, atteignables via ses boutons.
-    "ticketsetup",
+    "ticketsetup", "ticketrepair",
     # Logs/notifications/serveur : seules commandes réelles pour ces réglages,
     # jamais fusionnées dans /setup contrairement à leurs voisines (logsetup,
     # create-logs, automod-status...).
