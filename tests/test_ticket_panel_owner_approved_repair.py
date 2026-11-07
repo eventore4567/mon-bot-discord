@@ -1,4 +1,4 @@
-"""Regression checks for permission-free requests and owner-approved panel repairs."""
+"""Regression checks for direct, strictly authorized ticket panel repairs."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import pytest
 
 os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 
-from cogs.tickets import TicketPanelRepairApprovalView, Tickets
+from cogs.tickets import Tickets
 from database.db import Database
 
 
@@ -108,17 +108,48 @@ async def test_repair_send_failure_leaves_old_message_and_database_unchanged():
 
 
 @pytest.mark.asyncio
-async def test_only_current_guild_owner_can_approve():
-    guild = SimpleNamespace(owner_id=42)
-    bot = SimpleNamespace(get_guild=lambda _: guild)
-    cog = SimpleNamespace(bot=bot)
-    view = TicketPanelRepairApprovalView(cog, 10, 3, 42, 99)
-    response = SimpleNamespace(send_message=AsyncMock())
+async def test_regular_member_cannot_repair_or_publish_panel():
+    db = SimpleNamespace(is_bot_creator=AsyncMock(return_value=False), fetchall=AsyncMock())
+    bot = SimpleNamespace(db=db)
+    cog = Tickets.__new__(Tickets)
+    cog.bot = bot
+    cog._ticket_repair_requests = {}
+    cog.repair_published_ticket_panel = AsyncMock()
+    ctx = SimpleNamespace(
+        author=SimpleNamespace(id=99),
+        guild=SimpleNamespace(id=10, owner_id=42),
+        reply=AsyncMock(),
+    )
+    await Tickets.ticketrepair.callback(cog, ctx)
+    cog.repair_published_ticket_panel.assert_not_awaited()
+    db.fetchall.assert_not_awaited()
+    assert "réservée" in ctx.reply.await_args.args[0]
 
-    assert not await view.interaction_check(SimpleNamespace(user=SimpleNamespace(id=99), response=response))
-    response.send_message.assert_awaited_once()
 
-    assert await view.interaction_check(SimpleNamespace(user=SimpleNamespace(id=42), response=response))
-    guild.owner_id = 77
-    assert not await view.interaction_check(SimpleNamespace(user=SimpleNamespace(id=42), response=response))
-    view.stop()
+@pytest.mark.asyncio
+@pytest.mark.parametrize("caller_id,is_creator", [(42, False), (99, True)])
+async def test_guild_owner_and_registered_bot_creator_can_repair_without_approval(
+    caller_id, is_creator,
+):
+    db = SimpleNamespace(
+        is_bot_creator=AsyncMock(return_value=is_creator),
+        fetchall=AsyncMock(return_value=[{
+            "id": 5, "guild_id": 10, "name": "Support",
+        }]),
+    )
+    cog = Tickets.__new__(Tickets)
+    cog.bot = SimpleNamespace(db=db)
+    cog._ticket_repair_requests = {}
+    cog.repair_published_ticket_panel = AsyncMock(return_value=(
+        SimpleNamespace(jump_url="https://discord.com/channels/10/100/202"),
+        True,
+    ))
+    ctx = SimpleNamespace(
+        author=SimpleNamespace(id=caller_id),
+        guild=SimpleNamespace(id=10, owner_id=42),
+        reply=AsyncMock(),
+    )
+
+    await Tickets.ticketrepair.callback(cog, ctx)
+    cog.repair_published_ticket_panel.assert_awaited_once_with(10, 5)
+    assert "Panel réparé" in ctx.reply.await_args.args[0]
