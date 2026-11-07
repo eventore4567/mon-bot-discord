@@ -407,11 +407,11 @@ async def _publish_panel(
     if old_message_id:
         try:
             message = await channel.fetch_message(int(old_message_id))
-            await panels.editer(message, panels.avec_composants(panels.depuis_embed(cog.build_panel_embed(panel)), view))
+            await panels.editer(message, cog.build_panel_layout(panel, types))
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
             message = None
     if message is None:
-        message = await panels.envoyer(channel, panels.avec_composants(panels.depuis_embed(cog.build_panel_embed(panel)), view))
+        message = await panels.envoyer(channel, cog.build_panel_layout(panel, types))
 
     await bot.db.execute(
         "UPDATE ticket_panels_v2 SET message_id=?,channel_id=?,enabled=1 WHERE id=?",
