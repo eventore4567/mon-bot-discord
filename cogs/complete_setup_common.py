@@ -104,10 +104,17 @@ class CompleteView(AdminView):
         await i.edit_original_response(view=self, attachments=[])
 
 
-def heading(title, text, *, colour=None):
-    from cogs.setup_components_v73 import ACCENT
+def setting_line(box, title, description, action):
+    """Une ligne lisible avec son action à droite, plutôt qu’une grille."""
+    box.add_item(
+        discord.ui.Section(
+            discord.ui.TextDisplay(f"**{title}**\n{description}"), accessory=action
+        )
+    )
 
-    box = discord.ui.Container(accent_colour=ACCENT if colour is None else colour)
+
+def heading(title, text, *, colour=None):
+    box = discord.ui.Container(accent_colour=0x5865F2 if colour is None else colour)
     box.add_item(discord.ui.TextDisplay(f"## {title}\n{text}"))
     return box
 

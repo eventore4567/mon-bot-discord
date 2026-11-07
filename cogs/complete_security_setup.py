@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import discord
 
-from cogs.complete_setup_common import CompleteView, button, heading, with_actor
+from cogs.complete_setup_common import (
+    CompleteView,
+    button,
+    heading,
+    setting_line,
+    with_actor,
+)
 from utils import config_journal, spam_sensitivity
 from utils import sentrix_emojis as icons
 
@@ -358,13 +364,13 @@ class SecurityCenterView(CompleteView):
                 )
             await self.refresh(i)
 
-        box.add_item(
-            discord.ui.ActionRow(
-                button(
-                    "Désactiver" if enabled else "Activer", toggle, danger=bool(enabled)
-                ),
-                button("Toutes les protections", back),
-            )
+        setting_line(
+            box,
+            "Protection",
+            "Active sur ce serveur." if enabled else "Inactive sur ce serveur.",
+            button(
+                "Désactiver" if enabled else "Activer", toggle, danger=bool(enabled)
+            ),
         )
         supports = key in policy._SECURITY_POLICY_LABELS
         if self.section == "exceptions" and supports:
@@ -414,29 +420,41 @@ class SecurityCenterView(CompleteView):
                 discord.ui.ActionRow(button("Modifier l’escalade globale", escalate))
             )
         else:
-            row = []
             if limits is not None:
 
                 async def edit_limits(i):
                     await i.response.send_modal(SecurityLimitsModal(self, limits))
 
-                row.append(button("Configurer les limites", edit_limits))
+                setting_line(
+                    box,
+                    "Limites",
+                    "Choisir le seuil de déclenchement.",
+                    button("Configurer les limites", edit_limits),
+                )
             if supports or key == "antinuke":
 
                 async def sanctions(i):
                     self.section = "sanctions"
                     await self.refresh(i)
 
-                row.append(button("Voir et régler les sanctions", sanctions))
+                setting_line(
+                    box,
+                    "Sanctions",
+                    "Consulter la réponse et les récidives.",
+                    button("Voir et régler les sanctions", sanctions),
+                )
             if supports:
 
                 async def exceptions(i):
                     self.section = "exceptions"
                     await self.refresh(i)
 
-                row.append(button("Rôles et salons", exceptions))
-            if row:
-                box.add_item(discord.ui.ActionRow(*row))
+                setting_line(
+                    box,
+                    "Exceptions",
+                    "Choisir les rôles et salons concernés.",
+                    button("Rôles et salons", exceptions),
+                )
             if key == "antiraid":
                 from cogs import security_verification_v71 as v71
 
@@ -487,13 +505,15 @@ class SecurityCenterView(CompleteView):
                     self.section = "trusted"
                     await self.refresh(i)
 
-                box.add_item(
-                    discord.ui.ActionRow(
-                        button("Membres de confiance anti-nuke", whitelist)
-                    )
+                setting_line(
+                    box,
+                    "Membres de confiance",
+                    "Exempter les personnes autorisées.",
+                    button("Membres de confiance anti-nuke", whitelist),
                 )
                 if self.section == "trusted":
                     await self.nuke_whitelist(box)
+        box.add_item(discord.ui.ActionRow(button("Toutes les protections", back)))
         if self.section not in {"main", "trusted"}:
 
             async def detail(i):

@@ -48,9 +48,7 @@ class ActivityPublicView(discord.ui.LayoutView):
     def __init__(self, bot, config):
         super().__init__(timeout=None)
         self.bot, self.config = bot, config
-        from cogs.setup_components_v73 import ACCENT
-
-        box = discord.ui.Container(accent_colour=ACCENT)
+        box = discord.ui.Container(accent_colour=0x5865F2)
         box.add_item(discord.ui.TextDisplay(f"## {config['title']}\n{config['text']}"))
         for group in ("Economy", "GamesRapides", "Duels", "GamesCommunity"):
             names = [
@@ -66,6 +64,18 @@ class ActivityPublicView(discord.ui.LayoutView):
             ]
             if not names:
                 continue
+            titles = {
+                "Economy": ("Mon économie", "Récompenses, solde et boutique."),
+                "GamesRapides": ("En solo", "Une partie rapide, à votre rythme."),
+                "Duels": ("À deux", "Choisissez un jeu, puis votre adversaire."),
+                "GamesCommunity": (
+                    "En groupe",
+                    "Choisissez un jeu et invitez le salon à rejoindre.",
+                ),
+            }
+            title, help_text = titles[group]
+            box.add_item(discord.ui.Separator(spacing=discord.SeparatorSpacing.large))
+            box.add_item(discord.ui.TextDisplay(f"### {title}\n{help_text}"))
             picker = discord.ui.Select(
                 placeholder={
                     "Economy": "Mon économie",
@@ -135,6 +145,7 @@ class ActivityPublicView(discord.ui.LayoutView):
             picker.callback = launch
             box.add_item(discord.ui.ActionRow(picker))
         if any(n in ACTIONS and ACTIONS[n][1] != "Economy" for n in config["actions"]):
+            box.add_item(discord.ui.Separator())
             tools = []
             for label, name in (
                 ("Mes statistiques", "gamestats"),
@@ -217,7 +228,7 @@ class EconomyPanelBuilder(AdminView):
         super().__init__(bot, guild, owner_id)
         self.config = {
             "title": "Économie et jeux",
-            "text": "Récompenses, défis et parties à plusieurs : choisissez votre activité. Les duels et événements se jouent dans le salon.",
+            "text": "Choisissez votre façon de jouer ci-dessous.",
             "actions": [],
         }
         self.stage = "type"

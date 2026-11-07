@@ -40,7 +40,7 @@ def valid(view):
     )
     assert view.children[0].accent_colour is None or int(
         view.children[0].accent_colour
-    ) == int(ACCENT)
+    ) in {int(ACCENT), 0x5865F2}
 
 
 def find_button(view, label):
@@ -78,6 +78,10 @@ async def main():
     for key, *_ in specs():
         view = await SecurityCenterView(bot, guild, h.ADMIN_ID, key).build()
         valid(view)
+        if key == "antinuke":
+            lines = [x for x in view.walk_children() if isinstance(x, discord.ui.Section)]
+            assert len(lines) >= 4
+            assert all(isinstance(x.accessory, discord.ui.Button) for x in lines)
         if key in {"antispam", "antiinvite", "antimention", "antiscam"}:
             for section in ("exceptions", "sanctions"):
                 view.section = section
