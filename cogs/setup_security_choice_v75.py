@@ -1022,9 +1022,10 @@ def install(bot: commands.Bot) -> None:
 
     current_security = cls._build_security
     if not getattr(current_security, "_sentrix_security_choice_v75", False):
-        _build_security_v75._sentrix_security_choice_v75 = True
-        _build_security_v75._sentrix_previous = current_security
-        cls._build_security = _build_security_v75
+        from .complete_security_setup import build_security_page
+        build_security_page._sentrix_security_choice_v75 = True
+        build_security_page._sentrix_previous = current_security
+        cls._build_security = build_security_page
 
     current_states = cls._effective_states
     if not getattr(current_states, "_sentrix_security_choice_v75", False):

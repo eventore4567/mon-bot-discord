@@ -41,7 +41,7 @@ def check(ok: bool, label: str) -> None:
 def protection_select(view) -> discord.ui.Select:
     for top in view.children:
         for item in walk(top):
-            if isinstance(item, discord.ui.Select) and item.placeholder == "Choisir les protections anti à activer":
+            if isinstance(item, discord.ui.Select) and item.placeholder == "Configurer une protection":
                 return item
     raise AssertionError("menu des protections introuvable")
 
@@ -53,10 +53,15 @@ def texts(view) -> str:
 
 async def choose(bot, guild, keys: set[str]) -> None:
     """L'administrateur coche exactement ces protections sur la page Sécurité."""
-    view = await build(bot, guild, "security")
-    select = protection_select(view)
-    select._values = sorted(keys)
-    await select.callback(interaction(bot))
+    from cogs.complete_security_setup import SecurityCenterView
+    from cogs.setup_control_center import AUTOMOD
+    for key, _ in AUTOMOD:
+        current = dict(await bot.db.get_automod(guild.id) or {})
+        if bool(current.get(key)) == (key in keys):
+            continue
+        view = await SecurityCenterView(bot, guild, h.ADMIN_ID, key).build()
+        toggle = next(i for i in view.walk_children() if isinstance(i, discord.ui.Button) and i.label in {"Activer", "Désactiver"})
+        await toggle.callback(interaction(bot))
     await h.settle(idle=0.3, maximum=3)
 
 
@@ -91,7 +96,7 @@ async def main() -> int:
     core.invalidate_module_cache(h.GID)
     bot.get_cog("Automod").automod_cache.clear()
     view = await build(bot, guild, "security")
-    cochees = [o.value for o in protection_select(view).options if o.default]
+    cochees = [o.value for o in protection_select(view).options if str(o.description or "").startswith("Activé")]
     check(not cochees, f"serveur neuf : aucune protection cochée ({cochees})")
     # Pas de ligne du tout (création paresseuse, cache V14) = aucune protection.
     row = dict(await bot.db.get_automod(h.GID) or {})
@@ -114,7 +119,7 @@ async def main() -> int:
     await bot.db.execute(f"UPDATE automod_settings SET {zeros} WHERE guild_id=?", (h.GID,))
     bot.get_cog("Automod").automod_cache.clear()
     view = await build(bot, guild, "security")
-    check(not [o for o in protection_select(view).options if o.default], "tout coupé : aucune protection cochée")
+    check(not [o for o in protection_select(view).options if str(o.description or "").startswith("Activé")], "tout coupé : aucune protection cochée")
     avant = await spam_deleted(bot, guild, 0)
     check(avant == 0, f"tout coupé : le spam n'est effectivement pas traité ({avant}/8 supprimés) — l'écran dit vrai")
 
@@ -124,7 +129,7 @@ async def main() -> int:
     check(row is not None and row["antispam"] and row["antiraid"] and row["antinuke"] and not row["antilink"],
           "cocher anti-spam, anti-raid et anti-nuke : exactement ces trois-là en base")
     view = await build(bot, guild, "security")
-    cochees = {o.value for o in protection_select(view).options if o.default}
+    cochees = {o.value for o in protection_select(view).options if str(o.description or "").startswith("Activé")}
     check({"antispam", "antiraid", "antinuke"} <= cochees and "antilink" not in cochees,
           f"la page affiche l'état réel ({sorted(cochees)})")
     apres = await spam_deleted(bot, guild, 1)

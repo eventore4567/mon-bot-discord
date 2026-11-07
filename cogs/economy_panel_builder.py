@@ -27,6 +27,20 @@ ACTIONS = {
     "minesweeper": ("Démineur", "GamesRapides"),
     "doors": ("Les trois portes", "GamesRapides"),
     "bossfight": ("Combat de boss", "GamesRapides"),
+    "fight": ("Combat au tour par tour", "GamesDuels"),
+    "duel": ("Pierre-feuille-ciseaux", "GamesDuels"),
+    "numberduel": ("Duel de nombres", "GamesDuels"),
+    "quizduel": ("Duel de quiz", "GamesDuels"),
+    "reactionduel": ("Duel de réflexes", "GamesDuels"),
+    "connect4": ("Puissance 4", "GamesDuels"),
+    "tictactoe": ("Morpion", "Minigames"),
+    "triviastart": ("Quiz du salon", "GamesCommunity"),
+    "wordrace": ("Course aux mots", "GamesCommunity"),
+    "mathrace": ("Course au calcul", "GamesCommunity"),
+    "guessrace": ("Course au nombre", "GamesCommunity"),
+    "reactionevent": ("Défi de réflexes", "GamesCommunity"),
+    "emoji_race": ("Course aux emojis", "GamesCommunity"),
+    "lastmessage": ("Dernier message gagne", "GamesCommunity"),
 }
 
 
@@ -34,18 +48,31 @@ class ActivityPublicView(discord.ui.LayoutView):
     def __init__(self, bot, config):
         super().__init__(timeout=None)
         self.bot, self.config = bot, config
-        box = discord.ui.Container(accent_colour=GOLD)
+        from cogs.setup_components_v73 import ACCENT
+
+        box = discord.ui.Container(accent_colour=ACCENT)
         box.add_item(discord.ui.TextDisplay(f"## {config['title']}\n{config['text']}"))
-        for group in ("Economy", "GamesRapides"):
+        for group in ("Economy", "GamesRapides", "Duels", "GamesCommunity"):
             names = [
-                n for n in config["actions"] if n in ACTIONS and ACTIONS[n][1] == group
+                n
+                for n in config["actions"]
+                if n in ACTIONS
+                and (
+                    "Duels"
+                    if ACTIONS[n][1] in {"GamesDuels", "Minigames"}
+                    else ACTIONS[n][1]
+                )
+                == group
             ]
             if not names:
                 continue
             picker = discord.ui.Select(
-                placeholder="Choisir une action économique"
-                if group == "Economy"
-                else "Choisir un jeu à lancer",
+                placeholder={
+                    "Economy": "Mon économie",
+                    "GamesRapides": "Jouer en solo",
+                    "Duels": "Défier un membre",
+                    "GamesCommunity": "Ouvrir une partie de groupe",
+                }[group],
                 custom_id="sentrix:activity:" + group,
                 options=[
                     discord.SelectOption(label=ACTIONS[n][0], value=n) for n in names
@@ -57,13 +84,41 @@ class ActivityPublicView(discord.ui.LayoutView):
                 if (
                     name not in self.config["actions"]
                     or name not in ACTIONS
-                    or ACTIONS[name][1] != _group
+                    or (
+                        "Duels"
+                        if ACTIONS[name][1] in {"GamesDuels", "Minigames"}
+                        else ACTIONS[name][1]
+                    )
+                    != _group
                 ):
                     return await i.response.send_message(
                         "Cette option n'est pas proposée sur ce panneau.",
                         ephemeral=True,
                     )
-                cog = bot.get_cog(_group)
+                if _group in {"Duels", "GamesCommunity"} and i.guild is None:
+                    return await i.response.send_message(
+                        "Les parties multijoueurs se lancent sur un serveur.",
+                        ephemeral=True,
+                    )
+                if _group == "Duels":
+                    from cogs.community_game_panels import DuelMemberPicker
+
+                    return await i.response.send_message(
+                        view=DuelMemberPicker(
+                            bot,
+                            i.guild,
+                            i.user.id,
+                            ACTIONS[name][1],
+                            name,
+                            ACTIONS[name][0],
+                        ),
+                        ephemeral=True,
+                    )
+                if _group == "GamesCommunity":
+                    from cogs.community_game_panels import open_community_lobby
+
+                    return await open_community_lobby(bot, i, name, ACTIONS[name][0])
+                cog = bot.get_cog(ACTIONS[name][1])
                 if cog is None:
                     return await i.response.send_message(
                         "Cette activité est temporairement indisponible.",
@@ -79,6 +134,32 @@ class ActivityPublicView(discord.ui.LayoutView):
 
             picker.callback = launch
             box.add_item(discord.ui.ActionRow(picker))
+        if any(n in ACTIONS and ACTIONS[n][1] != "Economy" for n in config["actions"]):
+            tools = []
+            for label, name in (
+                ("Mes statistiques", "gamestats"),
+                ("Classement des joueurs", "gametop"),
+            ):
+                item = discord.ui.Button(
+                    label=label, custom_id="sentrix:activity:profile:" + name
+                )
+
+                async def profile(i, _name=name):
+                    cog = bot.get_cog("GamesPlayerCommands")
+                    if cog is None:
+                        return await i.response.send_message(
+                            "Les statistiques sont temporairement indisponibles.",
+                            ephemeral=True,
+                        )
+                    await i.response.defer(ephemeral=True, thinking=True)
+                    ctx = ComponentContext(bot, i)
+                    command = getattr(cog, _name)
+                    ctx.command = command
+                    await command.callback(cog, ctx)
+
+                item.callback = profile
+                tools.append(item)
+            box.add_item(discord.ui.ActionRow(*tools))
         self.add_item(box)
 
 
@@ -136,7 +217,7 @@ class EconomyPanelBuilder(AdminView):
         super().__init__(bot, guild, owner_id)
         self.config = {
             "title": "Économie et jeux",
-            "text": "Choisissez une activité ci-dessous. Votre partie et vos réponses restent privées.",
+            "text": "Récompenses, défis et parties à plusieurs : choisissez votre activité. Les duels et événements se jouent dans le salon.",
             "actions": [],
         }
         self.stage = "type"

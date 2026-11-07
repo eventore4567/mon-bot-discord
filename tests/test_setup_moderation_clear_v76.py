@@ -42,6 +42,6 @@ def test_sanction_dm_configuration_is_available_from_setup():
 def test_v76_is_loaded_after_v75_security_patch():
     source = V75.read_text(encoding="utf-8")
 
-    install_security = source.index("cls._build_security = _build_security_v75")
+    install_security = source.index("cls._build_security = build_security_page")
     install_v76 = source.index("moderation_v76.install(bot)")
     assert install_security < install_v76

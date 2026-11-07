@@ -230,7 +230,7 @@ async def main() -> int:
     # 7 — Aperçu depuis les pages Bienvenue et Départs : vrai message, aucune notification.
     for page, label in (("welcome", "Bienvenue"), ("goodbye", "Départs")):
         view = await setup_page(bot, guild, page)
-        button = control(view, lambda i: getattr(i, "label", None) == "Aperçu")
+        button = control(view, lambda i: getattr(i, "label", None) == "Envoyer un test dans le salon")
         check(button is not None, f"page {label} : bouton Aperçu présent")
         if button is None:
             continue
@@ -243,7 +243,7 @@ async def main() -> int:
               f"page {label} : l'aperçu envoie le message sans notifier", str(sent[0].get("allowed_mentions") if sent else None))
         check("Test envoyé" in h.visible_text(h.CALLS[since:]), f"page {label} : l'aperçu confirme où il a été envoyé")
     goodbye_view = await setup_page(bot, guild, "goodbye")
-    check(control(goodbye_view, lambda i: getattr(i, "label", None) == "Texte de départ") is not None,
+    check(control(goodbye_view, lambda i: getattr(i, "label", None) == "Modifier le message") is not None,
           "page Départs : le texte de départ se modifie depuis sa propre page")
 
     # 8 — Départ : un message, les variables remplacées, personne n'est notifié.
