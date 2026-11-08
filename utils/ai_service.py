@@ -1075,6 +1075,64 @@ async def get_daily_usage(bot, guild_id: int, user_id: int) -> int:
     return row["requests"] if row else 0
 
 
+# 08/11/2026 : « mets une limite à l'IA par utilisateur ». La limite par serveur
+# (daily_limit, réglable dans /setup → IA) existait ; il manquait :
+# - une limite d'IMAGES par membre et par jour (ce qui coûte le plus) ;
+# - une limite GLOBALE par utilisateur, tous serveurs confondus, pour qu'un même compte
+#   présent sur 20 serveurs ne puisse pas consommer 20 × la limite.
+# Réglables par variable d'environnement, sans nouvelle table (ai_usage, jour « img-… »).
+IMAGES_PAR_JOUR = int(__import__("os").environ.get("SENTRIX_AI_IMAGES_PAR_JOUR", "5") or 5)
+LIMITE_GLOBALE_PAR_JOUR = int(__import__("os").environ.get("SENTRIX_AI_LIMITE_GLOBALE", "150") or 150)
+
+
+def _jour_images() -> str:
+    return f"img-{_today_str()}"
+
+
+def prochaine_remise_a_zero() -> int:
+    """Minuit UTC suivant (les compteurs sont par jour UTC)."""
+    maintenant = datetime.now(timezone.utc)
+    demain = maintenant.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() + 86400
+    return int(demain)
+
+
+async def get_image_usage(bot, guild_id: int, user_id: int) -> int:
+    row = await bot.db.fetchone(
+        "SELECT requests FROM ai_usage WHERE guild_id = ? AND user_id = ? AND day = ?",
+        (guild_id, user_id, _jour_images()),
+    )
+    return int(row["requests"]) if row else 0
+
+
+async def record_image_usage(bot, guild_id: int, user_id: int) -> None:
+    await bot.db.execute(
+        "INSERT INTO ai_usage (guild_id, user_id, day, requests, tokens_estimate) VALUES (?, ?, ?, 1, 0) "
+        "ON CONFLICT(guild_id, user_id, day) DO UPDATE SET requests = requests + 1",
+        (guild_id, user_id, _jour_images()),
+    )
+
+
+async def get_global_usage(bot, user_id: int) -> int:
+    row = await bot.db.fetchone(
+        "SELECT SUM(requests) AS total FROM ai_usage WHERE user_id = ? AND day = ?",
+        (user_id, _today_str()),
+    )
+    return int((row["total"] if row else 0) or 0)
+
+
+async def limite_atteinte(bot, guild_id: int | None, user_id: int, settings: dict, *, image: bool = False) -> str | None:
+    """Le message à afficher si ce membre a atteint une limite, sinon None."""
+    retour = f"Réessaie <t:{prochaine_remise_a_zero()}:R>."
+    if guild_id:
+        if await get_daily_usage(bot, guild_id, user_id) >= int(settings.get("daily_limit") or 50):
+            return f"📅 Tu as atteint ta limite d'IA sur ce serveur ({settings.get('daily_limit')} demandes par jour). {retour}"
+        if image and await get_image_usage(bot, guild_id, user_id) >= IMAGES_PAR_JOUR:
+            return f"🖼️ Tu as atteint ta limite d'images ({IMAGES_PAR_JOUR} par jour). {retour}"
+    if await get_global_usage(bot, user_id) >= LIMITE_GLOBALE_PAR_JOUR:
+        return f"📅 Tu as atteint ta limite d'IA du jour ({LIMITE_GLOBALE_PAR_JOUR} demandes, tous serveurs). {retour}"
+    return None
+
+
 async def record_usage(bot, guild_id: int, user_id: int, tokens_estimate: int = 0):
     day = _today_str()
     await bot.db.execute(

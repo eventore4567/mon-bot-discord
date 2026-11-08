@@ -75,15 +75,19 @@ async def test_image_creation_sends_a_real_cropped_discord_jpeg():
         allowed_role_ids=[], allowed_channel_ids=[],
     )
     with patch("cogs.ai.ai_service.get_settings", AsyncMock(return_value=settings)):
-        with patch("cogs.ai.ai_service.get_daily_usage", AsyncMock(return_value=0)):
+        # 08/11/2026 : les limites (serveur, images, globale) passent par limite_atteinte,
+        # et chaque image est comptée à part (record_image_usage).
+        with patch("cogs.ai.ai_service.limite_atteinte", AsyncMock(return_value=None)):
             with patch("cogs.ai.ai_service.generate_image", AsyncMock(return_value=result)) as generation:
-                with patch("cogs.ai.ai_service.record_usage", AsyncMock()) as record:
+                with patch("cogs.ai.ai_service.record_usage", AsyncMock()) as record, \
+                     patch("cogs.ai.ai_service.record_image_usage", AsyncMock()) as image_comptee:
                     assert await Ai._send_generated_image_natural(ai, message, question) is True
 
     generation.assert_awaited_once()
     assert generation.await_args.args[0] == question
     assert generation.await_args.kwargs["guild_id"] == 123
     record.assert_awaited_once()
+    image_comptee.assert_awaited_once()
     image_file = message.reply.await_args.kwargs["file"]
     assert isinstance(image_file, discord.File)
     image_file.fp.seek(0)
