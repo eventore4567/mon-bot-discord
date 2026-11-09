@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import decimal
 import logging
+import os
 import re
 import sqlite3
 from typing import Any, Iterable, Sequence
@@ -35,6 +36,10 @@ from database import pg_dialect
 from database.pg_dialect import TableInfo
 
 logger = logging.getLogger("bot.pg")
+
+# SENTRIX_PG_ECRITURES_PARALLELES=0 rétablit les écritures une à une sur la connexion
+# principale (comportement d'avant le 09/11/2026).
+_ECRITURES_EN_PARALLELE = os.getenv("SENTRIX_PG_ECRITURES_PARALLELES", "1").strip() != "0"
 
 try:
     import asyncpg  # type: ignore
@@ -279,8 +284,10 @@ class PgConnection:
         # chaque libération, ce qui effaçait un SET search_path (tables « introuvables »).
         settings = {"search_path": f'"{schema}"'}
         main = await asyncpg.connect(url, server_settings=settings)
+        # min_size : quelques connexions ouvertes d'avance, pour qu'une rafale
+        # d'écritures parallèles ne paie pas l'ouverture (TLS) de chaque connexion.
         pool = await asyncpg.create_pool(
-            url, min_size=1, max_size=max(1, pool_size), server_settings=settings
+            url, min_size=min(4, max(1, pool_size)), max_size=max(1, pool_size), server_settings=settings
         )
         self = cls(main, pool, schema)
         await main.execute(
@@ -422,6 +429,14 @@ class PgConnection:
         """
         params = tuple(parameters or ())
         translated = pg_dialect.translate(sql, self._catalog)
+        if translated.kind == "dml" and self._tx is None and _ECRITURES_EN_PARALLELE and self._pool is not None:
+            # 09/11/2026 : « SentriX est lent ». Toutes les écritures isolées passaient
+            # par UNE connexion, sous un verrou, une à la fois : sous un salon actif
+            # elles faisaient la queue (250 à 500 ms mesurés en production). Une
+            # écriture isolée est un autocommit d'une seule instruction : elle part
+            # sur le pool, en parallèle des autres. Les transactions explicites
+            # (BEGIN … COMMIT) restent sur la connexion principale.
+            return await self._ecrire_sur_le_pool(translated, params)
         if translated.kind in ("dml", "other") and self._tx is None:
             async with self._lock:
                 if self._tx is None:
@@ -429,6 +444,26 @@ class PgConnection:
         cursor = await self.execute(sql, params)
         await self.commit()
         return cursor
+
+    async def _ecrire_sur_le_pool(self, translated: pg_dialect.Translated, params: tuple) -> PgCursor:
+        sql = translated.sql
+        try:
+            async with self._pool.acquire() as conn:
+                types = await self._types_for(sql, conn)
+                args = self._args(params, types)
+                if re.search(r"\bRETURNING\b", sql, re.I):
+                    records = await conn.fetch(sql, *args)
+                    status = f"RETURNING {len(records)}"
+                else:
+                    records = []
+                    status = await conn.execute(sql, *args)
+            return self._cursor(records, status, translated)
+        except Exception as exc:  # noqa: BLE001
+            mapped = _sqlite_error(exc)
+            if mapped is exc:
+                raise
+            logger.debug("SQL Postgres refusé : %s\n%s", exc, sql)
+            raise mapped from exc
 
     async def _begin(self) -> None:
         self._tx = self._main.transaction()
