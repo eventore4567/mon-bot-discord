@@ -781,6 +781,15 @@ class BotAllInOne(commands.Bot):
         self._prune_redundant_commands()
         self._audit_command_permissions()
 
+        # 09/11/2026 : temps passé par chaque écouteur on_message, journalisé toutes
+        # les 10 min (préparation du regroupement des 35 écouteurs).
+        try:
+            from utils import mesure_ecouteurs
+
+            mesure_ecouteurs.installer(self)
+        except Exception:
+            logger.warning("Mesure des écouteurs indisponible :\n" + traceback.format_exc())
+
         if self._module_supervisor_task is None or self._module_supervisor_task.done():
             self._module_supervisor_task = asyncio.create_task(
                 self.module_supervisor.run(self),
