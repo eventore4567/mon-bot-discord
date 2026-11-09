@@ -2449,11 +2449,10 @@ class Ai(commands.Cog, name="Ai"):
                     f"Réessayez dans {int(DELAI_IMAGE_NATURELLE - since) + 1} secondes."
                 )
                 return True
-            if guild_id is not None:
-                used = await ai_service.get_daily_usage(self.bot, guild_id, user_id)
-                if used >= settings["daily_limit"]:
-                    await reply("Tu as atteint la limite quotidienne d'utilisation de l'IA.")
-                    return True
+            limite = await ai_service.limite_atteinte(self.bot, guild_id, user_id, settings, image=True)
+            if limite:
+                await reply(limite)
+                return True
 
             self._natural_image_recent[key] = time.monotonic()
             try:
@@ -2513,6 +2512,7 @@ class Ai(commands.Cog, name="Ai"):
                     await ai_service.record_usage(
                         self.bot, guild_id, user_id, tokens_estimate=0,
                     )
+                    await ai_service.record_image_usage(self.bot, guild_id, user_id)
                 except Exception:
                     logger.exception("Compteur image non mis à jour guild=%s", guild_id)
             return True
@@ -2929,9 +2929,9 @@ class Ai(commands.Cog, name="Ai"):
             problem = ai_service.moderate_input(description, max_length=settings["max_question_length"])
             if problem:
                 return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(problem)))
-            used_today = await ai_service.get_daily_usage(self.bot, guild_id, ctx.author.id)
-            if used_today >= settings["daily_limit"]:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f"Limite quotidienne atteinte ({settings['daily_limit']} demandes/jour).")))
+            limite = await ai_service.limite_atteinte(self.bot, guild_id, ctx.author.id, settings, image=True)
+            if limite:
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(limite)))
 
         thinking_message = None
         if ctx.interaction:
@@ -2964,6 +2964,7 @@ class Ai(commands.Cog, name="Ai"):
 
         if guild_id:
             await ai_service.record_usage(self.bot, guild_id, ctx.author.id, tokens_estimate=0)
+            await ai_service.record_image_usage(self.bot, guild_id, ctx.author.id)
 
         filename = "sentrix-image-4k.jpg"
         file = discord.File(io.BytesIO(image_bytes), filename=filename)
@@ -3085,7 +3086,15 @@ class Ai(commands.Cog, name="Ai"):
                     self._build_system_instructions(user_id, author_name, guild_id),
                 )
             if used_today >= settings["daily_limit"]:
-                return {"ok": False, "error": f"📅 Limite quotidienne atteinte ({settings['daily_limit']} demandes/jour). Réessaie demain."}
+                return {"ok": False, "error": (
+                    f"📅 Tu as atteint ta limite d'IA sur ce serveur ({settings['daily_limit']} demandes par jour). "
+                    f"Réessaie <t:{ai_service.prochaine_remise_a_zero()}:R>."
+                )}
+            if await ai_service.get_global_usage(self.bot, user_id) >= ai_service.LIMITE_GLOBALE_PAR_JOUR:
+                return {"ok": False, "error": (
+                    f"📅 Tu as atteint ta limite d'IA du jour ({ai_service.LIMITE_GLOBALE_PAR_JOUR} demandes, "
+                    f"tous serveurs). Réessaie <t:{ai_service.prochaine_remise_a_zero()}:R>."
+                )}
         else:
             instructions = await self._build_system_instructions(user_id, author_name, guild_id)
 
