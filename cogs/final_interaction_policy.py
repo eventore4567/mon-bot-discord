@@ -125,6 +125,12 @@ def _clean_embed(
     root: str = "",
     bot: Any = None,
 ) -> discord.Embed | None:
+    # 10/11/2026 : une bannière seule (image sans texte) reste une bannière : sans
+    # titre « Information » ni footer, elle formait une carte vide au-dessus du panneau.
+    from utils.command_style_v2 import est_bandeau_image
+
+    if est_bandeau_image(embed):
+        return embed
     result = sentrix_embeds.style_existing(embed, root=root, bot=bot)
     if not isinstance(result, discord.Embed):
         return result

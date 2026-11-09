@@ -1001,12 +1001,14 @@ class EmbedBuilderView(discord.ui.View):
                 f"Couleur : `#{self.draft.colour:06X}`\n"
                 if self.draft.colour is not None else "Couleur : aucune\n"
             ) + f"Image : {'oui' if self.draft.image_url else 'non'} · Miniature : {'oui' if self.draft.thumbnail_url else 'non'}",
-            inline=True,
+            # 10/11/2026 : en « inline », une couche de mise en page tassait Apparence et
+            # Éléments sur une seule ligne illisible dans la description.
+            inline=False,
         )
         status.add_field(
             name="Éléments",
             value=f"Champs : {len(self.draft.fields)}/{MAX_FIELDS}\nLiens : {len(self.draft.buttons)}/{MAX_BUTTONS}",
-            inline=True,
+            inline=False,
         )
         # Le visuel dans status.set_image() apparaissait en BAS de l'embed,
         # jamais au-dessus du titre. Un embed distinct le précède désormais.
