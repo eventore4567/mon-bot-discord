@@ -54,12 +54,15 @@ async def test_message_count_increments_when_levels_disabled():
     cog, bot, db = _make_cog(levels_enabled=False)
 
     await cog.on_message(_message())
+    # 09/11/2026 : compté en mémoire, écrit en base au vidage (toutes les 10 s).
+    db.execute.assert_not_awaited()
+    await cog._compteur_messages().vider()
 
     db.execute.assert_awaited_once()
     sql, params = db.execute.await_args.args
     assert "INSERT INTO message_counts" in sql
-    assert "count = count + 1" in sql
-    assert params == (100, 200)
+    assert "count = count + excluded.count" in sql
+    assert params == (100, 200, 1)
     db.get_stats_settings.assert_not_awaited()
     cog._process_xp.assert_not_awaited()
 
@@ -71,8 +74,11 @@ async def test_message_count_increments_even_during_xp_cooldown():
 
     await cog.on_message(_message(message_id=1))
     await cog.on_message(_message(message_id=2))
+    await cog._compteur_messages().vider()
 
-    assert db.execute.await_count == 2
+    # Les deux messages sont comptés, en une seule écriture regroupée.
+    assert db.execute.await_count == 1
+    assert db.execute.await_args.args[1] == (100, 200, 2)
     cog._process_xp.assert_not_awaited()
 
 
@@ -85,6 +91,7 @@ async def test_command_not_awarded_xp_but_still_counted():
     bot.get_context.return_value = SimpleNamespace(valid=True)
 
     await cog.on_message(_message())
+    await cog._compteur_messages().vider()
 
     db.execute.assert_awaited_once()
     bot.get_context.assert_awaited_once()
@@ -98,6 +105,7 @@ async def test_xp_skip_ids_still_count_real_messages():
 
     await cog.on_message(_message())
 
+    await cog._compteur_messages().vider()
     db.execute.assert_awaited_once()
     cog._process_xp.assert_not_awaited()
 
@@ -133,6 +141,7 @@ async def test_failure_to_count_does_not_block_other_listeners_or_xp():
     with patch.object(cog, "_process_xp", new_callable=AsyncMock) as process:
         await cog.on_message(_message())
         await asyncio.sleep(0)
+        await cog._compteur_messages().vider()   # l'échec est journalisé, rien ne remonte
 
     db.execute.assert_awaited_once()
     process.assert_awaited_once()

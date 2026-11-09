@@ -753,26 +753,39 @@ class Levels(commands.Cog, name="Levels"):
 
     # -------------------------------------------------------------- XP
 
+    def _compteur_messages(self):
+        """09/11/2026 : messages comptés en mémoire puis écrits toutes les 10 s par
+        membre (une requête PostgreSQL coûte 125 à 500 ms en production)."""
+        compteur = self.__dict__.get("_sentrix_compteur_messages")
+        if compteur is None:
+            from utils.compteur_groupe import CompteurGroupe
+
+            compteur = self._sentrix_compteur_messages = CompteurGroupe(
+                self._ecrire_messages_comptes, intervalle=10.0, nom="messages-comptes",
+            )
+        return compteur
+
+    async def _ecrire_messages_comptes(self, cle, total: int) -> None:
+        guild_id, user_id = cle
+        await self.bot.db.execute(
+            "INSERT INTO message_counts (guild_id, user_id, count) VALUES (?, ?, ?) "
+            "ON CONFLICT(guild_id, user_id) DO UPDATE SET count = count + excluded.count",
+            (guild_id, user_id, int(total)),
+        )
+
     async def _record_message(self, message: discord.Message) -> None:
         """Compte l'activité réelle indépendamment des règles de gain d'XP.
 
         Un message humain est compté une fois même lorsque le module Niveaux
         est désactivé, qu'un cooldown XP s'applique ou que le message est une
-        commande. La base conserve ce cumul après redémarrage.
+        commande. Le cumul est écrit en base toutes les 10 s (compteur regroupé).
         """
-        try:
-            await self.bot.db.execute(
-                "INSERT INTO message_counts (guild_id, user_id, count) VALUES (?, ?, 1) "
-                "ON CONFLICT(guild_id, user_id) DO UPDATE SET count = count + 1",
-                (message.guild.id, message.author.id),
-            )
-        except Exception:
-            # Un compteur indisponible ne doit jamais bloquer les autres cogs,
-            # la modération ou les gains d'XP.
-            logger.exception(
-                "Comptage de message impossible guild=%s user=%s",
-                message.guild.id, message.author.id,
-            )
+        self._compteur_messages().ajouter((message.guild.id, message.author.id))
+
+    async def cog_unload(self) -> None:
+        compteur = self.__dict__.get("_sentrix_compteur_messages")
+        if compteur is not None:
+            await compteur.fermer()
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):

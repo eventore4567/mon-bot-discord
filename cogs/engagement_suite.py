@@ -469,6 +469,25 @@ class EngagementSuite(commands.Cog):
                 )
                 await self.add_points(guild_id, user_id, int(progress["reward"]))
 
+    def _compteur_messages(self):
+        compteur = self.__dict__.get("_sentrix_compteur_messages")
+        if compteur is None:
+            from utils.compteur_groupe import CompteurGroupe
+
+            compteur = self._sentrix_compteur_messages = CompteurGroupe(
+                self._ecrire_messages, intervalle=10.0, nom="engagement-messages",
+            )
+        return compteur
+
+    async def _ecrire_messages(self, cle, total: int) -> None:
+        guild_id, user_id = cle
+        await self.advance_stat(guild_id, user_id, "message_count", int(total))
+
+    async def cog_unload(self) -> None:
+        compteur = self.__dict__.get("_sentrix_compteur_messages")
+        if compteur is not None:
+            await compteur.fermer()
+
     async def advance_stat(self, guild_id: int, user_id: int, field: str, amount: int, *, points: int = 0) -> None:
         if field not in {"message_count", "voice_seconds", "reactions_received", "suggestions_count"}:
             return
@@ -838,7 +857,9 @@ class EngagementSuite(commands.Cog):
                 return
         except Exception:
             logger.exception("Suggestion V3 impossible sur %s", message.guild.id)
-        await self.advance_stat(message.guild.id, message.author.id, "message_count", 1)
+        # 09/11/2026 : compté en mémoire, écrit toutes les 10 s par membre (la mise à
+        # jour du compteur + quêtes + succès coûtait 5 à 10 requêtes PAR message).
+        self._compteur_messages().ajouter((message.guild.id, message.author.id))
         key = (message.guild.id, message.author.id)
         stamp = time.monotonic()
         if stamp - self._message_points_at.get(key, 0.0) >= 30:
