@@ -112,7 +112,7 @@ def test_levels_messages_and_economy_are_database_backed():
     # un UPDATE separe. La garantie testee reste la meme : le compteur vit en base.
     assert re.search(
         r"INSERT\s+INTO\s+message_counts\b[\s\S]{0,200}?"
-        r"DO\s+UPDATE\s+SET\s+count\s*=\s*count\s*\+\s*1",
+        r"DO\s+UPDATE\s+SET\s+count\s*=\s*count\s*\+\s*excluded\.count",
         levels, re.I,
     )
     assert re.search(r"UPDATE\s+levels\s+SET\s+xp\s*=\s*\?,\s*level\s*=\s*\?", levels, re.I)
