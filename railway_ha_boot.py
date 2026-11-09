@@ -21,6 +21,7 @@ from typing import Any
 
 from aiohttp import web as aiohttp_web
 import discord
+import discord.ext.tasks
 
 
 # Certains cogs historiques démarrent leurs tâches de fond dès leur construction et leur
@@ -59,6 +60,50 @@ logger = logging.getLogger("bot.ha-boot")
 coordinator = SentriXFailoverCoordinator()
 
 _original_bot_start = boot.bot_main.BotAllInOne.start
+
+# 09/11/2026 : « déploiement en arrière-plan pour éviter de mettre SentriX en pause ».
+# Mesuré au déploiement de la PR #660 : 98 s sans SentriX. Railway arrêtait l'ancien
+# leader dès que la nouvelle instance répondait à /health, puis la nouvelle chargeait
+# ses modules (77 s) SEULEMENT après avoir pris le bail. Désormais (démarrage à chaud) :
+#   1. la nouvelle instance charge tout (login + setup_hook) AVANT de prendre le bail ;
+#   2. /health reste en 503 tant que ce chargement n'est pas fini : Railway garde
+#      l'ancien leader en service pendant ce temps ;
+#   3. au bail, il ne reste qu'à se connecter à Discord (quelques secondes).
+# Les boucles discord.ext.tasks démarrées pendant le chargement sont différées jusqu'au
+# bail : une instance passive ne fait aucun travail de fond en double.
+# SENTRIX_HA_WARM=0 rétablit l'ancien ordre.
+_DEMARRAGE_A_CHAUD = os.getenv("SENTRIX_HA_WARM", "1").strip() != "0"
+_chaud = {"en_cours": False, "pret": False, "erreur": None}
+_boucles_differees: list = []
+_original_loop_start = discord.ext.tasks.Loop.start
+
+
+def _loop_start_differe(self, *args, **kwargs):
+    if _chaud["en_cours"]:
+        _boucles_differees.append((self, args, kwargs))
+        return None
+    return _original_loop_start(self, *args, **kwargs)
+
+
+def _demarrer_boucles_differees() -> int:
+    """Lance pour de vrai les boucles demandées pendant le chargement à chaud."""
+    _chaud["en_cours"] = False
+    lancees = 0
+    vues = set()
+    while _boucles_differees:
+        boucle, args, kwargs = _boucles_differees.pop(0)
+        if id(boucle) in vues:
+            continue  # demandée deux fois pendant le chargement : un seul démarrage
+        vues.add(id(boucle))
+        try:
+            if not boucle.is_running():
+                _original_loop_start(boucle, *args, **kwargs)
+                lancees += 1
+        except RuntimeError:
+            pass  # déjà lancée entre-temps
+        except Exception:
+            logger.exception("HA : boucle différée impossible à démarrer.")
+    return lancees
 
 
 def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
@@ -99,6 +144,9 @@ def _install_ha_healthcheck() -> None:
 
         if not coordinator.enabled:
             ok = bool(previous_payload.get("ok", ready))
+        elif _chaud["en_cours"] and not _chaud["pret"]:
+            # Chargement à chaud en cours : pas encore prêt à remplacer le leader.
+            ok = False
         else:
             # Un standby doit rester vivant sur Railway. "blocked" est accepté car une
             # panne Redis transitoire peut se réparer sans redémarrer le conteneur.
@@ -115,6 +163,7 @@ def _install_ha_healthcheck() -> None:
             "ok": bool(ok),
             "discord_ready": ready,
             "latency_ms": round(bot.latency * 1000) if ready else None,
+            "warm": {"loading": bool(_chaud["en_cours"]), "ready": bool(_chaud["pret"])},
             "failover": {
                 "enabled": ha["enabled"],
                 "state": ha["state"],
@@ -342,6 +391,27 @@ async def _ha_bot_start(self, token: str, *args, **kwargs):
     # pouvoir sortir proprement au lieu d'être tuée au bout du délai de grâce.
     _installer_arret_gracieux(self)
 
+    a_chaud = _DEMARRAGE_A_CHAUD
+    if a_chaud:
+        debut = asyncio.get_running_loop().time()
+        _chaud["en_cours"] = True
+        discord.ext.tasks.Loop.start = _loop_start_differe
+        try:
+            # login() = authentification HTTP + setup_hook (modules, base, slash) :
+            # tout sauf la connexion au gateway, qui seule fait recevoir les événements.
+            await self.login(token)
+        except Exception as exc:
+            _chaud["erreur"] = f"{type(exc).__name__}: {exc}"[:300]
+            raise
+        finally:
+            discord.ext.tasks.Loop.start = _original_loop_start
+        _chaud["pret"] = True
+        logger.warning(
+            "HA : chargement à chaud terminé en %.1fs (%s boucle(s) en attente du bail) — "
+            "prêt à remplacer le leader.",
+            asyncio.get_running_loop().time() - debut, len(_boucles_differees),
+        )
+
     grant = await coordinator.wait_for_leadership()
     durable = getattr(self, "sentrix_durable_store", None)
 
@@ -364,6 +434,10 @@ async def _ha_bot_start(self, token: str, *args, **kwargs):
         grant.waited_seconds,
     )
     try:
+        if a_chaud:
+            lancees = _demarrer_boucles_differees()
+            logger.info("HA : %s boucle(s) de fond démarrée(s) au bail.", lancees)
+            return await self.connect(reconnect=kwargs.get("reconnect", True))
         return await _original_bot_start(self, token, *args, **kwargs)
     finally:
         snapshot_task.cancel()
