@@ -267,6 +267,21 @@ def _install_ai_pipeline_upgrade(bot: commands.Bot) -> None:
             return await _send(embed=embeds.error(result["error"]))
 
         content = (result["text"] or "…").strip()
+        # 10/11/2026 : une réponse longue ou structurée part dans une belle carte ;
+        # une réponse courte reste du texte (c'est une conversation).
+        from utils import ai_presentation
+
+        if ai_presentation.doit_etre_en_carte(content):
+            # Une carte refusée par Discord part en texte, sans renvoyer les cartes
+            # déjà envoyées (pas de doublon).
+            for partie, vue in ai_presentation.cartes_et_textes(content):
+                try:
+                    await _send(view=vue)
+                except discord.HTTPException:
+                    logger.warning("Carte de réponse IA refusée par Discord : envoi en texte.", exc_info=True)
+                    for chunk in ai_service.split_for_discord(partie):
+                        await _send(content=chunk)
+            return
         for chunk in ai_service.split_for_discord(content):
             await _send(content=chunk)
 

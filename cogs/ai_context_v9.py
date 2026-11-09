@@ -1,5 +1,6 @@
 """Production V9: contexte serveur minimal et sûr pour les réponses IA."""
 
+import re
 import logging
 import time
 
@@ -144,6 +145,40 @@ def _resume_permissions(perms) -> str:
     return ", ".join(actives) if actives else "aucune permission notable"
 
 
+# 10/11/2026 : « d'où les 3 000 à 4 000 tokens ? » — la fiche du serveur (permissions,
+# chiffres, actions possibles, contexte en base) partait avec CHAQUE réponse, même un
+# « salut ça va ». Elle ne part plus que si la question concerne le serveur ; sinon
+# une version courte (qui est SentriX, où, avec qui). Moins de tokens : réponse plus
+# rapide et moins chère.
+_BESOIN_CONTEXTE = re.compile(
+    r"\b(?:serv(?:eu)?r|server|salons?|channels?|r[ôo]les?|membres?|members?|perm(?:ission)?s?|"
+    r"commandes?|commands?|config\w*|setup|r[ée]glages?|param[èe]tres?|ban\w*|kick\w*|mute\w*|"
+    r"warn\w*|sanction\w*|tickets?|r[èe]gles?|r[èe]glement|staff|mod[ée]r\w*|admin\w*|owner|"
+    r"propri[ée]taire|sentrix|bot|logs?|s[ée]curit[ée]|automod|anti\w+|v[ée]rif\w*|niveaux?|xp|"
+    r"[ée]conomie|argent|pi[èe]ces?|solde|boutique|shop|giveaway|sondages?|bienvenue|"
+    r"cr[ée]{1,2}r?|supprim\w*|renomm\w*|ajout\w*|retir\w*|donne\w*|mets?|active\w*|d[ée]sactiv\w*|"
+    r"qui est|combien|liste\w*|peux[- ]tu|tu peux|est[- ]ce que tu)\b",
+    re.IGNORECASE,
+)
+
+
+def besoin_contexte_serveur(question: str) -> bool:
+    texte = str(question or "")
+    return len(texte) > 220 or bool(_BESOIN_CONTEXTE.search(texte))
+
+
+def contexte_court(bot, guild_id, user_id) -> str:
+    guild = bot.get_guild(int(guild_id)) if guild_id else None
+    if guild is None:
+        return ""
+    membre = guild.get_member(int(user_id)) if user_id else None
+    qui = f" · tu parles avec {membre.display_name}" if membre is not None else ""
+    return (
+        "[Qui tu es] Tu ES SentriX, le bot Discord de ce serveur (pas un assistant à part)."
+        f" Serveur : {guild.name}{qui}."
+    )
+
+
 def contexte_discord_reel(bot, guild_id, channel_id, user_id) -> str:
     """Ce que SentriX est VRAIMENT sur ce serveur (cache Discord, aucune requête).
 
@@ -228,7 +263,12 @@ def install(bot: commands.Bot) -> None:
         if kwargs.get("command") in _NO_CONTEXT_COMMANDS:
             return await current(*args, **kwargs)
 
-        context = await build_server_context(bot, kwargs.get("guild_id"), kwargs.get("channel_id"))
+        question_brute = ai_service._latest_user_text(args[0] if args else kwargs.get("prompt", ""))
+        complet = besoin_contexte_serveur(question_brute)
+        context = (
+            await build_server_context(bot, kwargs.get("guild_id"), kwargs.get("channel_id"))
+            if complet else ""
+        )
         # 06/11/2026 : garde-fou de sécurité sur TOUTES les réponses (consigne + filtre de
         # sortie) — capture d'un mode d'emploi chimique dangereux.
         from utils import ai_safety
@@ -248,8 +288,11 @@ def install(bot: commands.Bot) -> None:
                 contexte_salon,
             )
         try:
-            reel = contexte_discord_reel(
-                bot, kwargs.get("guild_id"), kwargs.get("channel_id"), kwargs.get("user_id"),
+            reel = (
+                contexte_discord_reel(
+                    bot, kwargs.get("guild_id"), kwargs.get("channel_id"), kwargs.get("user_id"),
+                )
+                if complet else contexte_court(bot, kwargs.get("guild_id"), kwargs.get("user_id"))
             )
         except Exception:  # noqa: BLE001 — jamais bloquant pour la réponse
             logger.debug("Contexte Discord réel indisponible.", exc_info=True)

@@ -293,9 +293,99 @@ def _resume_familles_automod(
 
 
 
+#: 10/11/2026 : « la config de sécurité du setup est moche, trop compliquée ; on doit
+#: pouvoir activer par défaut sans tout configurer ». L'écran simple propose UN bouton
+#: qui active ces protections (sans toucher aux autres), le détail reste dans
+#: « Personnaliser ». Choix : ce qui protège sans gêner les membres normaux (pas
+#: d'anti-majuscules, anti-émoji, anti-lien ni expulsion des comptes récents).
+PROTECTION_RECOMMANDEE: tuple[tuple[str, str], ...] = (
+    ("antispam", "Spam et flood"),
+    ("antimention", "@everyone et pings en masse"),
+    ("antiinvite", "Pub pour d'autres serveurs"),
+    ("antiscam", "Liens d'arnaque (faux Nitro…)"),
+    ("antiinsult", "Insultes (avec analyse du contexte)"),
+    ("antiraid", "Raids (afflux de comptes)"),
+    ("antibot", "Bots ajoutés sans autorisation"),
+    ("antinuke", "Destruction du serveur (nuke)"),
+)
+
+
+async def _build_security_simple(self: v74.SentriXSetupV74, selected: set[str], missing: list[str]) -> None:
+    recommandees = [champ for champ, _ in PROTECTION_RECOMMANDEE]
+    actives = [champ for champ in recommandees if champ in selected]
+    tout = len(actives) == len(recommandees)
+    couleur = 0x57F287 if tout else (0xF0A020 if actives else 0xED4245)
+    container = discord.ui.Container(accent_colour=discord.Colour(couleur))
+    v74.v73.poser_banniere(container)
+    if tout:
+        etat = "🟢 **Votre serveur est protégé.** Toutes les protections recommandées sont actives."
+    elif actives:
+        etat = (f"🟠 **Protection partielle** — {len(actives)} sur {len(recommandees)} protections "
+                "recommandées. « Activer la sécurité » met le reste en place, sans rien configurer.")
+    else:
+        etat = "🔴 **Aucune protection active.** « Activer la sécurité » protège le serveur en un clic."
+    container.add_item(discord.ui.Section(
+        discord.ui.TextDisplay(f"# 🛡️ Sécurité\n{etat}"),
+        accessory=v74.v73._thumbnail(self.bot),
+    ))
+    container.add_item(discord.ui.Separator())
+    container.add_item(discord.ui.TextDisplay("\n".join(
+        f"{'✅' if champ in selected else '▫️'} {libelle}" for champ, libelle in PROTECTION_RECOMMANDEE
+    )))
+    autres = len(selected - set(recommandees))
+    if autres:
+        container.add_item(discord.ui.TextDisplay(f"-# + {autres} protection(s) en plus, réglée(s) dans « Personnaliser »."))
+    if missing:
+        container.add_item(discord.ui.TextDisplay(
+            "-# ⚠️ Il manque des permissions au rôle SentriX : " + ", ".join(missing[:6])
+            + (" …" if len(missing) > 6 else "") + ". Détails dans « Personnaliser »."
+        ))
+
+    activer = discord.ui.Button(
+        label="Activer la sécurité" if not tout else "Sécurité active",
+        style=discord.ButtonStyle.success, disabled=tout, emoji="🛡️",
+    )
+
+    async def activer_recommandee(interaction: discord.Interaction):
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        # Ajoute les protections recommandées SANS couper celles déjà choisies.
+        notice = await _save_protections(
+            self, set(await _selected_protections(self)) | set(recommandees), actor_id=interaction.user.id,
+        )
+        await self.refresh(interaction)
+        if notice:
+            try:
+                await interaction.followup.send(notice, ephemeral=True)
+            except discord.HTTPException:
+                pass
+
+    activer.callback = activer_recommandee
+    personnaliser = discord.ui.Button(label="Personnaliser", style=discord.ButtonStyle.secondary, emoji="⚙️")
+
+    async def ouvrir_detail(interaction: discord.Interaction):
+        self._securite_detail = True
+        await self.refresh(interaction)
+
+    personnaliser.callback = ouvrir_detail
+    mots = discord.ui.Button(label="Mots bloqués", style=discord.ButtonStyle.secondary)
+
+    async def ouvrir_mots(interaction: discord.Interaction):
+        from . import mots_bloques
+
+        await mots_bloques.ouvrir(interaction, self.guild)
+
+    mots.callback = ouvrir_mots
+    container.add_item(discord.ui.ActionRow(activer, personnaliser, mots))
+    self._add_navigation(container)
+    self.add_item(container)
+
+
 async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
     selected = await _selected_protections(self)
     _ok, missing = v74._bot_permission_audit(self.guild)
+    if not getattr(self, "_securite_detail", False):
+        return await _build_security_simple(self, selected, missing)
 
     option_specs: list[tuple[str, str, str]] = [
         (
@@ -321,7 +411,7 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
     container.add_item(
         discord.ui.Section(
             discord.ui.TextDisplay(
-                "# Sécurité\n"
+                "# Sécurité · personnaliser\n"
                 "Choisissez les protections à activer."
             ),
             accessory=v74.v73._thumbnail(self.bot),
@@ -608,8 +698,15 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
         await self.refresh(interaction)
 
     admins_bouton.callback = basculer_admins
+    vue_simple = discord.ui.Button(label="Vue simple", style=discord.ButtonStyle.secondary, emoji="↩️")
+
+    async def revenir_simple(interaction: discord.Interaction):
+        self._securite_detail = False
+        await self.refresh(interaction)
+
+    vue_simple.callback = revenir_simple
     # 07/11/2026 : « enlève Vérifier la configuration » — retiré du panneau.
-    container.add_item(discord.ui.ActionRow(exceptions, mots_bloques_bouton, admins_bouton))
+    container.add_item(discord.ui.ActionRow(exceptions, mots_bloques_bouton, admins_bouton, vue_simple))
 
     # Accès direct à CHAQUE règle, inspiré des écrans de réglages par filtre :
     # état réel et configuration explicite. Ce menu ne coche rien et n'active
