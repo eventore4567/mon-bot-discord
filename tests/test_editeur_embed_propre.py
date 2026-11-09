@@ -35,7 +35,7 @@ def test_les_reglages_de_l_editeur_ne_sont_plus_tasses_sur_une_ligne():
     draft = EmbedDraft()
     draft.template_name = "Règlement"
     vue = EmbedBuilderView.__new__(EmbedBuilderView)
-    vue.draft, vue.banner_enabled = draft, False
+    vue.draft = draft
     statut = vue.build_panel_embeds()[0]
     noms = {f.name: f for f in statut.fields}
     assert {"Texte", "Apparence", "Éléments", "Brouillon"} <= set(noms)
@@ -43,3 +43,49 @@ def test_les_reglages_de_l_editeur_ne_sont_plus_tasses_sur_une_ligne():
     cleaned = _clean_embed(statut, root="embeds")
     assert "Apparence" in [f.name for f in cleaned.fields]
     assert "•" not in (cleaned.description or "")
+
+
+def test_le_bouton_mentions_devient_vert_quand_il_est_active():
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+
+    from cogs.embed_builder import MENTIONS_OFF, MENTIONS_ON, EmbedSendView
+
+    async def scenario():
+        parent = SimpleNamespace(draft=EmbedDraft(), author_id=1, build_panel_embeds=lambda: [])
+        vue = EmbedSendView(parent)
+        bouton = vue.toggle_mentions
+        assert bouton.style == discord.ButtonStyle.secondary and bouton.label == MENTIONS_OFF
+        membre = MagicMock(spec=discord.Member)
+        membre.guild_permissions = SimpleNamespace(mention_everyone=True)
+        interaction = SimpleNamespace(user=membre, response=SimpleNamespace(edit_message=AsyncMock()))
+        await bouton.callback(interaction)
+        assert vue.allow_mentions and bouton.style == discord.ButtonStyle.success and bouton.label == MENTIONS_ON
+        await bouton.callback(interaction)
+        assert not vue.allow_mentions and bouton.style == discord.ButtonStyle.secondary
+
+    asyncio.run(scenario())
+
+
+def test_l_ecran_de_confirmation_a_un_vrai_titre_et_tout_le_resume():
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from cogs.embed_builder import EmbedSendView
+
+    async def scenario():
+        draft = EmbedDraft()
+        draft.title = "Règlement officiel du serveur"
+        draft.description = "Soyez respectueux."
+        parent = SimpleNamespace(draft=draft, author_id=1, build_panel_embeds=lambda: [])
+        vue = EmbedSendView(parent)
+        vue.channel = SimpleNamespace(mention="<#42>")
+        interaction = SimpleNamespace(response=SimpleNamespace(edit_message=AsyncMock()))
+        await vue.proceed.callback(interaction)
+        carte = interaction.response.edit_message.await_args.kwargs["embeds"][0]
+        assert carte.title == "📨 Confirmer l'envoi ?"
+        assert "<#42>" in carte.description and "désactivées" in carte.description
+
+    asyncio.run(scenario())
