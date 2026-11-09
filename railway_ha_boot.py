@@ -73,7 +73,10 @@ _original_bot_start = boot.bot_main.BotAllInOne.start
 # bail : une instance passive ne fait aucun travail de fond en double.
 # SENTRIX_HA_WARM=0 rétablit l'ancien ordre.
 _DEMARRAGE_A_CHAUD = os.getenv("SENTRIX_HA_WARM", "1").strip() != "0"
-_chaud = {"en_cours": False, "pret": False, "erreur": None}
+# « en_cours » dès l'import : le dashboard (et donc /health) démarre AVANT _ha_bot_start.
+# Mesuré au déploiement de la PR #661 : dans cette fenêtre, /health répondait 200 et
+# Railway arrêtait l'ancien leader 60 s avant que la nouvelle instance soit prête.
+_chaud = {"en_cours": _DEMARRAGE_A_CHAUD, "pret": False, "erreur": None}
 _boucles_differees: list = []
 _original_loop_start = discord.ext.tasks.Loop.start
 
