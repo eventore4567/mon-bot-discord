@@ -254,8 +254,13 @@ def pick_reasoning_effort(model_key: str, base_effort: str = "medium") -> str:
         base_effort = "low"
     if model_key == MODEL_LUNA:
         return "none"
-    if model_key == MODEL_TERRA and base_effort == "medium":
-        return "low"
+    # 09/11/2026 : « rends l'IA plus rapide ». Mesuré en production : Terra avec
+    # raisonnement « low » répondait en 10 à 20 s, et rendait parfois une réponse VIDE
+    # (le raisonnement épuisait le budget), relancée ensuite. Sans raisonnement :
+    # quelques secondes. Le raisonnement reste pour Sol (questions difficiles) et pour
+    # un serveur qui a choisi « high » ou plus.
+    if model_key == MODEL_TERRA and base_effort in ("none", "low", "medium"):
+        return "none"
     if model_key == MODEL_SOL and base_effort in ("none", "low", "medium"):
         return "high"
     return base_effort

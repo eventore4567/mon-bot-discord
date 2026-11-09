@@ -241,12 +241,14 @@ def _install_ai_empty_retry() -> None:
             return result
 
         logger.warning(
-            "Réponse IA vide détectée (commande=%s, modèle=%s) : seconde tentative Terra.",
+            "Réponse IA vide détectée (commande=%s, modèle=%s) : seconde tentative rapide (Luna).",
             kwargs.get("command"), kwargs.get("model_key"),
         )
         retry_kwargs = dict(kwargs)
-        retry_kwargs["model_key"] = ai_service.MODEL_TERRA
-        retry_kwargs["reasoning_effort"] = "low"
+        # 09/11/2026 : la relance passait par Terra avec raisonnement (≈ 15 s, mesuré) ;
+        # Luna sans raisonnement répond en ≈ 1,5 s et ne rend pas de texte vide.
+        retry_kwargs["model_key"] = ai_service.MODEL_LUNA
+        retry_kwargs["reasoning_effort"] = "none"
         # Une réponse précédente défectueuse ne doit pas contaminer la relance.
         retry_kwargs["previous_response_id"] = None
         command = str(retry_kwargs.get("command") or "ai")
@@ -258,7 +260,7 @@ def _install_ai_empty_retry() -> None:
         logger.error("Deux réponses IA vides successives — commande=%s.", command)
         return ai_service.AiResult(
             error=ai_service.ERROR_GENERIC,
-            model_key=ai_service.MODEL_TERRA,
+            model_key=ai_service.MODEL_LUNA,
         )
 
     generate_v33._sentrix_v33_empty_retry = True
