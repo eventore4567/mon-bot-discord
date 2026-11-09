@@ -91,3 +91,14 @@ def test_desactivable():
 
     source = inspect.getsource(ha)
     assert 'os.getenv("SENTRIX_HA_WARM", "1")' in source
+
+
+def test_health_en_503_des_le_demarrage_du_processus():
+    import importlib
+
+    module = importlib.reload(ha)
+    try:
+        assert module._chaud["en_cours"] is module._DEMARRAGE_A_CHAUD
+        assert module._chaud["pret"] is False
+    finally:
+        importlib.reload(module)
