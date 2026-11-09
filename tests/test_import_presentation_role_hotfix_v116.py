@@ -40,6 +40,6 @@ def test_mass_role_exposes_target_and_acks_slash():
 def test_embed_builder_has_thin_banner_toggle():
     from cogs.embed_builder import EmbedBuilderView
     source = inspect.getsource(EmbedBuilderView)
-    assert "toggle_banner" in source
-    assert "attachment://" in source
-    assert "banner_enabled" in source
+    # 10/11/2026 : bannière retirée de l'éditeur à la demande de l'utilisateur.
+    assert "toggle_banner" not in source
+    assert "banner_enabled" not in source

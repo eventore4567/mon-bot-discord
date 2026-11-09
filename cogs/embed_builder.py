@@ -64,18 +64,6 @@ MAX_CONTENT = 2000
 MAX_URL_LEN = 2000
 DRAFT_TIMEOUT = 600  # secondes avant qu'un brouillon non sauvegardé n'expire (configurable ici)
 
-def _editor_banner_file() -> discord.File | None:
-    """Use the existing ultra-thin SentriX asset, never a large generated image."""
-    try:
-        from utils.premium_log_banners import get_premium_log_banner, BANNER_FILENAME
-        banner = get_premium_log_banner()
-        if banner.is_file():
-            return discord.File(str(banner), filename=BANNER_FILENAME)
-    except (OSError, ValueError):
-        logger.debug("La bannière du créateur d'embed est indisponible.", exc_info=True)
-    return None
-
-
 COLOR_PRESETS = [
     ("blue", "🔵 Bleu", 0x5865F2),
     ("purple", "🟣 Violet", 0x9B59B6),
@@ -929,14 +917,12 @@ class EmbedBuilderView(discord.ui.View):
         self.draft = draft
         self.author_id = author_id
         self.message: discord.Message | None = None
-        self.banner_enabled = True
         # Moins de boutons (Jayden, 22/10/2026) : les six réglages passent dans UN menu,
         # qui appelle exactement les mêmes actions ; restent 4 boutons d'action.
         reglages = [
             ("texte", "Texte : titre, description, footer", "📝", self.edit_text),
             ("apparence", "Apparence : couleur, photo, nom, date", "🎨", self.open_appearance),
             ("images", "Images et miniature", "🖼️", self.edit_images),
-            ("banniere", "Bannière ultra-fine : oui/non", "▬", self.toggle_banner),
             ("ajout_champ", "Ajouter un champ", "➕", self.add_field),
             ("champs", "Gérer les champs", "📋", self.manage_fields),
             ("boutons", "Boutons de lien", "🔘", self.manage_buttons),
@@ -1001,12 +987,14 @@ class EmbedBuilderView(discord.ui.View):
                 f"Couleur : `#{self.draft.colour:06X}`\n"
                 if self.draft.colour is not None else "Couleur : aucune\n"
             ) + f"Image : {'oui' if self.draft.image_url else 'non'} · Miniature : {'oui' if self.draft.thumbnail_url else 'non'}",
-            inline=True,
+            # 10/11/2026 : en « inline », une couche de mise en page tassait Apparence et
+            # Éléments sur une seule ligne illisible dans la description.
+            inline=False,
         )
         status.add_field(
             name="Éléments",
             value=f"Champs : {len(self.draft.fields)}/{MAX_FIELDS}\nLiens : {len(self.draft.buttons)}/{MAX_BUTTONS}",
-            inline=True,
+            inline=False,
         )
         # Le visuel dans status.set_image() apparaissait en BAS de l'embed,
         # jamais au-dessus du titre. Un embed distinct le précède désormais.
@@ -1015,13 +1003,8 @@ class EmbedBuilderView(discord.ui.View):
             value=self.draft.template_name or "Non sauvegardé",
             inline=False,
         )
-        result = []
-        if self.banner_enabled:
-            from utils.premium_log_banners import BANNER_FILENAME
-            strip = discord.Embed(colour=discord.Colour(0x6C57CC))
-            strip.set_image(url=f"attachment://{BANNER_FILENAME}")
-            result.append(strip)
-        result.append(status)
+        # 10/11/2026 : plus de bannière au-dessus de l'éditeur (« enlève-la »).
+        result = [status]
         preview = self.draft.to_embed()
         if preview:
             result.append(preview)
@@ -1040,11 +1023,6 @@ class EmbedBuilderView(discord.ui.View):
     @discord.ui.button(label="Apparence", style=discord.ButtonStyle.secondary, emoji="🎨", row=0)
     async def open_appearance(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(embeds=self.build_panel_embeds(), view=EmbedAppearanceView(self))
-
-    @discord.ui.button(label="Bannière", style=discord.ButtonStyle.secondary, row=1)
-    async def toggle_banner(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.banner_enabled = not self.banner_enabled
-        await self.refresh(interaction)
 
     @discord.ui.button(label="Images", style=discord.ButtonStyle.secondary, emoji="🖼️", row=0)
     async def edit_images(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1206,12 +1184,6 @@ class EmbedBuilder(commands.Cog, name="EmbedBuilder"):
         """L'éditeur en privé depuis un bouton ou un menu (le Setup)."""
         view = EmbedBuilderView(self, EmbedDraft(), interaction.user.id)
         kwargs = {"embeds": view.build_panel_embeds(), "view": view, "ephemeral": True}
-        banner = _editor_banner_file()
-        if banner is not None:
-            kwargs["file"] = banner
-        else:
-            view.banner_enabled = False
-            kwargs["embeds"] = view.build_panel_embeds()
         await interaction.response.send_message(**kwargs)
         try:
             view.message = await interaction.original_response()
@@ -1223,12 +1195,6 @@ class EmbedBuilder(commands.Cog, name="EmbedBuilder"):
         view = EmbedBuilderView(self, draft, ctx.author.id)
         kwargs = {"embeds": view.build_panel_embeds(), "view": view,
                   "ephemeral": bool(ctx.interaction)}
-        banner = _editor_banner_file()
-        if banner is not None:
-            kwargs["file"] = banner
-        else:
-            view.banner_enabled = False
-            kwargs["embeds"] = view.build_panel_embeds()
         msg = await ctx.send(**kwargs)
         view.message = msg if not ctx.interaction else await ctx.interaction.original_response()
 
@@ -1598,6 +1564,16 @@ class EmbedSendConfirmView(discord.ui.View):
         await _report_ui_error(interaction, error, "confirmation d'envoi")
 
 
+MENTIONS_OFF = "Autoriser les mentions @everyone/@here (réservé)"
+MENTIONS_ON = "Mentions @everyone/@here autorisées"
+
+
+def _etat_bouton_mentions(button: discord.ui.Button, actif: bool) -> None:
+    button.style = discord.ButtonStyle.success if actif else discord.ButtonStyle.secondary
+    button.label = MENTIONS_ON if actif else MENTIONS_OFF
+    button.emoji = "✅" if actif else None
+
+
 class EmbedSendView(discord.ui.View):
     """Sous-écran "📨 Envoyer" : choix du salon puis mentions, avant le résumé final."""
 
@@ -1631,6 +1607,8 @@ class EmbedSendView(discord.ui.View):
         if not isinstance(member, discord.Member) or not member.guild_permissions.mention_everyone:
             return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Seuls les membres ayant la permission **Mentionner tout le monde** peuvent activer ceci.')), ephemere=True)
         self.allow_mentions = not self.allow_mentions
+        # 10/11/2026 : l'état se voit — vert quand les mentions sont autorisées.
+        _etat_bouton_mentions(button, self.allow_mentions)
         await interaction.response.edit_message(embeds=self.parent.build_panel_embeds(), view=self)
 
     @discord.ui.button(label="Continuer", style=discord.ButtonStyle.success, row=2)
@@ -1646,7 +1624,9 @@ class EmbedSendView(discord.ui.View):
             f"**Mentions :** {'autorisées (@everyone/@here)' if self.allow_mentions else 'désactivées'}\n"
             f"**Modèle sauvegardé :** {yesno(bool(self.draft.template_name and not self.draft.dirty))}"
         )
-        e = embeds.warning("📨 Confirmer l'envoi ?", summary)
+        # 10/11/2026 : titre et texte étaient inversés (tout le résumé en titre, coupé
+        # à « désacti… », et « Confirmer l'envoi ? » en dessous).
+        e = embeds.warning(summary, "📨 Confirmer l'envoi ?")
         await interaction.response.edit_message(embeds=[e], view=EmbedSendConfirmView(self.parent, self.channel, self.allow_mentions))
 
     @discord.ui.button(label="◀ Retour", style=discord.ButtonStyle.secondary, row=2)

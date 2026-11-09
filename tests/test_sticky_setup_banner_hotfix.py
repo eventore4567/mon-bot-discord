@@ -34,15 +34,12 @@ def test_slash_sticky_has_native_fields_and_prefix_opens_minisetup():
     assert "StickySetupView" in inspect.getsource(open_sticky_setup)
 
 
-def test_embed_editor_banner_is_first_not_last():
+def test_embed_editor_has_no_banner_anymore():
+    # 10/11/2026 : « pourquoi il y a une bannière, enlève-la ».
     view = EmbedBuilderView(object(), EmbedDraft(), 1234)
     items = view.build_panel_embeds()
-    assert len(items) >= 2
-    assert items[0].image.url.startswith("attachment://")
-    assert items[1].title == "Créateur d'embed SentriX"
-    view.banner_enabled = False
-    other = view.build_panel_embeds()
-    assert other[0].title == "Créateur d'embed SentriX"
+    assert items[0].title == "Créateur d'embed SentriX"
+    assert not any(str(getattr(e.image, "url", "") or "").startswith("attachment://") for e in items)
 
 
 def test_setup_public_ack_never_leaves_dead_reply():

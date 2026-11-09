@@ -790,6 +790,15 @@ class BotAllInOne(commands.Bot):
         except Exception:
             logger.warning("Mesure des écouteurs indisponible :\n" + traceback.format_exc())
 
+        # 10/11/2026 : liste des fichiers jamais chargés en production (avant tout
+        # nettoyage du dépôt : on ne supprime que ce que la production n'utilise pas).
+        try:
+            from utils import modules_charges
+
+            modules_charges.installer(self)
+        except Exception:
+            logger.warning("Constat des fichiers chargés indisponible :\n" + traceback.format_exc())
+
         if self._module_supervisor_task is None or self._module_supervisor_task.done():
             self._module_supervisor_task = asyncio.create_task(
                 self.module_supervisor.run(self),

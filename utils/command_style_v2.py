@@ -167,6 +167,18 @@ def _enrich_ping(embed: discord.Embed, command: Any) -> None:
     embed.add_field(name="Shards", value=str(shard_count), inline=True)
 
 
+def est_bandeau_image(embed: Any) -> bool:
+    """Bannière seule (image, sans titre ni texte) : elle ne reçoit ni titre ni footer.
+
+    10/11/2026 : la fine bannière de l'éditeur d'embed devenait une carte vide
+    « Information … SentriX » au-dessus du vrai panneau.
+    """
+    if not isinstance(embed, discord.Embed):
+        return False
+    image = getattr(getattr(embed, "image", None), "url", None)
+    return bool(image) and not (embed.title or embed.description or embed.fields or getattr(embed.author, "name", None))
+
+
 def style_embed(
     embed: discord.Embed,
     *,
@@ -181,6 +193,8 @@ def style_embed(
     """Applique le panneau SentriX aux réponses de commande sans toucher au métier."""
     del guild, requester, log_type
     if not isinstance(embed, discord.Embed) or _is_chat_command(command):
+        return embed
+    if est_bandeau_image(embed):
         return embed
 
     resolved_category = premium_style.infer_category(command=command, embed=embed, hint=category)
