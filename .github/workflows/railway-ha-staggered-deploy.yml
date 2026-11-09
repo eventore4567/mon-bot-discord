@@ -4,6 +4,12 @@ on:
   push:
     branches:
       - main
+      # 09/11/2026 : la production Railway suit dashboard-refonte-2026-09. Sans ce
+      # déclencheur, standby-stable n'avançait plus et le secours suivait directement la
+      # branche de prod : les deux services redémarraient EN MÊME TEMPS (≈ 60–98 s sans
+      # SentriX, mesuré). Le secours suit standby-stable, déplacé ici une fois le
+      # primaire validé.
+      - dashboard-refonte-2026-09
   workflow_dispatch:
 
 permissions:
@@ -16,7 +22,7 @@ concurrency:
 
 jobs:
   sync-standby-after-primary:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dashboard-refonte-2026-09'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -32,7 +38,7 @@ jobs:
             const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
             let validated = false;
 
-            core.info(`Waiting for Railway PRIMARY status on ${context.sha}...`);
+            core.info(`Waiting for Railway PRIMARY status on ${context.sha} (${context.ref})...`);
 
             for (let attempt = 1; attempt <= 180; attempt++) {
               const { data: statuses } = await github.rest.repos.listCommitStatusesForRef({
