@@ -53,6 +53,11 @@ def _morceaux(texte: str, taille: int = TAILLE_CARTE) -> list[str]:
 
 
 def cartes(texte: str) -> list[discord.ui.LayoutView]:
+    return [vue for _, vue in cartes_et_textes(texte)]
+
+
+def cartes_et_textes(texte: str) -> list[tuple[str, discord.ui.LayoutView]]:
+    """(texte du morceau, carte) : permet de renvoyer en texte une seule carte refusée."""
     parties = _morceaux(str(texte or ""))
     vues = []
     for index, partie in enumerate(parties):
@@ -63,8 +68,8 @@ def cartes(texte: str) -> list[discord.ui.LayoutView]:
             carte.add_item(discord.ui.Separator(visible=False))
             carte.add_item(discord.ui.TextDisplay(SIGNATURE))
         vue.add_item(carte)
-        vues.append(vue)
+        vues.append((partie, vue))
     return vues
 
 
-__all__ = ["doit_etre_en_carte", "cartes", "SEUIL_CARACTERES"]
+__all__ = ["doit_etre_en_carte", "cartes", "cartes_et_textes", "SEUIL_CARACTERES"]

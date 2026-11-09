@@ -31,3 +31,13 @@ def test_tres_long_texte_en_plusieurs_cartes_sans_casser_le_code():
         assert len(contenu) <= 4000
         assert contenu.count("```") % 2 == 0          # chaque bloc de code est refermé
     assert vues[-1].children[0].children[-1].content == p.SIGNATURE
+
+
+def test_chaque_carte_garde_son_texte_pour_le_repli():
+    from utils import ai_presentation as ap
+
+    texte = "\n\n".join(f"Paragraphe {i} " + "x" * 900 for i in range(8))
+    paires = ap.cartes_et_textes(texte)
+    assert len(paires) >= 2
+    assert "".join(t for t, _ in paires).replace("\n", "") == texte.replace("\n", "")
+    assert all(len(t) <= ap.TAILLE_CARTE for t, _ in paires)
