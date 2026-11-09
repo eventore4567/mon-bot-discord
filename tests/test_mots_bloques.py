@@ -70,7 +70,9 @@ def test_le_bouton_est_dans_setup_securite():
 
     source = (Path(__file__).resolve().parents[1] / "cogs" / "setup_security_choice_v75.py").read_text(encoding="utf-8")
     assert "mots_bloques.ouvrir(interaction, self.guild)" in source
-    assert "discord.ui.ActionRow(exceptions, mots_bloques_bouton, admins_bouton)" in source
+    # 10/11/2026 : présent sur l'écran simple (« Mots bloqués ») et dans « Personnaliser ».
+    assert "discord.ui.ActionRow(exceptions, mots_bloques_bouton, admins_bouton, vue_simple)" in source
+    assert "discord.ui.ActionRow(activer, personnaliser, mots)" in source
 
 
 # --- 07/11/2026 : modifier / retirer des mots, bloquer les liens ---------------------
