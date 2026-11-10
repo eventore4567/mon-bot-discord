@@ -1,9 +1,12 @@
 """Régression SentriX : vraies invitations, fakes, départs et opt-in via /invites ou +i."""
 from __future__ import annotations
 
+import os
 from unittest.mock import AsyncMock
 
 import pytest
+
+os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 
 from database.db import Database
 from cogs.invites import Invites
