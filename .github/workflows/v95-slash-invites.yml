@@ -38,3 +38,9 @@ jobs:
           DISCORD_TOKEN: "ci.fake.token"
           DATABASE_PATH: "/tmp/sentrix-v97.db"
         run: python tools/v97_reliability_gate.py
+
+      - name: Invites anti-fake and compact command regression
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+        run: python -m pytest -q tests/test_invites_fakes_opt_in.py tests/test_invites_journal.py tests/test_invite_detection_fix_v77.py
+
