@@ -20,7 +20,10 @@ def test_en_slash_le_chemin_publie():
     # /games n'est plus dans le menu (02/11/2026) : le texte garde le « + » qui marche.
     assert command_refs.reference(SLASH, "dailygames", nom_prefixe="jeuxjour") == "+jeuxjour"
     assert command_refs.reference(SLASH, "trivia") == "/play trivia"
-    assert command_refs.reference(SLASH, "fight") == "/duel fight"
+    assert command_refs.reference(SLASH, "duel") == "/duel rps"
+    # 10/11/2026 : +fight a quitté le menu « / » faute d'usage. Le texte bascule
+    # tout seul sur le « + » qui marche, au lieu de citer un chemin qui n'existe plus.
+    assert command_refs.reference(SLASH, "fight") == "+fight"
     # autodrop n'avait que le « + » jusqu'au 28/10/2026.
     assert command_refs.reference(SLASH, "autodrop", "#salon") == "+autodrop #salon"
     # /counter est revenu dans le menu « / » le 06/11/2026 (configurable en /).

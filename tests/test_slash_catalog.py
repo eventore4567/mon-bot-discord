@@ -181,7 +181,9 @@ def test_nettoyage_retire_des_commandes_sans_casser_les_actions_critiques():
     assert "music skip" in publiees
     for essentiel in (
         "setup", "clear", "ban", "warn", "role mass", "logs search",
-        "tickets open", "duel fight", "security antinuke", "moderation warnings",
+        # 10/11/2026 : « duel fight » n'a jamais été joué en trois mois et quitte le
+        # menu. Le canari des jeux devient « play trivia », le plus joué (25 parties).
+        "tickets open", "play trivia", "security antinuke", "moderation warnings",
     ):
         assert essentiel in publiees
 

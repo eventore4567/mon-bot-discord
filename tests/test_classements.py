@@ -92,3 +92,36 @@ def test_la_commande_est_publiee_en_slash_et_visible():
     assert '_e("leaderboard", "classement"' in catalogue
     assert '"classement",' in surface
     assert '"cogs.classements",' in (racine / "main.py").read_text(encoding="utf-8")
+
+
+# --- 10/11/2026 : « enlève les trucs qui servent à rien en / » ---------------
+
+def test_les_jeux_jamais_joues_quittent_le_menu_slash():
+    """Relevé de production du 05/08 au 10/11 : 72 serveurs, 2 545 exécutions.
+
+    Quinze routes n'ont jamais été lancées une seule fois. Elles quittent le menu
+    « / » ; le code, les données et le préfixe « + » ne changent pas.
+    """
+    from utils import slash_catalog as sc
+
+    visibles = {e.source for e in sc.CATALOG}
+    jamais_joues = {
+        "connect4", "dice", "dungeon", "fight", "ghost", "luckyroll", "numberduel",
+        "quizduel", "reaction", "reactionduel", "rocket", "sequence", "staff",
+        "tictactoe", "triviastart",
+    }
+    assert not (jamais_joues & visibles), sorted(jamais_joues & visibles)
+    # Les jeux qui tournent vraiment restent, et la sécurité n'est jamais touchée.
+    for garde in ("trivia", "hangman", "guess-number", "blackjack", "coinflip",
+                  "slots", "bossfight", "bomb", "duel"):
+        assert garde in visibles, garde
+    for securite in ("lockdown-server", "unlock-server", "automod-strict", "mots-interdits"):
+        assert securite in visibles, securite
+
+
+def test_le_retrait_du_menu_ne_supprime_pas_la_commande():
+    """Masquer n'est pas supprimer : la commande reste exécutable."""
+    from utils import slash_catalog as sc
+
+    assert "tictactoe" in sc.RETIRED
+    assert "menu" in sc.RETIRED["tictactoe"].casefold()
