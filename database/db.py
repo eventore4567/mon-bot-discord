@@ -2556,9 +2556,12 @@ class Database:
             and not rejoined
             and (role_pending or pending_until > timestamp)
         )
+        # Compteurs exclusifs : une invitation déjà partie relève uniquement de
+        # « Reparties », même si elle était suspecte à son arrivée. Sinon le
+        # même membre apparaît à la fois dans Reparties et Fakes.
         return {
             "reasons": reasons,
-            "fake": bool(reasons),
+            "fake": left_at is None and bool(reasons),
             "pending": pending,
             "left": left_at is not None,
             "rejoined": rejoined,
