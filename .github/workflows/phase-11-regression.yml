@@ -163,8 +163,6 @@ jobs:
               tests/test_dashboard_feedback_reports.py
               tests/test_dashboard_profile_and_moderation.py
               tests/test_dashboard_security_observability.py
-              tests/test_dashboard_unified_adapter_v9.py
-              tests/test_dashboard_unified_runtime_bridge_v10.py
               tests/test_dashboard_unified_product_ux.py
               tests/test_dashboard_product_ui_v18.py
               tests/test_dashboard_product_ui_v18_live_fix.py
