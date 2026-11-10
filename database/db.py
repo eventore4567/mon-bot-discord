@@ -2515,39 +2515,54 @@ class Database:
 
     @staticmethod
     def _invite_row_assessment(row, *, legacy_threshold: int, timestamp: int) -> dict:
-        """Un fake et un départ peuvent coexister ; le crédit ne peut être doublé."""
+        """Évalue une arrivée sans confondre soupçon d'alt, retour et départ.
+
+        Comme InviteLogger, l'âge est celui du compte AU MOMENT de l'arrivée :
+        le seuil des nouvelles arrivées est figé dans fake_flags. Les anciennes
+        lignes sans flags gardent leur seuil historique de 3 jours.
+        Le manque d'avatar et un retour ne prouvent pas un faux compte.
+        """
         left_at = row["left_at"]
         age = row["account_age_days"]
         flags = row["fake_flags"]
-        reasons = []
+        reasons: list[str] = []
+        rejoined = False
+        role_pending = False
+
         if flags is None:
             if age is not None and 0 <= int(age) < legacy_threshold:
                 reasons.append("Compte trop récent")
         else:
-            for bit, description in (
-                (1, "Compte trop récent"),
-                (2, "Auto-invitation"),
-                (4, "Avatar par défaut"),
-                (8, "Retour sur le serveur"),
-            ):
-                if int(flags) & bit:
-                    reasons.append(description)
-            if int(row["required_role_id"] or 0) and not int(row["role_confirmed"] or 0):
-                reasons.append("Rôle de vérification manquant")
+            flags = int(flags)
+            if flags & 1:
+                reasons.append("Compte de moins de 7 jours à l'arrivée")
+            if flags & 2:
+                reasons.append("Auto-invitation")
+            # Bit 4 (avatar par défaut) est informatif : jamais une preuve de fake.
+            # Bit 8 (retour) ne crédite pas de NOUVELLE invitation, sans accuser
+            # le membre d'utiliser un faux compte.
+            rejoined = bool(flags & 8)
+            role_pending = bool(
+                int(row["required_role_id"] or 0)
+                and not int(row["role_confirmed"] or 0)
+            )
 
-        joined_at = row["joined_at"]
-        quick_seconds = int(row["quick_leave_seconds"] or 0)
-        if flags is not None and quick_seconds and left_at is not None and joined_at is not None:
-            if 0 <= int(left_at) - int(joined_at) <= quick_seconds:
-                reasons.append("Départ trop rapide")
+        # Un départ, même rapide, relève de « Reparties », jamais de « Fakes ».
+        # Une vérification par rôle non terminée relève de l'attente, pas du fake.
         pending_until = int(row["pending_until"] or 0)
-        pending = left_at is None and not reasons and pending_until > timestamp
+        pending = (
+            left_at is None
+            and not reasons
+            and not rejoined
+            and (role_pending or pending_until > timestamp)
+        )
         return {
             "reasons": reasons,
             "fake": bool(reasons),
             "pending": pending,
             "left": left_at is not None,
-            "real": left_at is None and not reasons and not pending,
+            "rejoined": rejoined,
+            "real": left_at is None and not reasons and not pending and not rejoined,
         }
 
     async def get_invite_breakdown(self, guild_id: int, inviter_id: int) -> dict:
