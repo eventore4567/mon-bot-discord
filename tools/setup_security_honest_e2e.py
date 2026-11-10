@@ -95,7 +95,7 @@ async def main() -> int:
     await bot.db.execute("DELETE FROM automod_settings WHERE guild_id=?", (h.GID,))
     core.invalidate_module_cache(h.GID)
     bot.get_cog("Automod").automod_cache.clear()
-    view = await build(bot, guild, "security")
+    view = await build(bot, guild, "security", securite="detail")
     cochees = [o.value for o in protection_select(view).options if str(o.description or "").startswith("Activé")]
     check(not cochees, f"serveur neuf : aucune protection cochée ({cochees})")
     # Pas de ligne du tout (création paresseuse, cache V14) = aucune protection.
@@ -118,7 +118,7 @@ async def main() -> int:
     # Un admin qui a tout coupé à la main : l'écran le dit et le spam passe.
     await bot.db.execute(f"UPDATE automod_settings SET {zeros} WHERE guild_id=?", (h.GID,))
     bot.get_cog("Automod").automod_cache.clear()
-    view = await build(bot, guild, "security")
+    view = await build(bot, guild, "security", securite="detail")
     check(not [o for o in protection_select(view).options if str(o.description or "").startswith("Activé")], "tout coupé : aucune protection cochée")
     avant = await spam_deleted(bot, guild, 0)
     check(avant == 0, f"tout coupé : le spam n'est effectivement pas traité ({avant}/8 supprimés) — l'écran dit vrai")
@@ -128,7 +128,7 @@ async def main() -> int:
     row = await bot.db.fetchone("SELECT antispam, antiraid, antinuke, antilink FROM automod_settings WHERE guild_id=?", (h.GID,))
     check(row is not None and row["antispam"] and row["antiraid"] and row["antinuke"] and not row["antilink"],
           "cocher anti-spam, anti-raid et anti-nuke : exactement ces trois-là en base")
-    view = await build(bot, guild, "security")
+    view = await build(bot, guild, "security", securite="detail")
     cochees = {o.value for o in protection_select(view).options if str(o.description or "").startswith("Activé")}
     check({"antispam", "antiraid", "antinuke"} <= cochees and "antilink" not in cochees,
           f"la page affiche l'état réel ({sorted(cochees)})")

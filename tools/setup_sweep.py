@@ -83,10 +83,13 @@ def fill(select, guild) -> None:
         select._values = [o.value for o in options[:count]]
 
 
-async def build(bot, guild, page: str | None):
+async def build(bot, guild, page: str | None, *, securite: str | None = None):
+    """``securite="detail"`` : l'écran complet de la page Sécurité (derrière « Personnaliser »)."""
     from cogs import setup_experience_v74 as v74
 
     view = v74.SentriXSetupV74(bot, guild, h.ADMIN_ID)
+    if securite:
+        view._securite_mode = securite
     await view.prepare()
     if page == "avancé":
         # L'écran « Paramètres avancés » de l'accueil (il dépassait 40 composants).

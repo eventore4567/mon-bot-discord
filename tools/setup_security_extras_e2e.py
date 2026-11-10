@@ -51,7 +51,7 @@ async def main() -> int:
     def texts(view) -> str:
         return "\n".join(str(getattr(i, "content", "")) for i in items(view) if isinstance(i, discord.ui.TextDisplay))
 
-    view = await build(bot, guild, "security")
+    view = await build(bot, guild, "security", securite="detail")
     values = [o.value for o in select_of(view).options]
     check("honeypot" not in values and "verification" not in values,
           "sans système de vérification, le menu ne propose ni Salon piège ni Vérification", str(values))
@@ -63,14 +63,14 @@ async def main() -> int:
     check(button(view, "Activer toutes les protections") is None,
           "pas de bouton « Activer toutes les protections » : rien n'est activé en bloc")
 
-    v74_view = await build(bot, guild, "security")
+    v74_view = await build(bot, guild, "security", securite="detail")
     await v74_view._set_security_profile(True, h.ADMIN_ID)
     check(await flags() == (False, False), "« Activer la sécurité » ne les active pas pour rien", str(await flags()))
 
     # Un ancien réglage resté à 1 (avant ce correctif) n'est plus affiché coché.
     await v71.update_setting(bot, h.GID, "honeypot_enabled", 1, h.ADMIN_ID)
     await v71.update_setting(bot, h.GID, "verification_enabled", 1, h.ADMIN_ID)
-    view = await build(bot, guild, "security")
+    view = await build(bot, guild, "security", securite="detail")
     defaults = [o.value for o in select_of(view).options if str(o.description or "").startswith("Activé")]
     # La liste « Actuellement : … » est devenue un compteur (28/10/2026) : le
     # menu (options cochées) est la seule source de ce qui est actif.
@@ -87,7 +87,7 @@ async def main() -> int:
 
     v75._honeypot_resources_ready = ready
     try:
-        view = await build(bot, guild, "security")
+        view = await build(bot, guild, "security", securite="detail")
         values = [o.value for o in select_of(view).options]
         defaults = [o.value for o in select_of(view).options if str(o.description or "").startswith("Activé")]
         check("honeypot" in values and "verification" in values and button(view, "Installer") is None,
@@ -101,7 +101,7 @@ async def main() -> int:
     # arrivant recevait « Non vérifié » sans pouvoir se vérifier).
     await v71.update_setting(bot, h.GID, "honeypot_enabled", 0, h.ADMIN_ID)
     await v71.update_setting(bot, h.GID, "verification_enabled", 0, h.ADMIN_ID)
-    view = await build(bot, guild, "security")
+    view = await build(bot, guild, "security", securite="detail")
     from setup_sweep import CAPTURE, _install_capture
 
     _install_capture()

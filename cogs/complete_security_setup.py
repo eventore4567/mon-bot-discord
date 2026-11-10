@@ -117,11 +117,31 @@ class SecurityCenterView(CompleteView):
         super().__init__(bot, guild, owner_id)
         self.feature = feature
         self.section = "main"
+        # 10/11/2026 : la page s'ouvre sur l'écran simple (un bouton « Activer la
+        # sécurité » + crash-test) ; l'écran complet est derrière « Personnaliser ».
+        self.mode = "simple"
+
+    async def refresh(self, i):
+        if not i.response.is_done():
+            await i.response.defer()
+        await self.build()
+        # Les écrans simples portent la fine bannière : la rejoindre à chaque édition.
+        from cogs import setup_components_v73 as v73
+
+        bandeau = any(isinstance(item, discord.ui.MediaGallery) for item in self.walk_children())
+        await i.edit_original_response(
+            view=self, attachments=v73.pieces_jointes_banniere() if bandeau else [],
+        )
 
     async def build(self):
         self.clear_items()
         from cogs import setup_v2_ui as policy
 
+        if self.feature is None and self.mode != "detail":
+            from cogs import securite_simple
+
+            ecran = securite_simple.ecran_crash if self.mode == "crash" else securite_simple.ecran_simple
+            return self.finish(await ecran(self))
         if self.feature is None:
             from cogs import setup_security_choice_v75 as choices
 
@@ -258,8 +278,15 @@ class SecurityCenterView(CompleteView):
                     button("Sauvegardes et restauration", backups),
                 )
             )
+            async def simple(i):
+                self.mode = "simple"
+                await self.refresh(i)
+
             box.add_item(
-                discord.ui.ActionRow(button("Actualiser AutoMod Discord", native))
+                discord.ui.ActionRow(
+                    button("Actualiser AutoMod Discord", native),
+                    button("Vue simple", simple),
+                )
             )
             if self.section == "global":
                 await self.global_exceptions(box)
@@ -748,7 +775,10 @@ class SecurityCenterView(CompleteView):
 
 
 async def build_security_page(owner):
-    view = await SecurityCenterView(owner.bot, owner.guild, owner.author_id).build()
+    centre = SecurityCenterView(owner.bot, owner.guild, owner.author_id)
+    # « simple » par défaut ; un appelant (banc de test) peut demander l'écran complet.
+    centre.mode = getattr(owner, "_securite_mode", "simple")
+    view = await centre.build()
     for item in list(view.children):
         view.remove_item(item)
         owner.add_item(item)
