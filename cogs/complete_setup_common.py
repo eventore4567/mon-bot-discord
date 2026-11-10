@@ -95,6 +95,12 @@ class CompleteView(AdminView):
                             ACTOR.reset(token)
 
                 item.callback = guarded
+        # 10/11/2026 : ces centres construisent leurs TextDisplay et leurs boutons
+        # directement, sans passer par Panneau ni par la vue V73 : la traduction des
+        # icônes ne les atteignait jamais et ils gardaient les emojis Unicode.
+        from utils import sentrix_emojis
+
+        sentrix_emojis.appliquer_a_la_vue(self)
         return self
 
     async def refresh(self, i):

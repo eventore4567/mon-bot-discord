@@ -43,6 +43,14 @@ PERMISSIONS_FR = {
 }
 
 
+#: Nom court pour la vue compacte, où les bloquées tiennent sur une seule ligne.
+COURTS = {
+    "antispam": "Spam", "antimention": "@everyone", "antiinvite": "Pub",
+    "antiscam": "Arnaques", "antiinsult": "Insultes", "antiraid": "Raid",
+    "antibot": "Bots", "antinuke": "Nuke", "everyone": "Permissions",
+}
+
+
 @dataclass(frozen=True)
 class Resultat:
     cle: str
@@ -54,6 +62,10 @@ class Resultat:
     @property
     def icone(self) -> str:
         return ICONES[self.etat]
+
+    @property
+    def court(self) -> str:
+        return COURTS.get(self.cle, self.titre)
 
 
 @dataclass
