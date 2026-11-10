@@ -85,10 +85,7 @@ jobs:
             tests/test_dashboard_auth_visible.py \
             tests/test_dashboard_install_link.py \
             tests/test_guild_arrival_onboarding.py \
-            tests/test_public_home_v1.py \
-            tests/test_public_home_v2.py \
             tests/test_public_home_v3.py \
-            tests/test_public_support_v1.py \
             tests/test_public_support_v2.py \
             tests/test_public_layout_interactions.py \
             tests/test_public_short_links.py \
