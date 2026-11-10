@@ -45,6 +45,7 @@ _CONFIG_PERSISTENCE_MARKERS = (
     "sticky",
     "scheduled_messages",
     "suggestion_settings",
+    "invite_detection_settings",
 )
 
 
@@ -762,6 +763,13 @@ CREATE TABLE IF NOT EXISTS member_invites (
     joined_at INTEGER,
     left_at INTEGER,
     account_age_days INTEGER
+);
+
+-- Configuration par serveur : une activation explicite avant de durcir le calcul.
+CREATE TABLE IF NOT EXISTS invite_detection_settings (
+    guild_id INTEGER PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    min_account_age_days INTEGER NOT NULL DEFAULT 7
 );
 
 -- Invitations "bonus" : un ajustement manuel et traçable accordé par le staff (ex: un
@@ -2378,44 +2386,77 @@ class Database:
         left_n = left["c"] if left else 0
         return {"total": total_n, "left": left_n, "active": total_n - left_n}
 
-    async def get_invite_breakdown(self, guild_id: int, inviter_id: int) -> dict:
-        """Détail réelles / fake / reparties / bonus pour un invitant — toutes ces valeurs
-        viennent de données réellement enregistrées (âge du compte au moment de l'arrivée,
-        départ rapide, octroi manuel du staff), jamais inventées.
+    async def get_invite_detection_settings(self, guild_id: int) -> dict:
+        """L'heuristique renforcée est désactivée jusqu'à l'action d'un admin dans /invites ou +i."""
+        row = await self.fetchone(
+            "SELECT enabled, min_account_age_days FROM invite_detection_settings WHERE guild_id = ?",
+            (guild_id,),
+        )
+        return {
+            "enabled": bool(row["enabled"]) if row else False,
+            "min_account_age_days": min(30, max(1, int(row["min_account_age_days"] or 7))) if row else 7,
+        }
 
-        - "left"  : le membre invité a quitté le serveur depuis (peu importe s'il était
-          fake ou non — Discord ne permet pas de "annuler" un départ déjà survenu).
-        - "fake"  : le membre est TOUJOURS présent, mais son compte avait moins de
-          FAKE_INVITE_ACCOUNT_AGE_DAYS jours au moment de son arrivée (indice d'un compte
-          jetable/alt), OU account_age_days est inconnu (ancienne invitation enregistrée
-          avant l'ajout de cette colonne) ET le membre est parti en moins d'une heure —
-          seulement dans ce dernier cas précis, sinon on ne classe jamais "fake" par défaut
-          faute de donnée : on préfère sous-compter plutôt qu'accuser à tort.
-        - "real"  : toujours présent, compte pas suspect.
-        - "bonus" : somme des ajustements manuels du staff (table invite_bonuses).
-        - "credited" : real + bonus — c'est CE total qui sert de classement (une invitation
-          fake ou repartie ne rapporte rien, un bonus manuel s'ajoute)."""
+    async def set_invite_detection_enabled(self, guild_id: int, enabled: bool) -> None:
+        """Activation/désactivation par serveur, persistée pour les prochains redémarrages."""
+        await self.execute(
+            "INSERT INTO invite_detection_settings(guild_id,enabled,min_account_age_days) "
+            "VALUES(?,?,7) ON CONFLICT(guild_id) DO UPDATE SET enabled=excluded.enabled",
+            (guild_id, int(bool(enabled))),
+        )
+
+    async def get_invite_breakdown(self, guild_id: int, inviter_id: int) -> dict:
+        """Classe une invitation par membre unique, à partir des données enregistrées.
+
+        Les départs restent visibles séparément. Une invitation ne rapporte un crédit
+        que si le membre est encore présent et non suspect. La détection renforcée,
+        désactivée par défaut, classe comme suspect un compte de moins de 7 jours
+        (seuil enregistré par serveur) ou un départ dans l'heure. Il s'agit d'indices,
+        jamais d'une preuve de double compte. Les fakes et les départs peuvent se
+        chevaucher : un départ rapide est simultanément un fake et un départ.
+        """
+        settings = await self.get_invite_detection_settings(guild_id)
+        advanced = bool(settings["enabled"])
+        min_age = settings["min_account_age_days"] if advanced else FAKE_INVITE_ACCOUNT_AGE_DAYS
         rows = await self.fetchall(
-            "SELECT left_at, account_age_days FROM member_invites WHERE guild_id = ? AND inviter_id = ?",
+            "SELECT id, member_id, joined_at, left_at, account_age_days "
+            "FROM member_invites WHERE guild_id = ? AND inviter_id = ? "
+            "ORDER BY joined_at DESC, id DESC",
             (guild_id, inviter_id),
         )
-        total = len(rows)
-        left = sum(1 for r in rows if r["left_at"] is not None)
-        fake = 0
-        real = 0
+        seen_members: set[int] = set()
+        total = left = fake = real = 0
         for r in rows:
-            if r["left_at"] is not None:
+            # Rejoindre le même serveur ne doit jamais créer un deuxième crédit.
+            member_id = r["member_id"]
+            unique_key = int(member_id) if member_id is not None else -int(r["id"])
+            if unique_key in seen_members:
                 continue
+            seen_members.add(unique_key)
+            total += 1
+            left_at = r["left_at"]
+            joined_at = r["joined_at"]
             age = r["account_age_days"]
-            if age is not None and age < FAKE_INVITE_ACCOUNT_AGE_DAYS:
+            young_account = age is not None and 0 <= int(age) < min_age
+            quick_leave = (
+                advanced
+                and left_at is not None
+                and joined_at is not None
+                and 0 <= int(left_at) - int(joined_at) <= FAKE_INVITE_QUICK_LEAVE_SECONDS
+            )
+            suspect = young_account or quick_leave
+            if left_at is not None:
+                left += 1
+            if suspect and (advanced or left_at is None):
                 fake += 1
-            else:
+            elif left_at is None:
                 real += 1
+
         bonus_row = await self.fetchone(
             "SELECT COALESCE(SUM(amount), 0) as s FROM invite_bonuses WHERE guild_id = ? AND user_id = ?",
             (guild_id, inviter_id),
         )
-        bonus = bonus_row["s"] if bonus_row else 0
+        bonus = int(bonus_row["s"]) if bonus_row else 0
         return {
             "total": total,
             "left": left,
