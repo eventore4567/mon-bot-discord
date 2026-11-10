@@ -45,6 +45,7 @@ _CONFIG_PERSISTENCE_MARKERS = (
     "sticky",
     "scheduled_messages",
     "suggestion_settings",
+    "invite_detection_settings",
 )
 
 
@@ -761,7 +762,25 @@ CREATE TABLE IF NOT EXISTS member_invites (
     invite_code TEXT,
     joined_at INTEGER,
     left_at INTEGER,
-    account_age_days INTEGER
+    account_age_days INTEGER,
+    fake_flags INTEGER,
+    required_role_id INTEGER,
+    role_confirmed INTEGER DEFAULT 0,
+    pending_until INTEGER DEFAULT 0,
+    quick_leave_seconds INTEGER DEFAULT 0
+);
+
+-- Configuration par serveur : une activation explicite avant de durcir le calcul.
+CREATE TABLE IF NOT EXISTS invite_detection_settings (
+    guild_id INTEGER PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    min_account_age_days INTEGER NOT NULL DEFAULT 7,
+    block_self_invite INTEGER NOT NULL DEFAULT 1,
+    require_avatar INTEGER NOT NULL DEFAULT 0,
+    block_rejoins INTEGER NOT NULL DEFAULT 1,
+    required_role_id INTEGER NOT NULL DEFAULT 0,
+    credit_delay_hours INTEGER NOT NULL DEFAULT 0,
+    quick_leave_seconds INTEGER NOT NULL DEFAULT 3600
 );
 
 -- Invitations "bonus" : un ajustement manuel et traçable accordé par le staff (ex: un
@@ -1235,6 +1254,20 @@ TICKETS_NEW_COLUMNS = {
 # partir d'une donnée 100% réelle (âge du compte au moment de l'arrivée), jamais inventée.
 MEMBER_INVITES_NEW_COLUMNS = {
     "account_age_days": "INTEGER",
+    "fake_flags": "INTEGER",
+    "required_role_id": "INTEGER",
+    "role_confirmed": "INTEGER DEFAULT 0",
+    "pending_until": "INTEGER DEFAULT 0",
+    "quick_leave_seconds": "INTEGER DEFAULT 0",
+}
+
+INVITE_DETECTION_NEW_COLUMNS = {
+    "block_self_invite": "INTEGER NOT NULL DEFAULT 1",
+    "require_avatar": "INTEGER NOT NULL DEFAULT 0",
+    "block_rejoins": "INTEGER NOT NULL DEFAULT 1",
+    "required_role_id": "INTEGER NOT NULL DEFAULT 0",
+    "credit_delay_hours": "INTEGER NOT NULL DEFAULT 0",
+    "quick_leave_seconds": "INTEGER NOT NULL DEFAULT 3600",
 }
 
 # Même principe, pour giveaways : "image_url" ajoutée pour permettre une image sur
@@ -1583,6 +1616,7 @@ class Database:
         # au même moment sur le même serveur (deux modérateurs qui agissent en même temps)
         # ne doivent jamais recevoir le même numéro.
         self._sanctions_lock = asyncio.Lock()
+        self._invite_join_lock = asyncio.Lock()
 
     @property
     def backend(self) -> str:
@@ -1695,6 +1729,12 @@ class Database:
         for column, col_type in MEMBER_INVITES_NEW_COLUMNS.items():
             if column not in existing_invites:
                 await self._conn.execute(f"ALTER TABLE member_invites ADD COLUMN {column} {col_type}")
+
+        cur = await self._conn.execute("PRAGMA table_info(invite_detection_settings)")
+        existing_detection = {row[1] for row in await cur.fetchall()}
+        for column, col_type in INVITE_DETECTION_NEW_COLUMNS.items():
+            if column not in existing_detection:
+                await self._conn.execute(f"ALTER TABLE invite_detection_settings ADD COLUMN {column} {col_type}")
 
         cur = await self._conn.execute("PRAGMA table_info(giveaways)")
         existing_giveaways = {row[1] for row in await cur.fetchall()}
@@ -2351,14 +2391,37 @@ class Database:
 
     # ---------- Suivi des invitations ----------
 
+    async def has_invite_join_history(self, guild_id: int, member_id: int) -> bool:
+        """Historique observé : ne prétend pas connaître les arrivées avant SentriX."""
+        return await self.fetchone(
+            "SELECT 1 FROM member_invites WHERE guild_id=? AND member_id=? LIMIT 1",
+            (guild_id, member_id),
+        ) is not None
+
     async def record_invite_join(
-        self, guild_id: int, member_id: int, inviter_id: int | None, invite_code: str | None, account_age_days: int | None = None
+        self, guild_id: int, member_id: int, inviter_id: int | None, invite_code: str | None,
+        account_age_days: int | None = None, *, fake_flags: int | None = None,
+        required_role_id: int = 0, role_confirmed: bool = False,
+        pending_until: int = 0, quick_leave_seconds: int = 0,
     ):
-        await self.execute(
-            "INSERT INTO member_invites (guild_id, member_id, inviter_id, invite_code, joined_at, account_age_days) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (guild_id, member_id, inviter_id, invite_code, now(), account_age_days),
-        )
+        # Un événement d'arrivée répété ne peut attribuer un crédit supplémentaire.
+        async with self._invite_join_lock:
+            existing = await self.fetchone(
+                "SELECT id FROM member_invites WHERE guild_id=? AND member_id=? "
+                "AND left_at IS NULL LIMIT 1",
+                (guild_id, member_id),
+            )
+            if existing is not None:
+                return
+            await self.execute(
+                "INSERT INTO member_invites "
+                "(guild_id, member_id, inviter_id, invite_code, joined_at, account_age_days, "
+                "fake_flags, required_role_id, role_confirmed, pending_until, quick_leave_seconds) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (guild_id, member_id, inviter_id, invite_code, now(), account_age_days,
+                 fake_flags, required_role_id, int(bool(role_confirmed)), pending_until,
+                 quick_leave_seconds),
+            )
 
     async def mark_invite_left(self, guild_id: int, member_id: int):
         await self.execute(
@@ -2366,9 +2429,20 @@ class Database:
             (now(), guild_id, member_id),
         )
 
+    async def mark_invite_role_confirmed(self, guild_id: int, member_id: int, role_id: int):
+        """Un rôle obtenu confirme la dernière arrivée en attente, sans toucher au passé."""
+        await self.execute(
+            "UPDATE member_invites SET role_confirmed=1 WHERE id=("
+            "SELECT id FROM member_invites WHERE guild_id=? AND member_id=? "
+            "ORDER BY joined_at DESC,id DESC LIMIT 1) "
+            "AND required_role_id=? AND left_at IS NULL",
+            (guild_id, member_id, role_id),
+        )
+
     async def get_invite_stats(self, guild_id: int, inviter_id: int):
         total = await self.fetchone(
-            "SELECT COUNT(*) as c FROM member_invites WHERE guild_id = ? AND inviter_id = ?", (guild_id, inviter_id)
+            "SELECT COUNT(*) as c FROM member_invites WHERE guild_id = ? AND inviter_id = ?",
+            (guild_id, inviter_id),
         )
         left = await self.fetchone(
             "SELECT COUNT(*) as c FROM member_invites WHERE guild_id = ? AND inviter_id = ? AND left_at IS NOT NULL",
@@ -2378,51 +2452,159 @@ class Database:
         left_n = left["c"] if left else 0
         return {"total": total_n, "left": left_n, "active": total_n - left_n}
 
-    async def get_invite_breakdown(self, guild_id: int, inviter_id: int) -> dict:
-        """Détail réelles / fake / reparties / bonus pour un invitant — toutes ces valeurs
-        viennent de données réellement enregistrées (âge du compte au moment de l'arrivée,
-        départ rapide, octroi manuel du staff), jamais inventées.
-
-        - "left"  : le membre invité a quitté le serveur depuis (peu importe s'il était
-          fake ou non — Discord ne permet pas de "annuler" un départ déjà survenu).
-        - "fake"  : le membre est TOUJOURS présent, mais son compte avait moins de
-          FAKE_INVITE_ACCOUNT_AGE_DAYS jours au moment de son arrivée (indice d'un compte
-          jetable/alt), OU account_age_days est inconnu (ancienne invitation enregistrée
-          avant l'ajout de cette colonne) ET le membre est parti en moins d'une heure —
-          seulement dans ce dernier cas précis, sinon on ne classe jamais "fake" par défaut
-          faute de donnée : on préfère sous-compter plutôt qu'accuser à tort.
-        - "real"  : toujours présent, compte pas suspect.
-        - "bonus" : somme des ajustements manuels du staff (table invite_bonuses).
-        - "credited" : real + bonus — c'est CE total qui sert de classement (une invitation
-          fake ou repartie ne rapporte rien, un bonus manuel s'ajoute)."""
-        rows = await self.fetchall(
-            "SELECT left_at, account_age_days FROM member_invites WHERE guild_id = ? AND inviter_id = ?",
-            (guild_id, inviter_id),
+    async def get_invite_detection_settings(self, guild_id: int) -> dict:
+        """Règles propres au serveur : optionnelles, et figées pour les prochains joins."""
+        row = await self.fetchone(
+            "SELECT enabled,min_account_age_days,block_self_invite,require_avatar,"
+            "block_rejoins,required_role_id,credit_delay_hours,quick_leave_seconds "
+            "FROM invite_detection_settings WHERE guild_id=?",
+            (guild_id,),
         )
-        total = len(rows)
-        left = sum(1 for r in rows if r["left_at"] is not None)
-        fake = 0
-        real = 0
-        for r in rows:
-            if r["left_at"] is not None:
-                continue
-            age = r["account_age_days"]
-            if age is not None and age < FAKE_INVITE_ACCOUNT_AGE_DAYS:
-                fake += 1
-            else:
-                real += 1
-        bonus_row = await self.fetchone(
-            "SELECT COALESCE(SUM(amount), 0) as s FROM invite_bonuses WHERE guild_id = ? AND user_id = ?",
-            (guild_id, inviter_id),
-        )
-        bonus = bonus_row["s"] if bonus_row else 0
+        defaults = {
+            "enabled": True,
+            "min_account_age_days": 7,
+            "block_self_invite": True,
+            "require_avatar": False,
+            "block_rejoins": True,
+            "required_role_id": 0,
+            "credit_delay_hours": 0,
+            "quick_leave_seconds": 3600,
+        }
+        if row is None:
+            return defaults
         return {
-            "total": total,
-            "left": left,
-            "fake": fake,
-            "real": real,
-            "bonus": bonus,
-            "credited": real + bonus,
+            "enabled": bool(row["enabled"]),
+            "min_account_age_days": min(30, max(1, int(row["min_account_age_days"] or 7))),
+            "block_self_invite": bool(row["block_self_invite"]),
+            "require_avatar": bool(row["require_avatar"]),
+            "block_rejoins": bool(row["block_rejoins"]),
+            "required_role_id": max(0, int(row["required_role_id"] or 0)),
+            "credit_delay_hours": min(168, max(0, int(row["credit_delay_hours"] or 0))),
+            "quick_leave_seconds": min(86400, max(0, int(row["quick_leave_seconds"] or 0))),
+        }
+
+    async def set_invite_detection_enabled(self, guild_id: int, enabled: bool) -> None:
+        await self.execute(
+            "INSERT INTO invite_detection_settings(guild_id,enabled,min_account_age_days) "
+            "VALUES(?,?,7) ON CONFLICT(guild_id) DO UPDATE SET enabled=excluded.enabled",
+            (guild_id, int(bool(enabled))),
+        )
+
+    async def set_invite_detection_rule(self, guild_id: int, key: str, value: int) -> None:
+        """Colonnes autorisées explicitement : aucun fragment SQL fourni par un membre."""
+        allowed = {
+            "min_account_age_days": (1, 30),
+            "block_self_invite": (0, 1),
+            "require_avatar": (0, 1),
+            "block_rejoins": (0, 1),
+            "required_role_id": (0, 9223372036854775807),
+            "credit_delay_hours": (0, 168),
+            "quick_leave_seconds": (0, 86400),
+        }
+        if key not in allowed or not allowed[key][0] <= int(value) <= allowed[key][1]:
+            raise ValueError("Règle ou valeur anti-fake invalide")
+        await self.execute(
+            "INSERT INTO invite_detection_settings(guild_id) VALUES(?) "
+            "ON CONFLICT(guild_id) DO NOTHING",
+            (guild_id,),
+        )
+        await self.execute(
+            f"UPDATE invite_detection_settings SET {key}=? WHERE guild_id=?",
+            (int(value), guild_id),
+        )
+
+    @staticmethod
+    def _invite_row_assessment(row, *, legacy_threshold: int, timestamp: int) -> dict:
+        """Un fake et un départ peuvent coexister ; le crédit ne peut être doublé."""
+        left_at = row["left_at"]
+        age = row["account_age_days"]
+        flags = row["fake_flags"]
+        reasons = []
+        if flags is None:
+            if age is not None and 0 <= int(age) < legacy_threshold:
+                reasons.append("Compte trop récent")
+        else:
+            for bit, description in (
+                (1, "Compte trop récent"),
+                (2, "Auto-invitation"),
+                (4, "Avatar par défaut"),
+                (8, "Retour sur le serveur"),
+            ):
+                if int(flags) & bit:
+                    reasons.append(description)
+            if int(row["required_role_id"] or 0) and not int(row["role_confirmed"] or 0):
+                reasons.append("Rôle de vérification manquant")
+
+        joined_at = row["joined_at"]
+        quick_seconds = int(row["quick_leave_seconds"] or 0)
+        if flags is not None and quick_seconds and left_at is not None and joined_at is not None:
+            if 0 <= int(left_at) - int(joined_at) <= quick_seconds:
+                reasons.append("Départ trop rapide")
+        pending_until = int(row["pending_until"] or 0)
+        pending = left_at is None and not reasons and pending_until > timestamp
+        return {
+            "reasons": reasons,
+            "fake": bool(reasons),
+            "pending": pending,
+            "left": left_at is not None,
+            "real": left_at is None and not reasons and not pending,
+        }
+
+    async def get_invite_breakdown(self, guild_id: int, inviter_id: int) -> dict:
+        settings = await self.get_invite_detection_settings(guild_id)
+        # Historique antérieur à cette version : conserver le calcul d'origine
+        # (< 3 jours), même quand la détection renforcée est active aujourd'hui.
+        legacy_threshold = FAKE_INVITE_ACCOUNT_AGE_DAYS
+        rows = await self.fetchall(
+            "SELECT id,member_id,joined_at,left_at,account_age_days,fake_flags,"
+            "required_role_id,role_confirmed,pending_until,quick_leave_seconds "
+            "FROM member_invites WHERE guild_id=? AND inviter_id=? "
+            "ORDER BY joined_at DESC,id DESC",
+            (guild_id, inviter_id),
+        )
+        unique_members: set[int] = set()
+        total = left = fake = real = pending = 0
+        instant = now()
+        for row in rows:
+            member_id = row["member_id"]
+            unique_id = int(member_id) if member_id is not None else -int(row["id"])
+            if unique_id in unique_members:
+                continue
+            unique_members.add(unique_id)
+            detail = self._invite_row_assessment(
+                row, legacy_threshold=legacy_threshold, timestamp=instant
+            )
+            total += 1
+            left += int(detail["left"])
+            fake += int(detail["fake"])
+            pending += int(detail["pending"])
+            real += int(detail["real"])
+        bonus_row = await self.fetchone(
+            "SELECT COALESCE(SUM(amount),0) as s FROM invite_bonuses WHERE guild_id=? AND user_id=?",
+            (guild_id, inviter_id),
+        )
+        bonus = int(bonus_row["s"]) if bonus_row else 0
+        return {
+            "total": total, "left": left, "fake": fake, "real": real,
+            "pending": pending, "bonus": bonus, "credited": real + bonus,
+        }
+
+    async def get_invite_member_assessment(self, guild_id: int, member_id: int) -> dict | None:
+        row = await self.fetchone(
+            "SELECT * FROM member_invites WHERE guild_id=? AND member_id=? "
+            "ORDER BY joined_at DESC,id DESC LIMIT 1",
+            (guild_id, member_id),
+        )
+        if row is None:
+            return None
+        settings = await self.get_invite_detection_settings(guild_id)
+        threshold = FAKE_INVITE_ACCOUNT_AGE_DAYS
+        data = self._invite_row_assessment(row, legacy_threshold=threshold, timestamp=now())
+        return {
+            **data,
+            "inviter_id": row["inviter_id"],
+            "joined_at": row["joined_at"],
+            "pending_until": row["pending_until"],
         }
 
     async def grant_invite_bonus(self, guild_id: int, user_id: int, amount: int, granted_by: int, reason: str = ""):

@@ -9,10 +9,9 @@ pour distinguer les invitations "actives" des invitations "reparties".
 Refonte visuelle (Phase 2, design premium/sombre) : /invites et /invite-leaderboard passent
 maintenant par utils/design_system et affichent un détail réelles/fake/reparties/bonus,
 façon InviteLogger. AUCUNE de ces valeurs n'est inventée :
-- "fake" est déduit de l'âge réel du compte au moment de son arrivée (member.created_at,
-  capturé et stocké dans member_invites.account_age_days) — jamais un compte n'est
-  qualifié de fake sans cette donnée réelle (une ligne sans donnée reste "réelle" par
-  défaut, pour ne jamais accuser à tort faute de preuve).
+- "fake" est un signal de suspicion calculé à partir de l'âge enregistré du
+  compte (seuil de 3 jours par défaut, 7 jours quand le mode renforcé est activé
+  par un administrateur), ou d'un départ sous 1 h en mode renforcé.
 - "bonus" est un ajustement 100% manuel et traçable, accordé explicitement par un membre
   du staff via /addbonusinvites — jamais généré automatiquement par le bot.
 Voir database/db.py::get_invite_breakdown() pour le détail du calcul.
@@ -162,11 +161,34 @@ class Invites(commands.Cog, name="Invites"):
         invite = await self.find_used_invite(guild)
         inviter_id = invite.inviter.id if invite and invite.inviter else None
         code = invite.code if invite else None
-        # Âge réel du compte au moment de l'arrivée, capturé une fois pour toutes ici :
-        # c'est cette valeur (et elle seule) qui permettra plus tard de distinguer une
-        # invitation "réelle" d'une invitation "fake" sur /invites, sans jamais deviner.
-        account_age_days = (discord.utils.utcnow() - member.created_at).days
-        await self.bot.db.record_invite_join(guild.id, member.id, inviter_id, code, account_age_days)
+        # Les règles sont évaluées à l'arrivée et conservées avec CET événement :
+        # les changements de configuration ne réécrivent pas l'historique.
+        account_age_days = max(0, (discord.utils.utcnow() - member.created_at).days)
+        settings = await self.bot.db.get_invite_detection_settings(guild.id)
+        enhanced = bool(settings["enabled"])
+        flags = 0
+        age_limit = settings["min_account_age_days"] if enhanced else FAKE_INVITE_ACCOUNT_AGE_DAYS
+        if account_age_days < age_limit:
+            flags |= 1  # YOUNG
+        if enhanced:
+            if settings["block_self_invite"] and inviter_id == member.id:
+                flags |= 2  # SELF
+            if settings["require_avatar"] and member.avatar is None:
+                flags |= 4  # NOPFP, seulement si la règle est explicitement activée
+            if settings["block_rejoins"] and await self.bot.db.has_invite_join_history(guild.id, member.id):
+                flags |= 8  # ALREADYJOINED (uniquement pour les arrivées observées)
+        role_id = int(settings["required_role_id"]) if enhanced else 0
+        role_confirmed = bool(role_id and any(role.id == role_id for role in member.roles))
+        pending_until = (
+            int(time.time()) + int(settings["credit_delay_hours"]) * 3600
+            if enhanced else 0
+        )
+        quick_leave_seconds = int(settings["quick_leave_seconds"]) if enhanced else 0
+        await self.bot.db.record_invite_join(
+            guild.id, member.id, inviter_id, code, account_age_days,
+            fake_flags=flags, required_role_id=role_id, role_confirmed=role_confirmed,
+            pending_until=pending_until, quick_leave_seconds=quick_leave_seconds,
+        )
         await self._journaliser_arrivee(member, code, inviter_id)
 
         if not inviter_id:
@@ -282,6 +304,22 @@ class Invites(commands.Cog, name="Invites"):
             return
         await self.bot.db.mark_invite_left(member.guild.id, member.id)
 
+    @commands.Cog.listener()
+    async def on_member_update(self, before: discord.Member, after: discord.Member):
+        if after.bot:
+            return
+        old_roles = {role.id for role in before.roles}
+        new_role_ids = {role.id for role in after.roles} - old_roles
+        if not new_role_ids:
+            return
+        # Seule la ligne active dont le rôle requis a été obtenu est déverrouillée.
+        row = await self.bot.db.get_invited_by(after.guild.id, after.id)
+        if not row or row["left_at"] is not None:
+            return
+        required_id = int(row["required_role_id"] or 0)
+        if required_id and required_id in new_role_ids:
+            await self.bot.db.mark_invite_role_confirmed(after.guild.id, after.id, required_id)
+
     @commands.hybrid_command(
         name="invites",
         aliases=["i"],
@@ -302,11 +340,11 @@ class Invites(commands.Cog, name="Invites"):
             thumbnail=membre.display_avatar.url if design.get("show_avatars", True) else None,
             footer=design.get("footer"),
         )
-        # 02/11/2026 : fiche courte. Les invitations de comptes suspects restent
-        # exclues du total crédité, sans ligne ni note supplémentaire à lire.
+        # Fiche courte identique pour /invites et +i : aucun bouton, aucune commande fake.
         embed.add_field(name="Réelles", value=design_system.format_number(b["real"]), inline=True)
         embed.add_field(name="Reparties", value=design_system.format_number(b["left"]), inline=True)
         embed.add_field(name="Bonus", value=design_system.format_number(b["bonus"]), inline=True)
+        embed.add_field(name="Fakes", value=design_system.format_number(b["fake"]), inline=True)
         await panels.envoyer(ctx, panels.depuis_embed(embed))
 
     @commands.hybrid_command(name="invite-leaderboard", description="Classement des membres ayant le plus invité (invitations créditées).")
