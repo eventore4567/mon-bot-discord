@@ -161,11 +161,34 @@ class Invites(commands.Cog, name="Invites"):
         invite = await self.find_used_invite(guild)
         inviter_id = invite.inviter.id if invite and invite.inviter else None
         code = invite.code if invite else None
-        # Âge réel du compte au moment de l'arrivée, capturé une fois pour toutes ici :
-        # c'est cette valeur (et elle seule) qui permettra plus tard de distinguer une
-        # invitation "réelle" d'une invitation "fake" sur /invites, sans jamais deviner.
-        account_age_days = (discord.utils.utcnow() - member.created_at).days
-        await self.bot.db.record_invite_join(guild.id, member.id, inviter_id, code, account_age_days)
+        # Les règles sont évaluées à l'arrivée et conservées avec CET événement :
+        # les changements de configuration ne réécrivent pas l'historique.
+        account_age_days = max(0, (discord.utils.utcnow() - member.created_at).days)
+        settings = await self.bot.db.get_invite_detection_settings(guild.id)
+        enhanced = bool(settings["enabled"])
+        flags = 0
+        age_limit = settings["min_account_age_days"] if enhanced else FAKE_INVITE_ACCOUNT_AGE_DAYS
+        if account_age_days < age_limit:
+            flags |= 1  # YOUNG
+        if enhanced:
+            if settings["block_self_invite"] and inviter_id == member.id:
+                flags |= 2  # SELF
+            if settings["require_avatar"] and member.avatar is None:
+                flags |= 4  # NOPFP, seulement si la règle est explicitement activée
+            if settings["block_rejoins"] and await self.bot.db.has_invite_join_history(guild.id, member.id):
+                flags |= 8  # ALREADYJOINED (uniquement pour les arrivées observées)
+        role_id = int(settings["required_role_id"]) if enhanced else 0
+        role_confirmed = bool(role_id and any(role.id == role_id for role in member.roles))
+        pending_until = (
+            int(time.time()) + int(settings["credit_delay_hours"]) * 3600
+            if enhanced else 0
+        )
+        quick_leave_seconds = int(settings["quick_leave_seconds"]) if enhanced else 0
+        await self.bot.db.record_invite_join(
+            guild.id, member.id, inviter_id, code, account_age_days,
+            fake_flags=flags, required_role_id=role_id, role_confirmed=role_confirmed,
+            pending_until=pending_until, quick_leave_seconds=quick_leave_seconds,
+        )
         await self._journaliser_arrivee(member, code, inviter_id)
 
         if not inviter_id:
@@ -281,6 +304,22 @@ class Invites(commands.Cog, name="Invites"):
             return
         await self.bot.db.mark_invite_left(member.guild.id, member.id)
 
+    @commands.Cog.listener()
+    async def on_member_update(self, before: discord.Member, after: discord.Member):
+        if after.bot:
+            return
+        old_roles = {role.id for role in before.roles}
+        new_role_ids = {role.id for role in after.roles} - old_roles
+        if not new_role_ids:
+            return
+        # Seule la ligne active dont le rôle requis a été obtenu est déverrouillée.
+        row = await self.bot.db.get_invited_by(after.guild.id, after.id)
+        if not row or row["left_at"] is not None:
+            return
+        required_id = int(row["required_role_id"] or 0)
+        if required_id and required_id in new_role_ids:
+            await self.bot.db.mark_invite_role_confirmed(after.guild.id, after.id, required_id)
+
     @commands.hybrid_command(
         name="invites",
         aliases=["i"],
@@ -307,6 +346,8 @@ class Invites(commands.Cog, name="Invites"):
         embed.add_field(name="Fakes", value=design_system.format_number(b["fake"]), inline=True)
         embed.add_field(name="Départs", value=design_system.format_number(b["left"]), inline=True)
         embed.add_field(name="Bonus", value=design_system.format_number(b["bonus"]), inline=True)
+        if b.get("pending", 0):
+            embed.add_field(name="En attente", value=design_system.format_number(b["pending"]), inline=True)
 
         buttons: list[panels.Bouton] = []
         author_perms = getattr(ctx.author, "guild_permissions", None)
@@ -349,6 +390,29 @@ class Invites(commands.Cog, name="Invites"):
                     ephemeral=True,
                 )
 
+            async def show_detection_options(interaction: discord.Interaction) -> None:
+                permissions = getattr(interaction.user, "guild_permissions", None)
+                if not (
+                    interaction.guild_id == ctx.guild.id
+                    and (
+                        getattr(permissions, "manage_guild", False)
+                        or interaction.user.id == getattr(ctx.guild, "owner_id", None)
+                    )
+                ):
+                    await interaction.response.send_message(
+                        "Seul un administrateur peut modifier ces paramètres.", ephemeral=True
+                    )
+                    return
+                await interaction.response.send_message(
+                    "**Configuration des invitations**\n"
+                    "Utilise `/fakeconfig` ou `+fakeconfig` pour afficher les règles.\n"
+                    "Exemples : `+fakeconfig age 7`, `+fakeconfig avatar on`, "
+                    "`+fakeconfig rejoin on`, `+fakeconfig role @Rôle`, "
+                    "`+fakeconfig delai 24`.\n"
+                    "Les modifications concernent les prochaines arrivées.",
+                    ephemeral=True,
+                )
+
             buttons.append(
                 panels.Bouton(
                     libelle=(
@@ -360,7 +424,137 @@ class Invites(commands.Cog, name="Invites"):
                     callback=toggle_detection,
                 )
             )
+            buttons.append(panels.Bouton(
+                libelle="Règles anti-fake",
+                custom_id=f"sentrix:invites:rules:{ctx.guild.id}",
+                callback=show_detection_options,
+            ))
         await panels.envoyer(ctx, panels.depuis_embed(embed, boutons=buttons))
+
+    @commands.hybrid_command(
+        name="fakeconfig",
+        aliases=["fc"],
+        description="[Admin] Configurer la détection des fausses invitations.",
+    )
+    @checks.is_owner_or_admin_for("configuration")
+    @app_commands.describe(
+        parametre="on, off, age, self, avatar, rejoin, role, delai ou depart",
+        valeur="Nouvelle valeur (ex. 7, on, off, 24, mention ou ID du rôle)",
+    )
+    async def fakeconfig(self, ctx: commands.Context, parametre: str = "voir", valeur: str = ""):
+        option = (parametre or "voir").strip().lower()
+        val = (valeur or "").strip()
+        settings = await self.bot.db.get_invite_detection_settings(ctx.guild.id)
+        if option not in {"voir", "status", "list", "liste"}:
+            if option in {"on", "activer", "off", "desactiver"}:
+                await self.bot.db.set_invite_detection_enabled(
+                    ctx.guild.id, option in {"on", "activer"}
+                )
+            else:
+                keys = {
+                    "age": "min_account_age_days",
+                    "self": "block_self_invite",
+                    "autoinvite": "block_self_invite",
+                    "avatar": "require_avatar",
+                    "rejoin": "block_rejoins",
+                    "retour": "block_rejoins",
+                    "role": "required_role_id",
+                    "delai": "credit_delay_hours",
+                    "attente": "credit_delay_hours",
+                    "depart": "quick_leave_seconds",
+                }
+                key = keys.get(option)
+                if key is None:
+                    return await panels.envoyer(
+                        ctx, panels.depuis_embed(embeds.error("Paramètre inconnu. Utilise /fakeconfig sans argument."))
+                    )
+                if key in {"block_self_invite", "require_avatar", "block_rejoins"}:
+                    synonyms = {"on": 1, "oui": 1, "true": 1, "off": 0, "non": 0, "false": 0}
+                    if val.lower() not in synonyms:
+                        return await panels.envoyer(
+                            ctx, panels.depuis_embed(embeds.error("Utilise on ou off."))
+                        )
+                    number = synonyms[val.lower()]
+                elif key == "required_role_id":
+                    if val.lower() in {"off", "non", "0"}:
+                        number = 0
+                    else:
+                        try:
+                            role_id = int(val.strip("<@&>"))
+                        except ValueError:
+                            role_id = 0
+                        role = ctx.guild.get_role(role_id) if role_id else None
+                        if role is None:
+                            return await panels.envoyer(
+                                ctx, panels.depuis_embed(embeds.error("Mentionne un rôle existant ou utilise off."))
+                            )
+                        number = role.id
+                else:
+                    try:
+                        number = int(val)
+                    except ValueError:
+                        return await panels.envoyer(
+                            ctx, panels.depuis_embed(embeds.error("Indique un nombre valide."))
+                        )
+                    if key == "quick_leave_seconds":
+                        number *= 60  # l'interface affiche des minutes
+                try:
+                    await self.bot.db.set_invite_detection_rule(ctx.guild.id, key, number)
+                except ValueError:
+                    return await panels.envoyer(
+                        ctx, panels.depuis_embed(embeds.error(
+                            "Valeur hors limites : âge 1–30 j, délai 0–168 h, départ 0–1440 min."
+                        ))
+                    )
+            settings = await self.bot.db.get_invite_detection_settings(ctx.guild.id)
+
+        yn = lambda x: "Oui" if x else "Non"
+        display = (
+            f"**Mode renforcé :** {yn(settings['enabled'])}\n"
+            f"**Âge minimum :** {settings['min_account_age_days']} jours\n"
+            f"**Auto-invitations refusées :** {yn(settings['block_self_invite'])}\n"
+            f"**Avatar personnalisé requis :** {yn(settings['require_avatar'])}\n"
+            f"**Retours refusés :** {yn(settings['block_rejoins'])}\n"
+            f"**Rôle requis :** "
+            f"{('<@&' + str(settings['required_role_id']) + '>') if settings['required_role_id'] else 'Aucun'}\n"
+            f"**Validation différée :** {settings['credit_delay_hours']} h\n"
+            f"**Départ rapide :** {settings['quick_leave_seconds'] // 60} min\n\n"
+            "**Commandes :** `/fakeconfig` ou `+fakeconfig`\n"
+            "`+fakeconfig on/off` · `age 7` · `self on` · `avatar on` · "
+            "`rejoin on` · `role @Rôle/off` · `delai 24` · `depart 60`\n"
+            "Les changements s'appliquent aux nouvelles arrivées, sans effacer les statistiques."
+        )
+        await panels.envoyer(
+            ctx, panels.depuis_embed(embeds.neutral("Sécurité des invitations", display))
+        )
+
+    @commands.hybrid_command(
+        name="fakeinfo",
+        description="[Admin] Voir pourquoi une invitation a été marquée suspecte.",
+    )
+    @checks.is_owner_or_admin_for("configuration")
+    @app_commands.describe(membre="Membre invité à analyser")
+    async def fakeinfo(self, ctx: commands.Context, membre: discord.Member):
+        result = await self.bot.db.get_invite_member_assessment(ctx.guild.id, membre.id)
+        if not result:
+            return await panels.envoyer(
+                ctx, panels.depuis_embed(embeds.info("Aucune arrivée enregistrée pour ce membre."))
+            )
+        if result["left"]:
+            state = "Parti"
+        elif result["fake"]:
+            state = "Suspect / non crédité"
+        elif result["pending"]:
+            state = "En attente"
+        else:
+            state = "Valide / crédité"
+        reasons = "\n".join(f"• {reason}" for reason in result["reasons"]) or "Aucune"
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.neutral(
+            f"Contrôle d'invitation · {membre.display_name}",
+            f"**État :** {state}\n**Motifs :**\n{reasons}\n"
+            f"**Invité par :** {('<@' + str(result['inviter_id']) + '>') if result['inviter_id'] else 'Inconnu'}\n"
+            + (f"**Crédit possible :** <t:{result['pending_until']}:R>" if result["pending"] else "")
+        )))
 
     @commands.hybrid_command(name="invite-leaderboard", description="Classement des membres ayant le plus invité (invitations créditées).")
     async def invite_leaderboard(self, ctx: commands.Context):
