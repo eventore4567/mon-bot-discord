@@ -199,3 +199,33 @@ async def test_role_recu_confirme_le_membre_sans_retroactivite():
     after.roles = [role]
     await cog.on_member_update(before, after)
     bot.db.mark_invite_role_confirmed.assert_awaited_once_with(42, 20, 77)
+
+
+@pytest.mark.asyncio
+async def test_sqlite_persistant_role_validation_et_depart(tmp_path, monkeypatch):
+    monkeypatch.setenv("SENTRIX_DB_BACKEND", "sqlite")
+    db = Database(str(tmp_path / "invite_tracking.db"))
+    await db.connect()
+    try:
+        await db.set_invite_detection_enabled(55, True)
+        await db.set_invite_detection_rule(55, "required_role_id", 88)
+        cfg = await db.get_invite_detection_settings(55)
+        assert cfg["enabled"] is True and cfg["required_role_id"] == 88
+
+        await db.record_invite_join(
+            55, 101, 202, "abc", 20,
+            fake_flags=0, required_role_id=88, role_confirmed=False,
+        )
+        await db.record_invite_join(55, 101, 202, "abc", 20, fake_flags=0)
+        before = await db.get_invite_breakdown(55, 202)
+        assert (before["total"], before["fake"], before["credited"]) == (1, 1, 0)
+
+        await db.mark_invite_role_confirmed(55, 101, 88)
+        after = await db.get_invite_breakdown(55, 202)
+        assert (after["real"], after["fake"], after["credited"]) == (1, 0, 1)
+
+        await db.mark_invite_left(55, 101)
+        left = await db.get_invite_breakdown(55, 202)
+        assert (left["left"], left["credited"]) == (1, 0)
+    finally:
+        await db.close()
