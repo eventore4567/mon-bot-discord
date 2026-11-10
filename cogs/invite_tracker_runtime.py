@@ -438,10 +438,16 @@ class InviteTrackerRuntime(commands.Cog):
         display = discord.utils.escape_markdown(member.display_name or member.name)
         language = await language_runtime.get_language(self.bot, member.guild.id)
         if inviter_id:
+            # Le départ ne rapporte aucun crédit, y compris si l'arrivée avait
+            # déjà été marquée suspecte. Le chiffre affiché est le même que /invites.
+            count_info = await self.bot.db.get_invite_breakdown(member.guild.id, int(inviter_id))
+            count = int(count_info["credited"])
             text = (
-                f"**{display}** left the server. They had been invited by <@{int(inviter_id)}>."
+                f"**{display}** left the server. Invited by <@{int(inviter_id)}> "
+                f"who now has **{count}** credited invites."
                 if language == language_runtime.LANG_EN
-                else f"**{display}** a quitté le serveur. Il avait été invité par <@{int(inviter_id)}>."
+                else f"**{display}** a quitté le serveur. Invité par <@{int(inviter_id)}> "
+                f"qui possède désormais **{count}** invitation(s) créditée(s)."
             )
         else:
             text = (
