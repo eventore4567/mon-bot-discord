@@ -533,8 +533,8 @@ class Invites(commands.Cog, name="Invites"):
         description="[Admin] Voir pourquoi une invitation a été marquée suspecte.",
     )
     @checks.is_owner_or_admin_for("configuration")
-    @app_commands.describe(membre="Membre invité à analyser")
-    async def fakeinfo(self, ctx: commands.Context, membre: discord.Member):
+    @app_commands.describe(membre="Utilisateur invité à analyser (présent ou parti)")
+    async def fakeinfo(self, ctx: commands.Context, membre: discord.User):
         result = await self.bot.db.get_invite_member_assessment(ctx.guild.id, membre.id)
         if not result:
             return await panels.envoyer(
