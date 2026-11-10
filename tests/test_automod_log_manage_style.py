@@ -5,7 +5,14 @@ from types import SimpleNamespace
 
 os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 
-from cogs.automod import _automod_message_preview, _style_automod_log
+from cogs.automod import (
+    GRAVITE_JAUNE,
+    GRAVITE_ORANGE,
+    GRAVITE_ROUGE,
+    _automod_message_preview,
+    _style_automod_log,
+    gravite_automod,
+)
 from utils import embeds
 from utils.log_banners import get_banner
 
@@ -33,7 +40,10 @@ def test_all_automod_logs_use_manage_title_and_main_fields():
     fields = _fields(styled)
     names = [name for name, _ in fields]
 
-    assert styled.title == "Protection SentriX"
+    # 10/11/2026 : le titre nomme la protection ET la sanction, et la couleur dit
+    # la gravité — « Protection SentriX » partout ne se repérait pas dans un salon.
+    assert styled.title == "Liens externes · Suppression du message"
+    assert styled.colour.value == GRAVITE_JAUNE
     assert names[:6] == [
         "Membre",
         "Protection",
@@ -98,3 +108,39 @@ def test_l_ordre_reel_des_champs_ne_perd_ni_le_message_ni_la_sanction():
     assert "> https://example.com/test" in body
     assert "Messages supprimés : **2**" in body and "Sanction : **Suppression du message**" in body
     assert "Infractions (1h) : 3" in body and body.count("https://example.com/test") == 1
+
+
+# --- 10/11/2026 : les logs AutoMod doivent sauter aux yeux -------------------
+
+def test_la_couleur_du_log_suit_la_gravite_de_la_sanction():
+    assert gravite_automod("Expulsion")[0] == GRAVITE_ROUGE
+    assert gravite_automod("Bannissement définitif")[0] == GRAVITE_ROUGE
+    assert gravite_automod("Mute 10 min")[0] == GRAVITE_ORANGE
+    assert gravite_automod("Avertissement enregistré")[0] == GRAVITE_ORANGE
+    assert gravite_automod("Suppression du message")[0] == GRAVITE_JAUNE
+    # La sanction prime sur la protection : même filtre, deux gravités.
+    assert gravite_automod("Suppression du message", "Anti-spam")[0] == GRAVITE_JAUNE
+    assert gravite_automod("Exclusion 1 h", "Anti-spam")[0] == GRAVITE_ORANGE
+    # « unban » contient « ban » : ne pas le prendre pour une sanction grave.
+    assert gravite_automod("Débannissement")[0] != GRAVITE_ROUGE
+
+
+def test_une_attaque_sur_le_serveur_reste_rouge_sans_sanction_nommee():
+    for protection in ("Protection anti-raid", "Anti-nuke", "Permissions dangereuses"):
+        assert gravite_automod("", protection)[0] == GRAVITE_ROUGE
+    assert gravite_automod("Surveillance renforcée", "Risk")[0] == GRAVITE_ORANGE
+
+
+def test_le_titre_du_log_nomme_la_protection_et_la_sanction():
+    import discord
+
+    source = discord.Embed(title="Anti-nuke déclenché")
+    source.add_field(name="Membre", value="<@1>")
+    source.add_field(name="Sanction", value="Bannissement")
+    styled = _style_automod_log(source, "antinuke")
+    assert "Bannissement" in styled.title and styled.colour.value == GRAVITE_ROUGE
+
+    sans_sanction = discord.Embed(title="Protection anti-raid")
+    sans_sanction.add_field(name="Statut", value="Raid contenu")
+    muet = _style_automod_log(sans_sanction, "antiraid")
+    assert muet.colour.value == GRAVITE_ROUGE and "·" not in muet.title

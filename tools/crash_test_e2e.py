@@ -110,15 +110,15 @@ async def main() -> int:
 
     await bouton(view, "Retour").callback(interaction(bot))
     await h.settle(idle=0.3, maximum=3)
-    check("Sécurité" in texts(view) and "Votre serveur est protégé" in texts(view),
-          "« Retour » revient à l'écran simple, qui dit « Votre serveur est protégé »")
+    check("Sécurité" in texts(view) and "Le serveur est protégé" in texts(view),
+          "« Retour » revient à l'écran simple, qui dit « Le serveur est protégé »")
     await bouton(view, "Personnaliser").callback(interaction(bot))
     await h.settle(idle=0.3, maximum=3)
     menus = [i.placeholder for t in view.children for i in walk(t) if isinstance(i, discord.ui.Select)]
     check("Configurer une protection" in menus, "« Personnaliser » ouvre l'écran complet d'avant")
     await bouton(view, "Vue simple").callback(interaction(bot))
     await h.settle(idle=0.3, maximum=3)
-    check("Votre serveur est protégé" in texts(view), "« Vue simple » revient à l'écran simple")
+    check("Le serveur est protégé" in texts(view), "« Vue simple » revient à l'écran simple")
 
     # 10/11/2026 : « les emojis ne sont pas animés ni personnalisés ». Avec le pack
     # synchronisé, les deux écrans doivent porter les icônes SentriX, pas ✅ / ❌.

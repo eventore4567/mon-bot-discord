@@ -56,6 +56,10 @@ NORMAL_DIRECT_COMMANDS = frozenset({
     "economyleaderboard",
     "level", "stats", "set-xp", "add-xp", "set-level-role", "remove-level-role",
     "reset-levels",
+    # 10/11/2026 : /classement réunit niveaux, messages, vocal, invitations et
+    # économie dans un seul écran à menu. Les classements existaient déjà mais
+    # éparpillés, et la production dit que personne ne les trouvait.
+    "classement",
     "ticket", "giveaway", "giveaway-reroll",
     # Le nouveau moteur expose pause/skip/stop sous le groupe /music. Seul +play
     # reste volontairement une commande directe pour compatibilité rapide.

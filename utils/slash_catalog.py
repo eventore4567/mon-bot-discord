@@ -317,6 +317,12 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("market mine", "market-my", "Show your active listings."),
     _e("market history", "market-history", "Show your market history."),
 
+    # --------------------------------------------------------------- Classements
+    # 10/11/2026 : les classements existaient, éparpillés et introuvables — la
+    # production dit que /invite-leaderboard n'a servi à personne en trente jours.
+    # Une seule racine, un menu pour changer de catégorie.
+    _e("leaderboard", "classement", "Server leaderboards: levels, messages, voice, invites, economy."),
+
     # ------------------------------------------------------------------- Niveaux
     _e("level rank", "level", "Show your level or a member's."),
     _e("level leaderboard", "leaderboard-levels", "Show the level leaderboard."),

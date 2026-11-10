@@ -111,8 +111,13 @@ class ModerationCatalogSurfaceTests(unittest.TestCase):
         sont sortis. main.EXACT_DUPLICATE_COMMANDS les supprime au démarrage
         comme doublons exacts de +ai et +economyleaderboard, et les annoncer
         ici promettait des commandes que le boot effaçait.
+
+        Passé de 120 à 121 le 10/11/2026 : +classement. Les classements existaient
+        déjà, éparpillés sur cinq commandes dont la production dit que personne ne
+        les trouvait ; celle-ci les réunit sous un seul écran à menu.
         """
-        self.assertEqual(len(NORMAL_DIRECT_COMMANDS), 120)
+        self.assertEqual(len(NORMAL_DIRECT_COMMANDS), 121)
+        self.assertIn("classement", NORMAL_DIRECT_COMMANDS)
 
 
 if __name__ == "__main__":

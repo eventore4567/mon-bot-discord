@@ -145,6 +145,7 @@ EXTENSIONS = [
     "cogs.v17_health",
     "cogs.economy",
     "cogs.levels",
+    "cogs.classements",
     "cogs.import_data",
     "cogs.role_mass_target",
     "cogs.minigames",
@@ -273,6 +274,8 @@ PUBLIC_COMMANDS = frozenset({
     "balance", "economy", "daily", "weekly", "work", "rob", "pay",
     "economyleaderboard", "leaderboard-money", "shop", "buy", "buyrole",
     "inventory", "sell", "gamble", "deposit", "withdraw", "banque",
+    # 10/11/2026 : +classement, en lecture seule comme les autres classements.
+    "classement",
     "stats", "me", "level", "rank", "leaderboard", "leaderboard-levels", "level-roles",
     "profile", "set-bio", "rep", "reputation", "repleaderboard", "voice-time",
     # Tickets, événements et invitations accessibles aux membres

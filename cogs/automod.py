@@ -1161,6 +1161,44 @@ def _automod_default_sanction(log_type: str, title: str, protection: str) -> str
     return "Action AutoMod"
 
 
+#: 10/11/2026 : « fais que les logs automod soient vraiment visibles avec des
+#: couleurs qui captent l'œil ». Tous sortaient avec le même titre générique
+#: « Protection SentriX », donc la même couleur de marque : dans un salon de logs,
+#: une expulsion ne se distinguait pas d'un message supprimé. La gravité de la
+#: SANCTION donne maintenant la couleur et l'icône.
+GRAVITE_ROUGE = 0xED4245     # le membre quitte le serveur, ou le serveur était attaqué
+GRAVITE_ORANGE = 0xF0A020    # le membre est réduit au silence ou averti
+GRAVITE_JAUNE = 0xFEE75C     # seul un message disparaît
+
+_SANCTION_GRAVE = ("ban", "expuls", "kick", "neutralis", "quarantaine", "verrouill", "lockdown")
+_SANCTION_MOYENNE = ("mute", "muet", "timeout", "exclusion", "avertiss", "warn", "silence")
+#: Une sanction LEVÉE n'est pas une sanction : « débannissement » contient « ban »
+#: et « unmute » contient « mute ». Testé avant tout le reste.
+_SANCTION_LEVEE = ("déban", "deban", "unban", "unmute", "démute", "demute", "levée", "levee", "annul", "rétabli", "retabli")
+
+
+def gravite_automod(sanction: str, protection: str = "", titre: str = "") -> tuple[int, str]:
+    """(couleur, nom d'icône SentriX) selon ce qui a RÉELLEMENT été fait.
+
+    La sanction prime sur la protection : un anti-spam qui supprime un message et
+    un anti-spam qui exclut le membre ne méritent pas la même couleur.
+    """
+    sample = str(sanction or "").casefold()
+    contexte = f"{protection} {titre}".casefold()
+    if any(mot in sample for mot in _SANCTION_LEVEE):
+        return GRAVITE_JAUNE, "success"
+    if any(mot in sample for mot in _SANCTION_GRAVE):
+        return GRAVITE_ROUGE, "ban"
+    if any(mot in sample for mot in _SANCTION_MOYENNE):
+        return GRAVITE_ORANGE, "mute"
+    # Aucune sanction nommée : une attaque sur le serveur reste rouge.
+    if any(mot in contexte for mot in ("nuke", "raid", "permission", "vanity", "prune")):
+        return GRAVITE_ROUGE, "alerte"
+    if "surveillance" in sample or "risk" in contexte:
+        return GRAVITE_ORANGE, "eye"
+    return GRAVITE_JAUNE, "message_delete"
+
+
 def _style_automod_log(embed: discord.Embed, log_type: str) -> discord.Embed:
     """Uniformise tous les logs AutoMod avant leur rendu SentriX Trace."""
     title = str(embed.title or "")
@@ -1238,11 +1276,18 @@ def _style_automod_log(embed: discord.Embed, log_type: str) -> discord.Embed:
         if len(ordered) >= 20:
             break
 
+    # Le titre dit la protection ET ce qu'elle a fait ; la couleur dit la gravité.
+    # « Protection SentriX » pour tout le monde ne se repérait pas dans un salon.
+    from utils import sentrix_emojis
+
+    couleur, icone = gravite_automod(sanction_value, protection_value, title)
+    entete = protection_value if not sanction_value else f"{protection_value} · {sanction_value}"
     styled = embeds.canonical_log_embed(
-        "Protection SentriX",
+        sentrix_emojis.titre(icone, entete[:240]) or "Protection SentriX",
         description=str(embed.description or "")[:3500],
         fields=ordered,
     )
+    styled.colour = discord.Colour(couleur)
     image_url = str(getattr(getattr(embed, "image", None), "url", "") or "")
     if image_url:
         styled.set_image(url=image_url)

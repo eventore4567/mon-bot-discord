@@ -71,6 +71,11 @@ PUBLIC_COMMANDS = frozenset({
     "balance", "economy", "daily", "weekly", "work", "rob", "pay",
     "economyleaderboard", "leaderboard-money", "shop", "buy", "buyrole",
     "inventory", "sell", "gamble", "deposit", "withdraw", "banque",
+    # 10/11/2026 : /classement réunit niveaux, messages, vocal, invitations et
+    # économie. Comme +stats, il n'est rattaché à AUCUN module : le rattacher aux
+    # niveaux le ferait refuser sur un serveur sans niveaux, alors que ses autres
+    # catégories y fonctionnent.
+    "classement",
     "stats", "me", "level", "rank", "leaderboard-levels", "level-roles",
     "profile", "set-bio", "rep", "reputation", "repleaderboard", "voice-time",
     # Tickets, événements, invitations
