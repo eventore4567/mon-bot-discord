@@ -77,8 +77,11 @@ async def main() -> int:
     avant, texte = note(view), texts(view)
     print(texte)
     check(0 <= avant <= 30, f"serveur sans protection : note basse ({avant}/100)")
-    check(texte.count("Protection désactivée") == 8, "les 8 attaques sont annoncées comme non bloquées")
+    noms = ("Spam", "@everyone", "Pub", "Arnaques", "Insultes", "Raid", "Bots", "Nuke")
+    check(all(n in texte for n in noms) and texte.count("Protection désactivée") == 1,
+          "les 8 attaques sont nommées, et la cause commune n'est écrite qu'une fois")
     check("aucun message envoyé" in texte, "l'écran dit que c'est une simulation")
+    check(" — " not in texte, "vue courte : pas le scénario de chaque attaque")
     composants = sum(1 for t in view.children for _ in walk(t))
     check(composants <= 40, f"l'écran reste sous la limite Discord ({composants}/40 composants)")
     check(len(texte) <= 3900, f"le texte tient dans un message ({len(texte)} caractères)")
@@ -89,21 +92,66 @@ async def main() -> int:
     print(texte)
     check(apres > avant and apres >= 75, f"après « Activer la sécurité », la note monte ({avant} → {apres})")
     check("Protection désactivée" not in texte, "plus aucune attaque annoncée comme non protégée")
+    court = len(texte)
+    check("**Bloqué** ·" in texte and court <= 900,
+          f"serveur protégé : une seule ligne pour les attaques bloquées ({court} caractères)")
+
+    await bouton(view, "Détail").callback(interaction(bot))
+    await h.settle(idle=0.3, maximum=3)
+    detail = texts(view)
+    check(len(detail) > court and detail.count(" — ") == 9,
+          f"« Détail » montre les 9 scénarios ({len(detail)} caractères)")
+    await bouton(view, "Vue courte").callback(interaction(bot))
+    await h.settle(idle=0.3, maximum=3)
+    check(len(texts(view)) == court, "« Vue courte » revient à l'écran court")
     row = dict(await bot.db.get_automod(h.GID) or {})
     check(all(row.get(c) for c in ("antispam", "antiraid", "antinuke", "antiscam")),
           "les protections sont réellement enregistrées en base")
 
     await bouton(view, "Retour").callback(interaction(bot))
     await h.settle(idle=0.3, maximum=3)
-    check("# 🛡️ Sécurité" in texts(view) and "Votre serveur est protégé" in texts(view),
-          "« Retour » revient à l'écran simple, qui dit « Votre serveur est protégé »")
+    check("Sécurité" in texts(view) and "Le serveur est protégé" in texts(view),
+          "« Retour » revient à l'écran simple, qui dit « Le serveur est protégé »")
     await bouton(view, "Personnaliser").callback(interaction(bot))
     await h.settle(idle=0.3, maximum=3)
     menus = [i.placeholder for t in view.children for i in walk(t) if isinstance(i, discord.ui.Select)]
     check("Configurer une protection" in menus, "« Personnaliser » ouvre l'écran complet d'avant")
     await bouton(view, "Vue simple").callback(interaction(bot))
     await h.settle(idle=0.3, maximum=3)
-    check("# 🛡️ Sécurité" in texts(view), "« Vue simple » revient à l'écran simple")
+    check("Le serveur est protégé" in texts(view), "« Vue simple » revient à l'écran simple")
+
+    # 10/11/2026 : « les emojis ne sont pas animés ni personnalisés ». Avec le pack
+    # synchronisé, les deux écrans doivent porter les icônes SentriX, pas ✅ / ❌.
+    from utils import sentrix_emojis
+
+    sentrix_emojis.amorcer({
+        "sentrix_c_success": "<a:sentrix_c_success:1420000000000000111>",
+        "sentrix_c_error": "<a:sentrix_c_error:1420000000000000222>",
+        "sentrix_c_warning": "<a:sentrix_c_warning:1420000000000000333>",
+        "sentrix_c_security": "<a:sentrix_c_security:1420000000000000444>",
+        "sentrix_scan": "<:sentrix_scan:1420000000000000555>",
+        "sentrix_c_search": "<a:sentrix_c_search:1420000000000000666>",
+        "sentrix_c_return": "<a:sentrix_c_return:1420000000000000777>",
+        "sentrix_c_settings": "<a:sentrix_c_settings:1420000000000000888>",
+    })
+    try:
+        view = await SecurityCenterView(bot, guild, h.ADMIN_ID).build()
+        simple = texts(view)
+        icones = [i.emoji for t in view.children for i in walk(t)
+                  if isinstance(i, discord.ui.Button) and i.emoji is not None]
+        check("<a:sentrix_c_security:" in simple and "✅" not in simple and "▫️" not in simple,
+              "écran simple : icônes SentriX animées, plus aucun emoji Unicode")
+        check(icones and all(getattr(e, "id", None) for e in icones),
+              f"les boutons portent des icônes SentriX ({len(icones)} boutons)")
+        await bouton(view, "Tester ma sécurité").callback(interaction(bot))
+        await h.settle(idle=0.3, maximum=3)
+        crash = texts(view)
+        check("<a:sentrix_c_success:" in crash and "✅" not in crash,
+              "crash-test : « bloqué » porte l'icône SentriX animée")
+        check("<:sentrix_scan:" in crash and "🧪" not in crash,
+              "le titre du crash-test porte l'icône SentriX")
+    finally:
+        sentrix_emojis.reinitialiser()
 
     echecs = [label for ok, label in RESULTS if not ok]
     print(f"\n{len(RESULTS) - len(echecs)}/{len(RESULTS)} étapes réussies.")

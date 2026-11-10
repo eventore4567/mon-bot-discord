@@ -96,3 +96,42 @@ def test_le_crash_test_est_dans_la_vraie_page_securite():
     assert 'self.mode = "simple"' in centre
     assert "securite_simple.ecran_crash if self.mode == \"crash\" else securite_simple.ecran_simple" in centre
     assert 'button("Vue simple", simple)' in centre
+
+
+def test_les_centres_de_configuration_posent_les_icones_sentrix():
+    """10/11/2026 : « les emojis ne sont pas animés ni personnalisés ».
+
+    Ces vues construisent leurs TextDisplay et leurs boutons directement : la
+    traduction ne les atteignait pas et elles gardaient ✅ / ❌ / ⚠️ en Unicode.
+    """
+    import discord
+
+    from cogs.complete_setup_common import CompleteView
+    from utils import sentrix_emojis
+
+    sentrix_emojis.reinitialiser()
+    sentrix_emojis.amorcer({
+        "sentrix_c_success": "<a:sentrix_c_success:1420000000000000111>",
+        "sentrix_error": "<:sentrix_error:1420000000000000222>",
+        "sentrix_c_sync": "<a:sentrix_c_sync:1420000000000000333>",
+    })
+    try:
+        vue = CompleteView.__new__(CompleteView)
+        discord.ui.LayoutView.__init__(vue, timeout=None)
+        vue.bot = vue.guild = vue.owner_id = None
+        boite = discord.ui.Container()
+        boite.add_item(discord.ui.TextDisplay("✅ Bloqué\n❌ Spam et flood"))
+        bouton = discord.ui.Button(label="🔄 Relancer")
+        bouton.callback = lambda _i: None
+        boite.add_item(discord.ui.ActionRow(bouton))
+        vue.finish(boite)
+
+        textes = "\n".join(i.content for i in vue.walk_children() if isinstance(i, discord.ui.TextDisplay))
+        assert "<a:sentrix_c_success:1420000000000000111>" in textes and "✅" not in textes
+        assert "<:sentrix_error:1420000000000000222>" in textes and "❌" not in textes
+        # Un libellé de bouton ne peut pas porter de marquage : l'icône passe en emoji=.
+        actif = next(i for i in vue.walk_children()
+                     if isinstance(i, discord.ui.Button) and "Relancer" in str(i.label))
+        assert actif.label == "Relancer" and getattr(actif.emoji, "id", None) == 1420000000000000333
+    finally:
+        sentrix_emojis.reinitialiser()

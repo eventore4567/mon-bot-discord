@@ -64,7 +64,7 @@ def test_setup_inclut_les_etats_et_la_banniere():
 def test_six_modules_importants_restent_accessibles():
     routes = {e.path for e in slash_catalog.CATALOG}
     assert {"setup", "ban", "warn", "clear", "tickets open", "logs search",
-            "security antinuke", "music play", "duel fight"} <= routes
+            "security antinuke", "music play", "play trivia"} <= routes
 
 
 def test_lintercepteur_setup_se_compile():

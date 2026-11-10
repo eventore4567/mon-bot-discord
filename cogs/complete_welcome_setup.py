@@ -124,6 +124,32 @@ class WelcomeSetupView(CompleteView):
 
         picker.callback = choose
         box.add_item(discord.ui.ActionRow(picker))
+        # 10/11/2026 : ne demander que ce que SentriX ne peut pas décider seul. Un
+        # serveur qui a déjà désigné son salon d'arrivée à Discord répond déjà à la
+        # question : un bouton suffit, au lieu de parcourir la liste des salons.
+        if channel is None:
+            from utils import salons_evidents
+
+            besoin = "bienvenue" if self.kind == "welcome" else "depart"
+            propose = salons_evidents.salon_evident(self.guild, besoin)
+            if propose is not None:
+                async def adopter(i, cible=propose):
+                    await i.response.defer()
+                    await self.bot.db.set_guild_config(
+                        self.guild.id, self.kind + "_channel", cible.id,
+                    )
+                    await core.set_module_enabled(
+                        self.bot, self.guild.id, self.kind, True, actor_id=i.user.id,
+                    )
+                    await self.refresh(i)
+
+                box.add_item(discord.ui.Section(
+                    discord.ui.TextDisplay(
+                        "### Rien à choisir\n"
+                        + salons_evidents.pourquoi(self.guild, besoin, propose)
+                    ),
+                    accessory=button(f"Utiliser {propose.name}", adopter),
+                ))
         if self.kind == "welcome":
             from cogs.control_center_v3 import WelcomeAutoRolesSelect
             from utils import config_journal, welcome_autoroles

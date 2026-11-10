@@ -133,9 +133,9 @@ def test_prefix_and_slash_game_paths_reuse_the_same_command_callbacks():
     ):
         commands.update({command.name: command for command in cls.__cog_commands__})
     paths = {item.source: item.path for item in slash_catalog.CATALOG}
-    # tictactoe : masqué du « / » faute d'usage (utils/unused_commands.py) ; fight
-    # couvre le même cas, un duel publié.
-    for game in ("bossfight", "doors", "emojiorder", "duel", "trivia", "fight"):
+    # 10/11/2026 : tictactoe ET fight ont quitté le « / » faute d'usage. « duel »
+    # (/duel rps) couvre toujours le cas d'un duel publié.
+    for game in ("bossfight", "doors", "emojiorder", "duel", "trivia"):
         assert game in commands
         # Jeux à deux niveaux depuis le 22/10/2026 : /play, /duel, /race.
         assert paths[game].split()[0] in {"play", "duel", "race"}
