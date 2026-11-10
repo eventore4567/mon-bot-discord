@@ -141,10 +141,27 @@ async def test_parametres_sql_non_injectables():
     db.execute.assert_not_awaited()
 
 
-def test_les_commandes_slash_et_prefix_sont_hybrides():
+def test_la_fiche_invites_reste_simple_en_slash_et_prefix():
+    import inspect
+
     assert "i" in Invites.invites_cmd.aliases
-    assert "fc" in Invites.fakeconfig.aliases
-    assert "get_invite_detection_settings" in Invites.invites_cmd.callback.__code__.co_names
+    assert not hasattr(Invites, "fakeconfig")
+    assert not hasattr(Invites, "fakeinfo")
+    source = inspect.getsource(Invites.invites_cmd.callback)
+    assert [label for label in ("Réelles", "Reparties", "Bonus", "Fakes")
+            if f'name="{label}"' in source] == ["Réelles", "Reparties", "Bonus", "Fakes"]
+    assert "panels.Bouton" not in source
+    assert "boutons=" not in source
+    assert 'name="En attente"' not in source
+
+
+@pytest.mark.asyncio
+async def test_detection_renforcee_active_par_defaut_sans_nouveau_bouton():
+    db = Database(":memory:")
+    db.fetchone = AsyncMock(return_value=None)
+    settings = await db.get_invite_detection_settings(42)
+    assert settings["enabled"] is True
+    assert settings["min_account_age_days"] == 7
 
 
 @pytest.mark.asyncio
