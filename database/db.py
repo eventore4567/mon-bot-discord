@@ -773,7 +773,7 @@ CREATE TABLE IF NOT EXISTS member_invites (
 -- Configuration par serveur : une activation explicite avant de durcir le calcul.
 CREATE TABLE IF NOT EXISTS invite_detection_settings (
     guild_id INTEGER PRIMARY KEY,
-    enabled INTEGER NOT NULL DEFAULT 0,
+    enabled INTEGER NOT NULL DEFAULT 1,
     min_account_age_days INTEGER NOT NULL DEFAULT 7,
     block_self_invite INTEGER NOT NULL DEFAULT 1,
     require_avatar INTEGER NOT NULL DEFAULT 0,
@@ -2461,7 +2461,7 @@ class Database:
             (guild_id,),
         )
         defaults = {
-            "enabled": False,
+            "enabled": True,
             "min_account_age_days": 7,
             "block_self_invite": True,
             "require_avatar": False,
@@ -2552,10 +2552,9 @@ class Database:
 
     async def get_invite_breakdown(self, guild_id: int, inviter_id: int) -> dict:
         settings = await self.get_invite_detection_settings(guild_id)
-        legacy_threshold = (
-            settings["min_account_age_days"] if settings["enabled"]
-            else FAKE_INVITE_ACCOUNT_AGE_DAYS
-        )
+        # Historique antérieur à cette version : conserver le calcul d'origine
+        # (< 3 jours), même quand la détection renforcée est active aujourd'hui.
+        legacy_threshold = FAKE_INVITE_ACCOUNT_AGE_DAYS
         rows = await self.fetchall(
             "SELECT id,member_id,joined_at,left_at,account_age_days,fake_flags,"
             "required_role_id,role_confirmed,pending_until,quick_leave_seconds "
@@ -2599,7 +2598,7 @@ class Database:
         if row is None:
             return None
         settings = await self.get_invite_detection_settings(guild_id)
-        threshold = settings["min_account_age_days"] if settings["enabled"] else FAKE_INVITE_ACCOUNT_AGE_DAYS
+        threshold = FAKE_INVITE_ACCOUNT_AGE_DAYS
         data = self._invite_row_assessment(row, legacy_threshold=threshold, timestamp=now())
         return {
             **data,
