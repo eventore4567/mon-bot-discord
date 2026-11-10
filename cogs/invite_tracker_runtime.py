@@ -405,8 +405,9 @@ class InviteTrackerRuntime(commands.Cog):
         inviter_id = row["inviter_id"] if row and row["inviter_id"] else None
         language = await language_runtime.get_language(self.bot, member.guild.id)
         if inviter_id:
-            stats = await self.bot.db.get_invite_stats(member.guild.id, int(inviter_id))
-            count = int(stats.get("active", 0))
+            # Toujours afficher le nombre réellement crédité (hors fakes et départs).
+            breakdown = await self.bot.db.get_invite_breakdown(member.guild.id, int(inviter_id))
+            count = int(breakdown["credited"])
             if language == language_runtime.LANG_EN:
                 suffix = "invite" if count == 1 else "invites"
                 text = (
