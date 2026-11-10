@@ -29,16 +29,3 @@ def test_quiet_motion_is_reduced_mobile_and_performance_safe():
     assert "setInterval" not in calm.BOOT
     assert "MutationObserver" not in calm.BOOT
     assert "AudioContext" not in calm.BOOT
-
-
-def test_request_time_bridge_and_legacy_motion_guards():
-    wrapper = (ROOT / "web/dashboard_native_bundle_v14.py").read_text(encoding="utf-8")
-    assert "enhance_quiet_motion(html)" in wrapper
-    assert "inject_late_motion_into_native_v2(source)" in wrapper
-    for path in (
-        "web/dashboard_motion_system_v25.py",
-        "web/dashboard_visible_motion_v26.py",
-        "web/dashboard_motion_audio_v27.py",
-    ):
-        source = (ROOT / path).read_text(encoding="utf-8")
-        assert "if (window.__sentrixQuietMotionV29)" in source

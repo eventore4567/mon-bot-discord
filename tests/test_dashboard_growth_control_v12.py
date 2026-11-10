@@ -87,13 +87,3 @@ def test_growth_v12_wraps_build_app_only_once():
     assert getattr(wrapped, "_sentrix_growth_v12_routes", False) is True
     assert growth.install(dashboard) is True
     assert dashboard.build_app is wrapped
-
-
-@pytest.mark.skip(reason="Couche historique retirée du programme /app (refonte 2026-09, lot 1) : le finalizer sert un programme unique ; suppression de la couche au lot 7.")
-def test_finalizer_mentions_growth_v12_after_unified_adapter():
-    source = open("sentrix_dashboard_finalizer_v7.py", encoding="utf-8").read()
-    assert "dashboard_growth_control_v12.install(dashboard)" in source
-    assert "dashboard_growth_control_v12_fix.install(dashboard)" in source
-    assert source.index("dashboard_unified_adapter_v9.install(dashboard)") < source.index("dashboard_growth_control_v12.install(dashboard)")
-    assert source.index("dashboard_growth_control_v12.install(dashboard)") < source.index("dashboard_growth_control_v12_fix.install(dashboard)")
-    assert 'id="sentrix-growth-v12-js"' in source

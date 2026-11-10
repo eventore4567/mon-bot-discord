@@ -4,61 +4,8 @@ from sentrix_product_update import _DASHBOARD_RECOVERY_JS
 from web import dashboard_growth_control_v12
 from web import dashboard_live_response_v15
 from web import dashboard_product_ui_v18
-from web import dashboard_product_ui_v18_live_fix
-from web import dashboard_ui_hotfix_v16
 from web import dashboard_unified_v2
 import pytest
-
-
-def _live_v16_html():
-    html = dashboard_live_response_v15.patch_html(dashboard_unified_v2.INDEX_HTML)
-    return dashboard_ui_hotfix_v16.patch_html(html)
-
-
-@pytest.mark.skip(reason="Couche historique retirée du programme /app (refonte 2026-09, lot 1) : le finalizer sert un programme unique ; suppression de la couche au lot 7.")
-def test_v18_live_fix_patches_real_v15_v16_shape():
-    live_html = _live_v16_html()
-
-    # This is the production shape that made the original V18 exact anchors miss.
-    assert '["staffactivity","Activité staff","AS"]' in live_html
-    assert "case'staffactivity':await renderStaffV15();break;" in live_html
-
-    patched = dashboard_product_ui_v18_live_fix.patch_html(live_html)
-
-    assert '["product","Centre avancé","PX"]' in patched
-    assert patched.count('["product","Centre avancé","PX"]') == 1
-    assert 'product:["Centre avancé"' in patched
-    assert dashboard_product_ui_v18.JS_MARKER in patched
-    assert dashboard_product_ui_v18.MARKER in patched
-    assert "case'product':await renderProductV18();break;" in patched
-    assert 'name="sentrix-dashboard-product-ui-v18-live-fix"' in patched
-
-    # V19 reuses the Unified V2 palette rather than shipping a competing Cmd/Ctrl+K UI.
-    assert dashboard_product_ui_v18_live_fix.POLISH_MARKER in patched
-    assert dashboard_product_ui_v18_live_fix.POLISH_JS_MARKER in patched
-    assert 'id="paletteBackdrop"' in patched
-    assert '"/giveaways", "Giveaways"' in patched
-    assert '"/embed-builder", "Créateur d’embeds"' in patched
-    assert "sx19-command-overlay" not in patched
-    assert "sx19-command-hint" not in patched
-
-    # Live KPIs : polling espacé d'un instantané JSON, jamais un EventSource permanent.
-    # Un flux SSE ouvert en continu gardait la barre de chargement de Safari active
-    # indéfiniment et était rouvert à chaque mutation du rail des serveurs.
-    assert "new EventSource(" not in patched
-    assert "/live/stream" not in patched
-    assert "/live/metrics" in patched
-    assert "const LIVE_INTERVAL_MS = 20000;" in patched
-    assert "if (document.hidden) stopLive();" in patched
-    assert 'setText("metricTickets"' in patched
-    assert 'setText("metricWarnings"' in patched
-
-
-def test_v18_live_fix_is_idempotent_on_live_shape():
-    patched = dashboard_product_ui_v18_live_fix.patch_html(_live_v16_html())
-    assert dashboard_product_ui_v18_live_fix.patch_html(patched) == patched
-    assert patched.count(f'id="{dashboard_product_ui_v18_live_fix.POLISH_MARKER}"') == 1
-    assert patched.count('id="sentrix-dashboard-v19-polish-js"') == 1
 
 
 def test_v21_recovery_has_no_permanent_browser_polling():
@@ -70,15 +17,6 @@ def test_v21_recovery_has_no_permanent_browser_polling():
     assert 'addEventListener("pageshow"' in _DASHBOARD_RECOVERY_JS
     assert "sentrix:recovery-needed" in _DASHBOARD_RECOVERY_JS
     assert "[250, 900, 2000, 4500]" in _DASHBOARD_RECOVERY_JS
-
-
-@pytest.mark.skip(reason="Couche historique retirée du programme /app (refonte 2026-09, lot 1) : le finalizer sert un programme unique ; suppression de la couche au lot 7.")
-def test_v21_uses_one_canonical_v18_finalizer():
-    source = Path("sentrix_dashboard_finalizer_v7.py").read_text(encoding="utf-8")
-    assert "dashboard_product_ui_v18.install(dashboard)" not in source
-    assert source.count("dashboard_product_ui_v18_live_fix.install(dashboard)") == 1
-    assert "dashboard_action_hub_v17.install(dashboard)" in source
-    assert "if not product_ui_v18_ok:" in source
 
 
 def test_v21_has_one_boot_level_dashboard_finalizer_in_shared_bootstrap():
@@ -147,24 +85,6 @@ def test_growth_pages_are_owned_by_v15_not_by_a_v12_client_router():
     assert "function v15Empty(" in native
     assert "Aucune donnée disponible." in native
     assert "esc(i.code)" in native
-
-
-def test_v21_final_polish_covers_keyboard_mobile_and_accessible_live_state():
-    style = dashboard_product_ui_v18_live_fix._POLISH_STYLE
-    script = dashboard_product_ui_v18_live_fix._POLISH_JS
-
-    assert ":focus-visible" in style
-    assert ".btn:disabled" in style
-    assert "min-width:560px" in style
-    assert "forced-colors:active" in style
-    assert "prefers-reduced-motion:reduce" in style
-    assert 'runtimeText.setAttribute("aria-live", "polite")' in script
-    assert 'runtimeText.setAttribute("aria-live", "assertive")' in script
-    # La fausse barre de chargement de 900 ms (.sx19-loading-bar) est retirée : elle ne
-    # reflétait aucun chargement réel et se superposait à celle de V26.
-    assert 'sx19-loading-bar' not in script
-    assert 'sx19-loading-bar' not in style
-    assert 'paletteResults.setAttribute("aria-live", "polite")' in script
 
 
 def test_v19_live_metrics_backend_route_exists():

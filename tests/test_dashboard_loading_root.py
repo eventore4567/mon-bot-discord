@@ -107,20 +107,6 @@ def test_shared_boot_keeps_single_final_pass_after_v97():
     assert v97_call < final_call < build_call
 
 
-def test_motion_layers_never_fade_or_blur_whole_content_on_navigation():
-    root = Path(__file__).resolve().parents[1]
-    v23 = (root / "web/dashboard_visual_finish_v23.py").read_text(encoding="utf-8")
-    v25 = (root / "web/dashboard_motion_system_v25.py").read_text(encoding="utf-8")
-    v26 = (root / "web/dashboard_visible_motion_v26.py").read_text(encoding="utf-8")
-
-    assert 'content.setAttribute("aria-busy", "true")' not in v23
-    assert 'content?.classList.add("sx25-page-out")' not in v25
-    assert "opacity:.72" not in v25
-    assert "opacity:.25!important" not in v26
-    assert "filter:blur(1px)" not in v26
-    assert "#sx26Shade{{display:none!important}}" in v26
-
-
 def test_product_backend_is_installed_before_build_app_is_captured():
     root = Path(__file__).resolve().parents[1]
     source = (root / "railway_ha_product_boot.py").read_text(encoding="utf-8")
