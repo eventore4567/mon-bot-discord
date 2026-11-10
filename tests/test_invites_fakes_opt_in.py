@@ -60,21 +60,21 @@ async def test_auto_invite_est_fake():
 
 
 @pytest.mark.asyncio
-async def test_avatar_manquant_est_fake_si_regle_active_a_l_arrivee():
-    result = await stats([row(flags=4)], options=settings(require_avatar=0))
-    assert result["fake"] == 1  # critère figé au join, pas recalculé au changement
+async def test_avatar_par_defaut_est_un_indice_pas_un_fake():
+    result = await stats([row(flags=4)], options=settings(require_avatar=1))
+    assert (result["fake"], result["real"], result["credited"]) == (0, 1, 1)
 
 
 @pytest.mark.asyncio
-async def test_retour_est_fake_sans_perdre_historique():
+async def test_retour_ne_credite_pas_et_n_est_pas_un_fake():
     result = await stats([row(index=2, member=20, flags=8, joined=9000), row(index=1, member=20, left=4000)], options=settings())
-    assert (result["total"], result["fake"], result["left"], result["credited"]) == (1, 1, 0, 0)
+    assert (result["total"], result["fake"], result["left"], result["credited"]) == (1, 0, 0, 0)
 
 
 @pytest.mark.asyncio
-async def test_depart_rapide_est_fake_et_depart_mais_pas_double_soustrait():
+async def test_depart_rapide_est_seulement_reparti():
     result = await stats([row(flags=0, left=1300, quick=3600)], options=settings())
-    assert (result["left"], result["fake"], result["credited"]) == (1, 1, 0)
+    assert (result["left"], result["fake"], result["credited"]) == (1, 0, 0)
 
 
 @pytest.mark.asyncio
@@ -84,11 +84,11 @@ async def test_depart_normal_n_est_pas_fake():
 
 
 @pytest.mark.asyncio
-async def test_role_non_obtenu_bloque_credit_puis_confirme():
+async def test_role_non_obtenu_est_en_attente_pas_fake():
     pending = await stats([row(flags=0, role=999, verified=False)], options=settings())
     done = await stats([row(flags=0, role=999, verified=True)], options=settings())
-    assert (pending["fake"], pending["credited"]) == (1, 0)
-    assert (done["fake"], done["credited"]) == (0, 1)
+    assert (pending["pending"], pending["fake"], pending["credited"]) == (1, 0, 0)
+    assert (done["pending"], done["fake"], done["credited"]) == (0, 0, 1)
 
 
 @pytest.mark.asyncio
@@ -235,7 +235,7 @@ async def test_sqlite_persistant_role_validation_et_depart(tmp_path, monkeypatch
         )
         await db.record_invite_join(55, 101, 202, "abc", 20, fake_flags=0)
         before = await db.get_invite_breakdown(55, 202)
-        assert (before["total"], before["fake"], before["credited"]) == (1, 1, 0)
+        assert (before["total"], before["pending"], before["fake"], before["credited"]) == (1, 1, 0, 0)
 
         await db.mark_invite_role_confirmed(55, 101, 88)
         after = await db.get_invite_breakdown(55, 202)
@@ -246,3 +246,48 @@ async def test_sqlite_persistant_role_validation_et_depart(tmp_path, monkeypatch
         assert (left["left"], left["credited"]) == (1, 0)
     finally:
         await db.close()
+
+
+@pytest.mark.asyncio
+async def test_sans_role_obligatoire_compte_age_7_jours():
+    result = await stats([row(age=7, flags=0, role=0)], options=settings())
+    assert (result["real"], result["fake"], result["pending"], result["credited"]) == (1, 0, 0, 1)
+
+
+@pytest.mark.asyncio
+async def test_six_jours_sont_fakes_et_sept_jours_valides():
+    bot = Mock()
+    bot.db.get_invite_detection_settings = AsyncMock(return_value={
+        "enabled": True, "min_account_age_days": 7, "block_self_invite": True,
+        "require_avatar": False, "block_rejoins": False, "required_role_id": 0,
+        "credit_delay_hours": 0, "quick_leave_seconds": 3600,
+    })
+    bot.db.record_invite_join = AsyncMock()
+    cog = Invites(bot)
+    cog.find_used_invite = AsyncMock(return_value=None)
+    cog._journaliser_arrivee = AsyncMock()
+
+    async def simulate(days):
+        member = Mock(spec=discord.Member)
+        member.bot = False
+        member.id = 42 + days
+        member.guild = Mock(id=1)
+        member.created_at = discord.utils.utcnow() - timedelta(days=days, minutes=2)
+        member.avatar = None
+        member.roles = []
+        await cog.on_member_join(member)
+        return bot.db.record_invite_join.await_args.kwargs["fake_flags"]
+
+    assert await simulate(6) & 1 == 1
+    assert await simulate(7) & 1 == 0
+
+
+@pytest.mark.asyncio
+async def test_regles_default_n_necessitent_pas_role_ni_avatar():
+    db = Database(":memory:")
+    db.fetchone = AsyncMock(return_value=None)
+    cfg = await db.get_invite_detection_settings(44)
+    assert cfg["enabled"] is True
+    assert cfg["min_account_age_days"] == 7
+    assert cfg["required_role_id"] == 0
+    assert cfg["require_avatar"] is False
