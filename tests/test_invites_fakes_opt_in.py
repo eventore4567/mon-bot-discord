@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import os
 import time
-from unittest.mock import AsyncMock
+from datetime import timedelta
+from unittest.mock import AsyncMock, Mock
 
 import pytest
+import discord
 
 os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 
@@ -143,3 +145,57 @@ def test_les_commandes_slash_et_prefix_sont_hybrides():
     assert "i" in Invites.invites_cmd.aliases
     assert "fc" in Invites.fakeconfig.aliases
     assert "get_invite_detection_settings" in Invites.invites_cmd.callback.__code__.co_names
+
+
+@pytest.mark.asyncio
+async def test_nouvelle_arrivee_enregistre_age_auto_avatar_retour():
+    bot = Mock()
+    bot.db.get_invite_detection_settings = AsyncMock(return_value={
+        "enabled": True, "min_account_age_days": 7, "block_self_invite": True,
+        "require_avatar": True, "block_rejoins": True, "required_role_id": 0,
+        "credit_delay_hours": 24, "quick_leave_seconds": 3600,
+    })
+    bot.db.has_invite_join_history = AsyncMock(return_value=True)
+    bot.db.record_invite_join = AsyncMock()
+    cog = Invites(bot)
+    invite = Mock()
+    invite.inviter.id = 20
+    invite.code = "abc"
+    cog.find_used_invite = AsyncMock(return_value=invite)
+    cog._journaliser_arrivee = AsyncMock()
+    member = Mock(spec=discord.Member)
+    member.bot = False
+    member.id = 20
+    member.created_at = discord.utils.utcnow() - timedelta(days=2)
+    member.avatar = None
+    member.roles = []
+    member.guild = Mock(id=42)
+    await cog.on_member_join(member)
+    bot.db.record_invite_join.assert_awaited_once()
+    kwargs = bot.db.record_invite_join.await_args.kwargs
+    assert kwargs["fake_flags"] == 1 | 2 | 4 | 8
+    assert kwargs["quick_leave_seconds"] == 3600
+    assert kwargs["pending_until"] > int(time.time())
+    cog._journaliser_arrivee.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_role_recu_confirme_le_membre_sans_retroactivite():
+    bot = Mock()
+    bot.db.get_invited_by = AsyncMock(return_value={
+        "left_at": None, "required_role_id": 77, "role_confirmed": 0,
+    })
+    bot.db.mark_invite_role_confirmed = AsyncMock()
+    cog = Invites(bot)
+    before = Mock(spec=discord.Member)
+    before.bot = False
+    before.roles = []
+    after = Mock(spec=discord.Member)
+    after.bot = False
+    after.id = 20
+    after.guild = Mock(id=42)
+    role = Mock()
+    role.id = 77
+    after.roles = [role]
+    await cog.on_member_update(before, after)
+    bot.db.mark_invite_role_confirmed.assert_awaited_once_with(42, 20, 77)
