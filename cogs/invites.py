@@ -9,10 +9,9 @@ pour distinguer les invitations "actives" des invitations "reparties".
 Refonte visuelle (Phase 2, design premium/sombre) : /invites et /invite-leaderboard passent
 maintenant par utils/design_system et affichent un détail réelles/fake/reparties/bonus,
 façon InviteLogger. AUCUNE de ces valeurs n'est inventée :
-- "fake" est déduit de l'âge réel du compte au moment de son arrivée (member.created_at,
-  capturé et stocké dans member_invites.account_age_days) — jamais un compte n'est
-  qualifié de fake sans cette donnée réelle (une ligne sans donnée reste "réelle" par
-  défaut, pour ne jamais accuser à tort faute de preuve).
+- "fake" est un signal de suspicion calculé à partir de l'âge enregistré du
+  compte (seuil de 3 jours par défaut, 7 jours quand le mode renforcé est activé
+  par un administrateur), ou d'un départ sous 1 h en mode renforcé.
 - "bonus" est un ajustement 100% manuel et traçable, accordé explicitement par un membre
   du staff via /addbonusinvites — jamais généré automatiquement par le bot.
 Voir database/db.py::get_invite_breakdown() pour le détail du calcul.
@@ -302,12 +301,66 @@ class Invites(commands.Cog, name="Invites"):
             thumbnail=membre.display_avatar.url if design.get("show_avatars", True) else None,
             footer=design.get("footer"),
         )
-        # 02/11/2026 : fiche courte. Les invitations de comptes suspects restent
-        # exclues du total crédité, sans ligne ni note supplémentaire à lire.
+        # Les compteurs restent identiques sur les commandes slash (/invites)
+        # et préfixe (+i), car il s'agit de la même commande hybride.
         embed.add_field(name="Réelles", value=design_system.format_number(b["real"]), inline=True)
-        embed.add_field(name="Reparties", value=design_system.format_number(b["left"]), inline=True)
+        embed.add_field(name="Fakes", value=design_system.format_number(b["fake"]), inline=True)
+        embed.add_field(name="Départs", value=design_system.format_number(b["left"]), inline=True)
         embed.add_field(name="Bonus", value=design_system.format_number(b["bonus"]), inline=True)
-        await panels.envoyer(ctx, panels.depuis_embed(embed))
+
+        buttons: list[panels.Bouton] = []
+        author_perms = getattr(ctx.author, "guild_permissions", None)
+        can_configure = bool(
+            getattr(author_perms, "manage_guild", False)
+            or ctx.author.id == getattr(ctx.guild, "owner_id", None)
+        )
+        if can_configure:
+            settings = await self.bot.db.get_invite_detection_settings(ctx.guild.id)
+            initially_enabled = settings["enabled"]
+
+            async def toggle_detection(interaction: discord.Interaction) -> None:
+                permissions = getattr(interaction.user, "guild_permissions", None)
+                allowed = bool(
+                    interaction.guild_id == ctx.guild.id
+                    and (
+                        getattr(permissions, "manage_guild", False)
+                        or interaction.user.id == getattr(ctx.guild, "owner_id", None)
+                    )
+                )
+                if not allowed:
+                    await interaction.response.send_message(
+                        "Seul un administrateur du serveur peut modifier la détection.",
+                        ephemeral=True,
+                    )
+                    return
+                current = await self.bot.db.get_invite_detection_settings(ctx.guild.id)
+                if current["enabled"] != initially_enabled:
+                    await interaction.response.send_message(
+                        "Ce réglage a déjà changé. Relance /invites ou +i pour voir son état.",
+                        ephemeral=True,
+                    )
+                    return
+                new_state = not initially_enabled
+                await self.bot.db.set_invite_detection_enabled(ctx.guild.id, new_state)
+                status = "activée" if new_state else "désactivée"
+                await interaction.response.send_message(
+                    f"Détection renforcée {status} sur ce serveur. "
+                    "Relance /invites ou +i pour actualiser les statistiques.",
+                    ephemeral=True,
+                )
+
+            buttons.append(
+                panels.Bouton(
+                    libelle=(
+                        "Désactiver la détection renforcée"
+                        if initially_enabled else "Activer la détection renforcée (7 j)"
+                    ),
+                    style=discord.ButtonStyle.danger if initially_enabled else discord.ButtonStyle.success,
+                    custom_id=f"sentrix:invites:detection:{ctx.guild.id}:{int(initially_enabled)}",
+                    callback=toggle_detection,
+                )
+            )
+        await panels.envoyer(ctx, panels.depuis_embed(embed, boutons=buttons))
 
     @commands.hybrid_command(name="invite-leaderboard", description="Classement des membres ayant le plus invité (invitations créditées).")
     async def invite_leaderboard(self, ctx: commands.Context):
