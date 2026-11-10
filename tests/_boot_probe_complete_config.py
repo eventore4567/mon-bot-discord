@@ -30,6 +30,11 @@ from cogs.setup_experience_v74 import SentriXSetupV74
 from utils import spam_sensitivity
 
 
+#: 10/11/2026 : l'écran simple de la Sécurité et le crash-test portent la couleur de
+#: l'état (protégé / partiel / exposé), pas le bleu des autres centres.
+ETAT_SECURITE = {0x57F287, 0xF0A020, 0xED4245}
+
+
 def valid(view):
     assert view.total_children_count <= 40, view.total_children_count
     assert all(c["type"] in {1, 9, 10, 12, 13, 14, 17} for c in view.to_components())
@@ -40,7 +45,7 @@ def valid(view):
     )
     assert view.children[0].accent_colour is None or int(
         view.children[0].accent_colour
-    ) in {int(ACCENT), 0x5865F2}
+    ) in {int(ACCENT), 0x5865F2} | ETAT_SECURITE
 
 
 def find_button(view, label):
@@ -71,10 +76,21 @@ async def main():
                 type(facade)._build_page.__module__,
             )
         else:
+            # 10/11/2026 : la page s'ouvre sur l'écran simple ; l'écran complet (menu
+            # « Configurer une protection ») est derrière « Personnaliser ».
+            assert {"Activer la sécurité", "Tester ma sécurité", "Personnaliser"} <= set(labels) or {
+                "Sécurité active", "Tester ma sécurité", "Personnaliser"
+            } <= set(labels), (page, labels, type(facade)._build_security.__module__)
+            for mode in ("crash", "detail"):
+                facade.clear_items()
+                facade._securite_mode = mode
+                await facade._build_page(page)
+                valid(facade)
             assert any(
                 getattr(x, "placeholder", "") == "Configurer une protection"
                 for x in facade.walk_children()
-            ), (page, labels, type(facade)._build_security.__module__)
+            ), (page, type(facade)._build_security.__module__)
+            facade._securite_mode = "simple"
     for key, *_ in specs():
         view = await SecurityCenterView(bot, guild, h.ADMIN_ID, key).build()
         valid(view)
