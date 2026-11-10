@@ -291,3 +291,33 @@ async def test_regles_default_n_necessitent_pas_role_ni_avatar():
     assert cfg["min_account_age_days"] == 7
     assert cfg["required_role_id"] == 0
     assert cfg["require_avatar"] is False
+
+
+@pytest.mark.asyncio
+async def test_compte_recent_parti_ne_double_compte_pas_fake():
+    """Un départ doit apparaître uniquement dans Reparties, jamais aussi dans Fakes."""
+    result = await stats([row(age=2, flags=1, left=2000)], options=settings())
+    assert (result["total"], result["real"], result["left"], result["fake"], result["credited"]) == (1, 0, 1, 0, 0)
+
+
+@pytest.mark.asyncio
+async def test_ancien_fake_parti_ne_double_compte_pas_historique():
+    """Les invitations enregistrées avant le nouveau suivi ne doivent pas doubler."""
+    result = await stats([row(age=1, flags=None, left=2000)], options=None)
+    assert (result["total"], result["left"], result["fake"]) == (1, 1, 0)
+
+
+@pytest.mark.asyncio
+async def test_huit_arrivees_trois_departs_cinq_valides_zero_fake():
+    """Régression du cas réel : 8 joins, 3 leaves dont 1 ancien fake, 5 crédits."""
+    invites = [
+        row(index=i, member=100 + i, age=30, joined=1000 + i * 10,
+            left=(1500 + i) if i <= 3 else None,
+            flags=1 if i == 1 else 0)
+        for i in range(1, 9)
+    ]
+    result = await stats(invites, options=settings())
+    assert result == {
+        "total": 8, "left": 3, "fake": 0, "real": 5,
+        "pending": 0, "bonus": 0, "credited": 5,
+    }
