@@ -783,6 +783,21 @@ CREATE TABLE IF NOT EXISTS invite_detection_settings (
     quick_leave_seconds INTEGER NOT NULL DEFAULT 3600
 );
 
+-- 11/11/2026 : la mémoire des compteurs d'invitation de Discord.
+-- Le nombre d'utilisations d'un lien est tenu par DISCORD, pas par le bot : il monte même
+-- quand SentriX est éteint. Jusqu'ici ce compteur n'était gardé qu'en mémoire vive, et un
+-- redémarrage le réécrivait sur les valeurs du moment : les arrivées survenues pendant la
+-- coupure étaient avalées dans la nouvelle référence, définitivement invisibles.
+-- Conservé en base, il permet de retrouver au démarrage ce qui s'est passé sans nous.
+CREATE TABLE IF NOT EXISTS invite_code_meta (
+    guild_id INTEGER NOT NULL,
+    code TEXT NOT NULL,
+    label TEXT NOT NULL DEFAULT '',
+    last_seen_uses INTEGER NOT NULL DEFAULT 0,
+    last_seen_at INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (guild_id, code)
+);
+
 -- Invitations "bonus" : un ajustement manuel et traçable accordé par le staff (ex: un
 -- concours, un événement) — jamais une valeur inventée par le bot, toujours une action
 -- explicite d'un membre du staff, journalisée comme economy_transactions/reputation_history.
@@ -2403,6 +2418,7 @@ class Database:
         account_age_days: int | None = None, *, fake_flags: int | None = None,
         required_role_id: int = 0, role_confirmed: bool = False,
         pending_until: int = 0, quick_leave_seconds: int = 0,
+        joined_at: int | None = None,
     ):
         # Un événement d'arrivée répété ne peut attribuer un crédit supplémentaire.
         async with self._invite_join_lock:
@@ -2418,10 +2434,72 @@ class Database:
                 "(guild_id, member_id, inviter_id, invite_code, joined_at, account_age_days, "
                 "fake_flags, required_role_id, role_confirmed, pending_until, quick_leave_seconds) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                (guild_id, member_id, inviter_id, invite_code, now(), account_age_days,
+                (guild_id, member_id, inviter_id, invite_code,
+                 int(joined_at) if joined_at else now(), account_age_days,
                  fake_flags, required_role_id, int(bool(role_confirmed)), pending_until,
                  quick_leave_seconds),
             )
+
+    async def record_invite_arrivee_rattrapee(
+        self, guild_id: int, inviter_id: int, invite_code: str | None, *, parti: bool,
+        joined_at: int | None = None,
+    ) -> None:
+        """Une arrivée que Discord a comptée mais que SentriX n'a pas vue passer.
+
+        Le compteur du lien a monté pendant que le bot était hors ligne : l'arrivée est
+        certaine, seul le membre est inconnu. La ligne est donc enregistrée sans
+        member_id — jamais avec un identifiant inventé. ``parti`` est vrai quand le
+        membre n'est plus là : la ligne compte alors dans « Reparties » et ne crédite rien.
+        """
+        instant = int(joined_at) if joined_at else now()
+        await self.execute(
+            "INSERT INTO member_invites "
+            "(guild_id, member_id, inviter_id, invite_code, joined_at, left_at, "
+            "account_age_days, fake_flags, required_role_id, role_confirmed, "
+            "pending_until, quick_leave_seconds) "
+            "VALUES (?,NULL,?,?,?,?,NULL,0,0,0,0,0)",
+            (guild_id, inviter_id, invite_code, instant, instant if parti else None),
+        )
+
+    async def get_invite_code_counters(self, guild_id: int) -> dict[str, dict]:
+        """Le dernier compteur connu de chaque lien, et la date où on l'a lu."""
+        rows = await self.fetchall(
+            "SELECT code,last_seen_uses,last_seen_at FROM invite_code_meta WHERE guild_id=?",
+            (guild_id,),
+        )
+        return {
+            str(r["code"]): {
+                "uses": int(r["last_seen_uses"] or 0),
+                "at": int(r["last_seen_at"] or 0),
+            }
+            for r in rows
+        }
+
+    async def save_invite_code_counters(self, guild_id: int, compteurs: dict[str, int]) -> None:
+        """Écrit la référence. Le libellé éventuel du lien est conservé."""
+        instant = now()
+        for code, uses in compteurs.items():
+            await self.execute(
+                "INSERT INTO invite_code_meta(guild_id,code,label,last_seen_uses,last_seen_at) "
+                "VALUES(?,?,COALESCE((SELECT label FROM invite_code_meta WHERE guild_id=? AND code=?),''),?,?) "
+                "ON CONFLICT(guild_id,code) DO UPDATE SET "
+                "last_seen_uses=excluded.last_seen_uses,last_seen_at=excluded.last_seen_at",
+                (guild_id, str(code), guild_id, str(code), int(uses), instant),
+            )
+
+    async def membres_sans_arrivee_connue(self, guild_id: int, member_ids: list[int]) -> set[int]:
+        """Parmi ces membres, ceux dont SentriX n'a aucune ligne d'arrivée."""
+        connus: set[int] = set()
+        for debut in range(0, len(member_ids), 400):
+            lot = member_ids[debut:debut + 400]
+            marques = ",".join("?" for _ in lot)
+            rows = await self.fetchall(
+                f"SELECT DISTINCT member_id FROM member_invites "
+                f"WHERE guild_id=? AND member_id IN ({marques})",
+                (guild_id, *lot),
+            )
+            connus.update(int(r["member_id"]) for r in rows if r["member_id"] is not None)
+        return {int(m) for m in member_ids} - connus
 
     async def mark_invite_left(self, guild_id: int, member_id: int):
         await self.execute(
