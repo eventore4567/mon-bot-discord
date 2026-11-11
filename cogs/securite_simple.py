@@ -1,10 +1,10 @@
-"""Écran simple de la page Sécurité + crash-test (10/11/2026).
+"""Écran simple de la page Sécurité (10/11/2026).
 
 « Trop compliqué, garde les bannières, juste un bouton pour activer la sécurité à la
 place de tout configurer. » La page Sécurité de /setup s'ouvre sur cet écran : l'état
-en une phrase, les huit protections recommandées, un bouton « Activer la sécurité »,
-et « Tester ma sécurité » (crash-test, utils/crash_test.py). L'écran complet d'avant
-(une protection à la fois, seuils, exceptions) reste derrière « Personnaliser ».
+en une phrase, les huit protections recommandées et un bouton « Activer la sécurité ».
+L'écran complet d'avant (une protection à la fois, seuils, exceptions) reste derrière
+« Personnaliser ».
 
 Ces écrans vivent dans SecurityCenterView (cogs/complete_security_setup.py), la vue
 réellement affichée par /setup → Sécurité.
@@ -71,7 +71,7 @@ async def activer_recommandees(view) -> list[str]:
 COULEUR = 0x5865F2
 
 
-def _conteneur(view, titre: str, texte: str) -> discord.ui.Container:
+def conteneur(view, titre: str, texte: str) -> discord.ui.Container:
     from cogs import setup_components_v73 as v73
 
     box = discord.ui.Container(accent_colour=discord.Colour(COULEUR))
@@ -128,22 +128,17 @@ async def ecran_simple(view) -> discord.ui.Container:
     else:
         etat = ("**Aucune protection active.** « Activer la sécurité » protège le serveur en un clic.\n"
                 "-# " + ", ".join(courts[cle] for cle in RECOMMANDEES) + ".")
-    box = _conteneur(view, icons.titre("security", "Sécurité"), etat)
+    box = conteneur(view, icons.titre("security", "Sécurité"), etat)
     permissions = view.guild.me.guild_permissions if view.guild.me else discord.Permissions.none()
     inertes, degradees = diagnostic(permissions, set(actives))
     if inertes or degradees:
         box.add_item(discord.ui.TextDisplay(
-            f"⚠️ **{len(inertes) + len(degradees)} protection(s) bridée(s)** par des permissions manquantes "
-            "du rôle SentriX. « Tester ma sécurité » dit lesquelles."
+            f"⚠️ **{len(inertes) + len(degradees)} protection(s) bridée(s)** par des permissions "
+            "manquantes du rôle SentriX. « Personnaliser » dit lesquelles."
         ))
 
     async def activer(interaction):
         await _activer(view, interaction)
-
-    async def tester(interaction):
-        view.mode = "crash"
-        view.crash_detail = False
-        await view.refresh(interaction)
 
     async def personnaliser(interaction):
         view.mode = "detail"
@@ -157,75 +152,10 @@ async def ecran_simple(view) -> discord.ui.Container:
     box.add_item(discord.ui.ActionRow(
         _bouton("Sécurité active" if not manquantes else "Activer la sécurité", activer,
                 discord.ButtonStyle.success, icone="security", disabled=not manquantes),
-        _bouton("Tester ma sécurité", tester, discord.ButtonStyle.primary, icone="scan"),
-    ))
-    box.add_item(discord.ui.ActionRow(
         _bouton("Personnaliser", personnaliser, icone="settings"),
         _bouton("Mots bloqués", mots),
     ))
     return box
 
 
-async def ecran_crash(view) -> discord.ui.Container:
-    """Neuf attaques simulées contre la configuration réelle du serveur.
-
-    Par défaut, court : ce qui est bloqué tient sur une ligne, et seuls les points
-    faibles sont détaillés — un écran de neuf scénarios détaillés ne se lit pas.
-    « Détail » montre chaque attaque avec son scénario.
-    """
-    from utils import crash_test
-
-    actuels = await etats(view)
-    resultats = await crash_test.lancer(view.bot, view.guild, {cle for cle, actif in actuels.items() if actif})
-    valeur = crash_test.note(resultats)
-    bloquees = [r for r in resultats if r.etat == crash_test.BLOQUE]
-    soucis = [r for r in resultats if r.etat != crash_test.BLOQUE]
-    detaille = bool(getattr(view, "crash_detail", False))
-
-    box = _conteneur(
-        view, icons.titre("scan", f"Crash-test · {valeur}/100"),
-        f"**{crash_test.verdict(valeur)}** {len(bloquees)} attaque(s) bloquée(s) sur {len(resultats)}.",
-    )
-    if detaille:
-        lignes = [f"{r.icone} **{r.titre}** — {r.attaque}.\n-# {r.detail}" for r in resultats]
-    else:
-        lignes = []
-        if bloquees:
-            lignes.append("✅ **Bloqué** · " + ", ".join(r.court for r in bloquees))
-        # Les points faibles qui ont la MÊME cause tiennent sur une ligne : sur un
-        # serveur sans protection, les huit disaient la même phrase huit fois.
-        groupes: dict[tuple[str, str], list] = {}
-        for r in soucis:
-            groupes.setdefault((r.icone, r.detail), []).append(r)
-        for (icone, detail), membres in groupes.items():
-            if len(membres) == 1:
-                lignes.append(f"{icone} **{membres[0].titre}**\n-# {detail}")
-            else:
-                noms = ", ".join(r.court for r in membres)
-                lignes.append(f"{icone} **{noms}**\n-# {detail}")
-    lignes.append("-# Simulation : aucun message envoyé, personne n'est sanctionné.")
-    box.add_item(discord.ui.TextDisplay("\n".join(lignes)))
-
-    a_activer = [cle for cle in RECOMMANDEES if not actuels[cle]]
-
-    async def corriger(interaction):
-        await _activer(view, interaction)  # l'écran recalcule le test : la note monte
-
-    async def basculer(interaction):
-        view.crash_detail = not detaille
-        await view.refresh(interaction)
-
-    async def retour(interaction):
-        view.mode = "simple"
-        await view.refresh(interaction)
-
-    box.add_item(discord.ui.ActionRow(
-        _bouton("Activer la sécurité" if a_activer else "Protections actives", corriger,
-                discord.ButtonStyle.success, icone="security", disabled=not a_activer),
-        _bouton("Vue courte" if detaille else "Détail", basculer, icone="search"),
-        _bouton("Retour", retour, icone="return"),
-    ))
-    return box
-
-
-__all__ = ["PROTECTION_RECOMMANDEE", "RECOMMANDEES", "activer_recommandees", "ecran_crash", "ecran_simple", "etats"]
+__all__ = ["PROTECTION_RECOMMANDEE", "RECOMMANDEES", "activer_recommandees", "conteneur", "ecran_simple", "etats"]

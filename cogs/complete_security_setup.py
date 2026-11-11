@@ -118,7 +118,7 @@ class SecurityCenterView(CompleteView):
         self.feature = feature
         self.section = "main"
         # 10/11/2026 : la page s'ouvre sur l'écran simple (un bouton « Activer la
-        # sécurité » + crash-test) ; l'écran complet est derrière « Personnaliser ».
+        # sécurité ») ; l'écran complet est derrière « Personnaliser ».
         self.mode = "simple"
 
     async def refresh(self, i):
@@ -140,8 +140,7 @@ class SecurityCenterView(CompleteView):
         if self.feature is None and self.mode != "detail":
             from cogs import securite_simple
 
-            ecran = securite_simple.ecran_crash if self.mode == "crash" else securite_simple.ecran_simple
-            return self.finish(await ecran(self))
+            return self.finish(await securite_simple.ecran_simple(self))
         if self.feature is None:
             from cogs import setup_security_choice_v75 as choices
 
@@ -295,10 +294,11 @@ class SecurityCenterView(CompleteView):
         enabled, _advanced = await policy._security_center_state(
             self.bot, self.guild.id, key
         )
-        box = heading(
-            icons.titre("security", label),
-            f"{text}\n\n**État : {'Activé' if enabled else 'Désactivé'}**",
-        )
+        # 11/11/2026 : la bande de bannière manquait sur cette page, et « État : Activé »
+        # répétait ce que le bouton Activer/Désactiver dit déjà.
+        from cogs import securite_simple
+
+        box = securite_simple.conteneur(self, icons.titre("security", label), text)
         from utils.protection_requirements import diagnostic
 
         perms = (
@@ -308,26 +308,20 @@ class SecurityCenterView(CompleteView):
         )
         blocked, degraded = diagnostic(perms, {key} if enabled else set())
         for _, missing in blocked:
-            box.add_item(
-                discord.ui.TextDisplay(
-                    "**Protection inopérante :** permissions manquantes — "
-                    + ", ".join(missing)
-                )
-            )
+            box.add_item(discord.ui.TextDisplay(
+                "⚠️ **Sans effet** : il manque à SentriX " + ", ".join(missing) + "."
+            ))
         for _, missing in degraded:
-            box.add_item(
-                discord.ui.TextDisplay(
-                    "**Protection dégradée :** permissions manquantes — "
-                    + ", ".join(missing)
-                )
-            )
+            box.add_item(discord.ui.TextDisplay(
+                "⚠️ **Limitée** : il manque à SentriX " + ", ".join(missing) + "."
+            ))
         if key == "antinuke":
             from cogs.security_v2_runtime import get_policy
 
             limits = await get_policy(self.bot, self.guild.id)
             box.add_item(
                 discord.ui.TextDisplay(
-                    f"**Seuil partagé :** {limits['action_threshold']} actions en {limits['window_seconds']} s\nCouvre bans, expulsions, salons, rôles, webhooks et modifications du serveur. La restauration après attaque utilise les instantanés disponibles ; elle ne recrée pas l’historique des messages."
+                    f"**Seuil :** {limits['action_threshold']} actions destructrices en {limits['window_seconds']} s."
                 )
             )
         elif key == "antispam":
@@ -341,7 +335,7 @@ class SecurityCenterView(CompleteView):
 
             box.add_item(
                 discord.ui.TextDisplay(
-                    f"**Seuils actuels :** {PINGS_TOTAL} mentions au total ou {PINGS_MEME_CIBLE} vers la même cible sur {PINGS_FENETRE} s. Les mentions @everyone et @here gardent leur protection native existante."
+                    f"**Seuil :** {PINGS_TOTAL} mentions, ou {PINGS_MEME_CIBLE} vers la même personne, en {PINGS_FENETRE} s."
                 )
             )
         elif key == "anticaps":
@@ -349,13 +343,13 @@ class SecurityCenterView(CompleteView):
 
             box.add_item(
                 discord.ui.TextDisplay(
-                    f"**Seuil actuel :** plus de {CAPS_RATIO * 100:g} % de majuscules à partir de {CAPS_LETTRES_MIN} lettres."
+                    f"**Seuil :** plus de {CAPS_RATIO * 100:g} % de majuscules dès {CAPS_LETTRES_MIN} lettres."
                 )
             )
         elif key == "antiemoji":
             box.add_item(
                 discord.ui.TextDisplay(
-                    "**Seuil actuel :** plus de 10 emojis dans un message."
+                    "**Seuil :** plus de 10 emojis dans un message."
                 )
             )
 
@@ -391,14 +385,7 @@ class SecurityCenterView(CompleteView):
                 )
             await self.refresh(i)
 
-        setting_line(
-            box,
-            "Protection",
-            "Active sur ce serveur." if enabled else "Inactive sur ce serveur.",
-            button(
-                "Désactiver" if enabled else "Activer", toggle, danger=bool(enabled)
-            ),
-        )
+        actions = [button("Désactiver" if enabled else "Activer", toggle, danger=bool(enabled))]
         supports = key in policy._SECURITY_POLICY_LABELS
         if self.section == "exceptions" and supports:
             await self.filter_exceptions(box, key, policy)
@@ -452,36 +439,21 @@ class SecurityCenterView(CompleteView):
                 async def edit_limits(i):
                     await i.response.send_modal(SecurityLimitsModal(self, limits))
 
-                setting_line(
-                    box,
-                    "Limites",
-                    "Choisir le seuil de déclenchement.",
-                    button("Configurer les limites", edit_limits),
-                )
+                actions.append(button("Limites", edit_limits))
             if supports or key == "antinuke":
 
                 async def sanctions(i):
                     self.section = "sanctions"
                     await self.refresh(i)
 
-                setting_line(
-                    box,
-                    "Sanctions",
-                    "Consulter la réponse et les récidives.",
-                    button("Voir et régler les sanctions", sanctions),
-                )
+                actions.append(button("Sanctions", sanctions))
             if supports:
 
                 async def exceptions(i):
                     self.section = "exceptions"
                     await self.refresh(i)
 
-                setting_line(
-                    box,
-                    "Exceptions",
-                    "Choisir les rôles et salons concernés.",
-                    button("Rôles et salons", exceptions),
-                )
+                actions.append(button("Exceptions", exceptions))
             if key == "antiraid":
                 from cogs import security_verification_v71 as v71
 
@@ -532,15 +504,14 @@ class SecurityCenterView(CompleteView):
                     self.section = "trusted"
                     await self.refresh(i)
 
-                setting_line(
-                    box,
-                    "Membres de confiance",
-                    "Exempter les personnes autorisées.",
-                    button("Membres de confiance anti-nuke", whitelist),
-                )
-                if self.section == "trusted":
-                    await self.nuke_whitelist(box)
-        box.add_item(discord.ui.ActionRow(button("Toutes les protections", back)))
+                actions.append(button("Membres de confiance", whitelist))
+        # Discord n'accepte que cinq boutons par rangée ; « Toutes les protections »
+        # ferme toujours la liste.
+        actions.append(button("Toutes les protections", back))
+        for debut in range(0, len(actions), 5):
+            box.add_item(discord.ui.ActionRow(*actions[debut:debut + 5]))
+        if self.feature == "antinuke" and self.section == "trusted":
+            await self.nuke_whitelist(box)
         if self.section not in {"main", "trusted"}:
 
             async def detail(i):
