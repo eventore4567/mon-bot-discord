@@ -22,8 +22,10 @@ import datetime as dt
 import json
 import logging
 import os
+import atexit
 import pathlib
 import re
+import shutil
 import sys
 import tempfile
 from typing import Any
@@ -34,6 +36,11 @@ if str(ROOT) not in sys.path:
 
 # --- Environnement AVANT tout import du dépôt (config.DATABASE_PATH est figé au 1er import).
 _TMP = tempfile.mkdtemp(prefix="sentrix-e2e-")
+# 11/11/2026 : ce dossier n'était jamais supprimé. Chaque import du harnais en
+# laissait un de ~6 Mo derrière lui, et la suite complète en lance un par
+# processus : 5 630 dossiers et 30 Go de disque saturé, jusqu'à ce que plus
+# aucun test ne puisse écrire. Une base de test jetable doit se jeter.
+atexit.register(shutil.rmtree, _TMP, True)
 os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 os.environ.setdefault("SENTRIX_TRADUCTION_AUTO", "0")  # utils/english_fallback : pas de réseau
 os.environ.setdefault("SENTRIX_MUSIC_CATALOG", "0")  # utils/music/catalog : pas de réseau
