@@ -48,18 +48,19 @@ async def test_ancien_historique_age_3_jours_avant_activation():
 
 
 @pytest.mark.asyncio
-async def test_age_7_jours_classe_sur_l_arrivee():
-    """11/11/2026 : un compte jugé trop récent est signalé, plus retiré du crédit.
+async def test_le_seuil_applique_est_celui_du_serveur_aujourd_hui():
+    """11/11/2026 : SentriX affichait 17 là où InviteLogger affichait 18.
 
-    InviteLogger affichait 18 là où SentriX affichait 17, sur les mêmes arrivées :
-    un soupçon suffisait à retirer une invitation réellement faite. Le serveur qui
-    veut l'ancien calcul le demande explicitement (``exclude_fakes``).
+    Le seuil de 7 jours s'appliquait partout alors que personne ne l'avait choisi,
+    et chaque faux positif retirait une invitation réellement faite. Le serveur qui
+    règle 7 jours garde ce comportement ; par défaut le seuil est de 3 jours, et
+    corriger le seuil corrige aussi l'historique (l'âge enregistré, lui, ne bouge pas).
     """
-    result = await stats([row(age=4, flags=1)], options=settings())
-    assert (result["real"], result["fake"], result["credited"]) == (0, 1, 1)
+    severe = await stats([row(age=4, flags=1)], options=settings(min_account_age_days=7))
+    assert (severe["real"], severe["fake"], severe["credited"]) == (0, 1, 0)
 
-    strict = await stats([row(age=4, flags=1)], options=settings(exclude_fakes=1))
-    assert (strict["real"], strict["fake"], strict["credited"]) == (0, 1, 0)
+    defaut = await stats([row(age=4, flags=1)], options=settings(min_account_age_days=3))
+    assert (defaut["real"], defaut["fake"], defaut["credited"]) == (1, 0, 1)
 
 
 @pytest.mark.asyncio
@@ -116,13 +117,10 @@ async def test_validation_apres_delai_automatique():
 
 
 @pytest.mark.asyncio
-async def test_plusieurs_signaux_restent_signales_sans_retirer_le_credit():
+async def test_une_auto_invitation_reste_un_fake_quel_que_soit_l_age():
+    """Le compte a 60 jours : seul le bit « auto-invitation » peut encore l'accuser."""
     result = await stats([row(flags=1 | 2 | 4 | 8)], options=settings(), bonus=2)
-    assert (result["total"], result["fake"], result["real"], result["credited"]) == (1, 1, 0, 3)
-
-    # Le serveur qui a demandé d'écarter les suspectes ne garde que le bonus.
-    strict = await stats([row(flags=1 | 2 | 4 | 8)], options=settings(exclude_fakes=1), bonus=2)
-    assert strict["credited"] == 2
+    assert (result["total"], result["fake"], result["real"], result["credited"]) == (1, 1, 0, 2)
 
 
 @pytest.mark.asyncio
@@ -165,7 +163,7 @@ def test_la_fiche_invites_reste_simple_en_slash_et_prefix():
     # 11/11/2026 : les quatre chiffres isolés ne disaient pas d'où venait le total
     # crédité. Ils tiennent dans une ligne de calcul sous le chiffre, qui part
     # du total des arrivées et retranche ce qui n'est pas crédité.
-    assert "detail_du_calcul(b)" in source
+    assert "texte_du_resume(b)" in source
     assert "embed.add_field" not in source, "la fiche n'a plus de champs séparés"
     assert "panels.Bouton" not in source
     assert "boutons=" not in source
@@ -177,7 +175,9 @@ async def test_detection_renforcee_active_par_defaut_sans_nouveau_bouton():
     db.fetchone = AsyncMock(return_value=None)
     settings = await db.get_invite_detection_settings(42)
     assert settings["enabled"] is True
-    assert settings["min_account_age_days"] == 7
+    # 11/11/2026 : 3 jours, pas 7 — un seuil que personne n'avait choisi accusait
+    # des comptes normaux, et chaque fake retire une invitation à son auteur.
+    assert settings["min_account_age_days"] == 3
 
 
 @pytest.mark.asyncio
@@ -304,7 +304,7 @@ async def test_regles_default_n_necessitent_pas_role_ni_avatar():
     db.fetchone = AsyncMock(return_value=None)
     cfg = await db.get_invite_detection_settings(44)
     assert cfg["enabled"] is True
-    assert cfg["min_account_age_days"] == 7
+    assert cfg["min_account_age_days"] == 3
     assert cfg["required_role_id"] == 0
     assert cfg["require_avatar"] is False
 
@@ -335,7 +335,7 @@ async def test_huit_arrivees_trois_departs_cinq_valides_zero_fake():
     result = await stats(invites, options=settings())
     assert result == {
         "total": 8, "left": 3, "fake": 0, "real": 5,
-        "pending": 0, "rejoined": 0, "bonus": 0, "fakes_deduits": False, "credited": 5,
+        "pending": 0, "rejoined": 0, "bonus": 0, "credited": 5,
     }
     # Les compteurs couvrent exactement le total : aucune arrivée ne disparaît.
     assert sum(result[c] for c in ("left", "fake", "pending", "rejoined", "real")) == result["total"]

@@ -9,12 +9,11 @@ pour distinguer les invitations "actives" des invitations "reparties".
 Refonte visuelle (Phase 2, design premium/sombre) : /invites et /invite-leaderboard passent
 maintenant par utils/design_system et affichent un détail réelles/fake/reparties/bonus,
 façon InviteLogger. AUCUNE de ces valeurs n'est inventée :
-- "fake" est un signal de suspicion calculé à partir de l'âge enregistré du
-  compte (seuil de 3 jours par défaut, 7 jours quand le mode renforcé est activé
-  par un administrateur), ou d'un départ sous 1 h en mode renforcé. Depuis le
-  11/11/2026 c'est un SIGNAL, pas une sanction : une arrivée suspecte reste
-  créditée, comme chez InviteLogger, tant que le serveur n'a pas explicitement
-  demandé le contraire (réglage "exclude_fakes").
+- "fake" est calculé à partir de l'âge enregistré du compte à son arrivée,
+  comparé au seuil du serveur (3 jours par défaut depuis le 11/11/2026 ; il était
+  à 7, ce qui accusait des comptes normaux et retirait des invitations réelles).
+  Une auto-invitation compte aussi comme fake. Comme chez InviteLogger, un fake
+  est retranché du total crédité.
 - "bonus" est un ajustement 100% manuel et traçable, accordé explicitement par un membre
   du staff via /addbonusinvites — jamais généré automatiquement par le bot.
 Voir database/db.py::get_invite_breakdown() pour le détail du calcul.
@@ -53,31 +52,27 @@ SUSPECT_ACCOUNT_AGE_DAYS = 3
 INVITE_PREFETCH_INTERVAL = 0.5
 
 
-#: 11/11/2026 : « 17 créditées » au-dessus de « Réelles 17, Reparties 5, Fakes 1 »
-#: n'expliquait rien — on ne pouvait pas vérifier d'où venait le 17, et le total des
-#: arrivées n'était écrit nulle part. La fiche montre maintenant la soustraction,
-#: et seulement les lignes réellement soustraites : une suspecte est signalée, pas
-#: retirée, tant que le serveur n'a pas demandé le contraire.
-def detail_du_calcul(b: dict) -> str:
-    """« 23 arrivées · −5 reparties · 1 suspecte signalée » : le calcul se lit en entier."""
-    strict = bool(b.get("fakes_deduits"))
-    retraits = [
-        (int(b.get("left", 0)), "repartie", "reparties", True),
-        (int(b.get("fake", 0)), "suspecte", "suspectes", strict),
-        (int(b.get("pending", 0)), "en attente", "en attente", True),
-        (int(b.get("rejoined", 0)), "déjà comptée", "déjà comptées", strict),
+#: 11/11/2026 : le résumé est revenu, en français et dans l'ordre d'InviteLogger.
+#: Quatre lignes qui s'additionnent valent mieux qu'un chiffre seul : on peut
+#: vérifier d'où vient le total au lieu de devoir croire le bot sur parole.
+#: « Arrivées − Reparties − Fakes + Bonus » se lit, se recompte, et tombe juste.
+def resume_du_calcul(b: dict) -> list[tuple[str, int]]:
+    """Les lignes du résumé, dans l'ordre du calcul. Les cas rares seulement s'ils existent."""
+    lignes = [
+        ("Arrivées", int(b.get("total", 0))),
+        ("Reparties", int(b.get("left", 0))),
+        ("Fakes", int(b.get("fake", 0))),
     ]
-    total = int(b.get("total", 0))
-    morceaux = [f"**{total}** arrivée{'s' if total > 1 else ''}"]
-    for nombre, singulier, pluriel, soustrait in retraits:
-        if not nombre:
-            continue
-        mot = singulier if nombre == 1 else pluriel
-        morceaux.append(f"−{nombre} {mot}" if soustrait else f"{nombre} {mot} signalée{'s' if nombre > 1 else ''}")
-    bonus = int(b.get("bonus", 0))
-    if bonus:
-        morceaux.append(f"+{bonus} bonus")
-    return "-# " + " · ".join(morceaux)
+    # Cette ligne ne concerne que les serveurs qui ont réglé un délai ou un rôle
+    # obligatoire : l'afficher à zéro partout ne ferait qu'alourdir la fiche.
+    if int(b.get("pending", 0)):
+        lignes.append(("En attente", int(b["pending"])))
+    lignes.append(("Bonus", int(b.get("bonus", 0))))
+    return lignes
+
+
+def texte_du_resume(b: dict) -> str:
+    return "\n".join(f"**{nom}** · {valeur}" for nom, valeur in resume_du_calcul(b))
 
 
 class Invites(commands.Cog, name="Invites"):
@@ -365,8 +360,8 @@ class Invites(commands.Cog, name="Invites"):
         embed = design_system.create_embed(
             title=f"{style['emoji']} Invitations de {membre.display_name}",
             description=(
-                f"**{design_system.format_number(b['credited'])}** invitation(s) créditée(s).\n"
-                + detail_du_calcul(b)
+                f"**{design_system.format_number(b['credited'])}** invitation(s) créditée(s) au total.\n\n"
+                f"**Résumé**\n{texte_du_resume(b)}"
             ),
             colour=design.get("primary_color", style["colour"]),
             user=membre if design.get("show_avatars", True) else None,
@@ -540,20 +535,15 @@ class Invites(commands.Cog, name="Invites"):
         last_ts = int(latest["ts"] or 0) if latest else 0
         # Les cinq compteurs s'additionnent pour donner le total brut : sans la
         # ligne « Revenues », un membre revenu manquait à l'appel.
-        # 11/11/2026 : le détail dit maintenant ce qui est réellement retiré du
-        # crédit — une suspecte est signalée, pas déduite, sauf réglage du serveur.
-        strict = bool(b.get("fakes_deduits"))
-        suspectes = "retirées du crédit" if strict else "signalées, toujours créditées"
-        formule = "réelles + bonus" if strict else "arrivées encore présentes + bonus"
         description = (
             f"Total des arrivées : **{b['total']}**\n"
             f"Réelles : **{b['real']}**\n"
             f"Reparties : **{b['left']}**\n"
-            f"Suspectes : **{b['fake']}** ({suspectes})\n"
+            f"Fakes : **{b['fake']}**\n"
             f"En attente : **{b.get('pending', 0)}**\n"
             f"Revenues (déjà comptées) : **{b.get('rejoined', 0)}**\n"
             f"Bonus staff : **{b['bonus']}**\n"
-            f"Total crédité : **{b['credited']}** ({formule})\n"
+            f"Total crédité : **{b['credited']}** (arrivées − reparties − fakes + bonus)\n"
             f"Rétention : **{retention}%**"
         )
         if last_ts:

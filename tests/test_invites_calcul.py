@@ -27,7 +27,7 @@ def _ligne(**champs):
 
 
 def _etat(**champs):
-    return Database._invite_row_assessment(_ligne(**champs), legacy_threshold=3, timestamp=1000)
+    return Database._invite_row_assessment(_ligne(**champs), seuil_age=3, timestamp=1000)
 
 
 BUCKETS = ("left", "fake", "pending", "rejoined", "real")
@@ -62,31 +62,24 @@ def test_un_depart_prime_sur_le_soupcon():
     assert parti["left"] and not parti["fake"]
 
 
-def test_la_fiche_montre_la_soustraction_complete():
-    from cogs.invites import detail_du_calcul
+def test_le_resume_se_lit_et_s_additionne():
+    """« Arrivées − Reparties − Fakes + Bonus » : quatre lignes, pas un chiffre seul."""
+    from cogs.invites import resume_du_calcul, texte_du_resume
 
-    # Le cas réel de la capture : 23 arrivées, 5 reparties, 1 suspecte signalée.
-    # La suspecte n'est plus retranchée : elle est dite, pas déduite.
-    ligne = detail_du_calcul({"total": 23, "left": 5, "fake": 1, "pending": 0,
-                              "rejoined": 0, "bonus": 0})
-    assert "**23** arrivées" in ligne and "−5 reparties" in ligne
-    assert "1 suspecte signalée" in ligne and "−1 suspecte" not in ligne
+    # Le cas réel de la capture, côté InviteLogger : 24 − 6 − 0 = 18.
+    b = {"total": 24, "left": 6, "fake": 0, "pending": 0, "rejoined": 0,
+         "bonus": 0, "credited": 18}
+    assert resume_du_calcul(b) == [("Arrivées", 24), ("Reparties", 6), ("Fakes", 0), ("Bonus", 0)]
+    assert b["total"] - b["left"] - b["fake"] + b["bonus"] == b["credited"]
 
-    complet = detail_du_calcul({"total": 24, "left": 6, "fake": 0, "pending": 1,
-                                "rejoined": 2, "bonus": 3})
-    for attendu in ("**24** arrivées", "−6 reparties", "−1 en attente",
-                    "2 déjà comptées", "+3 bonus"):
-        assert attendu in complet, (attendu, complet)
+    texte = texte_du_resume(b)
+    for attendu in ("**Arrivées** · 24", "**Reparties** · 6", "**Fakes** · 0", "**Bonus** · 0"):
+        assert attendu in texte, (attendu, texte)
 
-    # Le serveur qui demande explicitement d'écarter les suspectes les voit déduites.
-    strict = detail_du_calcul({"total": 23, "left": 5, "fake": 1, "pending": 0,
-                               "rejoined": 0, "bonus": 0, "fakes_deduits": True})
-    assert "−1 suspecte" in strict
-
-    # Rien à retrancher : une seule mention, au singulier.
-    seul = detail_du_calcul({"total": 1, "left": 0, "fake": 0, "pending": 0,
-                             "rejoined": 0, "bonus": 0})
-    assert seul == "-# **1** arrivée"
+    # « En attente » ne s'affiche que là où le serveur a réglé un délai ou un rôle.
+    assert "En attente" not in texte
+    avec_attente = texte_du_resume({**b, "pending": 2})
+    assert "**En attente** · 2" in avec_attente
 
 
 def _breakdown(reglages: dict):
@@ -96,7 +89,7 @@ def _breakdown(reglages: dict):
     lignes = [
         _ligne(member_id=1, id=1),                       # réelle
         _ligne(member_id=2, id=2, left_at=900),          # repartie
-        _ligne(member_id=3, id=3, fake_flags=1),         # suspecte
+        _ligne(member_id=3, id=3, account_age_days=1, fake_flags=1),  # compte d'un jour
         _ligne(member_id=4, id=4, fake_flags=8),         # revenue
     ]
 
@@ -124,21 +117,39 @@ def test_les_cinq_compteurs_couvrent_exactement_le_total():
     assert b["left"] + b["fake"] + b["pending"] + b["rejoined"] + b["real"] == b["total"]
 
 
-def test_une_suspecte_est_creditee_comme_chez_invitelogger():
-    """11/11/2026 : SentriX affichait 17 là où InviteLogger affichait 18.
+def test_le_credit_est_celui_d_invitelogger():
+    """Arrivées − reparties − fakes + bonus, exactement comme InviteLogger.
 
-    Un compte jugé « trop récent » était retiré du crédit sans que le serveur l'ait
-    demandé. Par défaut, SentriX crédite maintenant toutes les arrivées encore
-    présentes : réelles + revenues + suspectes, plus le bonus du staff.
+    Sa capture le dit : 2 arrivées, 1 repartie, 1 fake, 0 bonus → 0 invitation.
     """
     b = _breakdown({})
-    assert b["fakes_deduits"] is False
-    assert b["credited"] == b["real"] + b["rejoined"] + b["fake"] + b["bonus"] == 5
-    # Seul un départ retire une invitation : 4 arrivées − 1 repartie + 2 bonus.
-    assert b["credited"] == b["total"] - b["left"] - b["pending"] + b["bonus"]
+    assert b["credited"] == b["total"] - b["left"] - b["fake"] - b["pending"] + b["bonus"] == 4
 
 
-def test_le_serveur_peut_encore_ecarter_les_suspectes():
-    b = _breakdown({"exclude_fakes": True})
-    assert b["fakes_deduits"] is True
-    assert b["credited"] == b["real"] + b["bonus"] == 3
+def test_un_compte_de_six_jours_n_est_plus_accuse():
+    """11/11/2026 : le seuil était à 7 jours sans que personne l'ait choisi.
+
+    Un compte créé six jours avant son arrivée était marqué « fake », et le fake
+    retirait une invitation réellement faite. Le seuil par défaut est revenu à 3
+    jours ; un serveur qui veut plus sévère le règle lui-même.
+    """
+    six_jours = _etat(account_age_days=6, fake_flags=1)
+    assert six_jours["real"] and not six_jours["fake"]
+
+    # Deux jours, c'est un compte jetable : il reste un fake.
+    deux_jours = _etat(account_age_days=2, fake_flags=1)
+    assert deux_jours["fake"] and not deux_jours["real"]
+
+    # Et le serveur qui remonte son seuil retrouve l'ancien comportement.
+    strict = Database._invite_row_assessment(
+        _ligne(account_age_days=6, fake_flags=1), seuil_age=7, timestamp=1000)
+    assert strict["fake"]
+
+
+def test_corriger_le_seuil_corrige_aussi_l_historique():
+    """Le bit figé dans fake_flags ne doit plus condamner une arrivée à vie."""
+    sept_jours = _breakdown({"min_account_age_days": 7})
+    trois_jours = _breakdown({"min_account_age_days": 3})
+    assert sept_jours["fake"] == 1 and trois_jours["fake"] == 1
+    # La ligne d'un jour reste fake dans les deux cas ; celle de 400 jours jamais.
+    assert trois_jours["real"] == 1
