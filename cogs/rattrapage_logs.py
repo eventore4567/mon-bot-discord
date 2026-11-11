@@ -108,24 +108,32 @@ class RattrapageLogs(commands.Cog, name="RattrapageLogs"):
 
     @tasks.loop(seconds=BATTEMENT_SECONDES)
     async def battement(self):
-        """« Je suis vivant, à cette heure-ci. » C'est ce qui mesurera l'absence."""
+        """« Je suis vivant, à cette heure-ci. » C'est ce qui mesurera l'absence.
+
+        Le premier battement sert aussi de départ au rattrapage : il lit l'absence
+        AVANT d'écrire l'heure du jour, sinon il effacerait la mesure qu'il doit
+        prendre. Le rattrapage part ensuite en tâche de fond — il appelle l'API
+        serveur par serveur, et ne doit pas retenir les battements suivants.
+
+        Volontairement sans listener on_ready : le budget d'écouteurs du bot est
+        tenu (tools/listener_budget_gate.py), et une boucle qui attend déjà
+        wait_until_ready rend le listener inutile.
+        """
         if not log_service.is_primary_process():
             return
+        premier = not self._fait
+        self._fait = True
+        absence = await self.duree_de_l_absence() if premier else 0
         try:
             await self.bot.db.set_setting(PRESENCE_CLE, str(int(time.time())))
         except Exception:  # noqa: BLE001 — un battement raté ne casse rien
             logger.debug("Battement de présence non enregistré", exc_info=True)
+        if absence:
+            self._tache = asyncio.create_task(self._rattraper_partout(absence))
 
     @battement.before_loop
     async def avant_battement(self):
         await self.bot.wait_until_ready()
-
-    @commands.Cog.listener()
-    async def on_ready(self):
-        # on_ready revient à chaque reconnexion : le rattrapage n'a lieu qu'une fois.
-        if self._fait or (self._tache is not None and not self._tache.done()):
-            return
-        self._tache = asyncio.create_task(self._rattraper_partout())
 
     async def duree_de_l_absence(self) -> float:
         """Combien de temps SentriX a été absent, 0 s'il n'y a rien à rattraper."""
@@ -140,11 +148,7 @@ class RattrapageLogs(commands.Cog, name="RattrapageLogs"):
             return 0
         return absence
 
-    async def _rattraper_partout(self) -> int:
-        absence = await self.duree_de_l_absence()
-        if not absence:
-            self._fait = True
-            return 0
+    async def _rattraper_partout(self, absence: float) -> int:
         depuis = datetime.fromtimestamp(time.time() - absence, tz=timezone.utc)
         logger.info("Logs : rattrapage des %.0f s d'absence", absence)
         total = 0
@@ -154,7 +158,6 @@ class RattrapageLogs(commands.Cog, name="RattrapageLogs"):
             except Exception:  # noqa: BLE001 — un serveur illisible n'arrête pas les autres
                 logger.debug("Rattrapage impossible guild=%s", guild.id, exc_info=True)
             await asyncio.sleep(PAUSE_ENTRE_SERVEURS)
-        self._fait = True
         if total:
             logger.info("Logs : %s action(s) retrouvée(s) pendant l'absence", total)
         return total

@@ -8,6 +8,7 @@ tranche relire, ce que mesure le battement de présence.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 from datetime import datetime, timedelta, timezone
@@ -145,6 +146,35 @@ def test_la_carte_dit_que_c_est_un_rattrapage():
     textes = [str(champ.value) for champ in carte.fields]
     assert any("Tomioka" in t for t in textes) and any("Modo" in t for t in textes)
     assert any("raid" in t for t in textes)
+
+
+@pytest.mark.asyncio
+async def test_le_premier_battement_mesure_avant_d_ecrire(monkeypatch):
+    """Écrire l'heure du jour d'abord effacerait la mesure qu'on vient prendre.
+
+    Et pas de listener on_ready : le budget d'écouteurs du bot est tenu, la boucle
+    du battement attend déjà que le bot soit prêt.
+    """
+    lances = []
+
+    async def _faux_rattrapage(self, absence):
+        lances.append(absence)
+        return 0
+
+    monkeypatch.setattr(RattrapageLogs, "_rattraper_partout", _faux_rattrapage)
+    monkeypatch.setattr(rattrapage_logs.log_service, "is_primary_process", lambda: True)
+
+    cog = _cog(str(int(time.time()) - 3600))
+    await RattrapageLogs.battement.coro(cog)
+    # Le rattrapage part en tâche de fond : il ne retient pas les battements.
+    await cog._tache
+    assert lances and 3500 < lances[0] < 3700
+    # L'heure est bien réécrite, et le second battement ne rattrape plus rien.
+    assert int(await cog.bot.db.get_setting(rattrapage_logs.PRESENCE_CLE)) > time.time() - 5
+    await RattrapageLogs.battement.coro(cog)
+    assert len(lances) == 1
+
+    assert not hasattr(RattrapageLogs, "on_ready")
 
 
 def test_une_cible_disparue_garde_son_identifiant():
