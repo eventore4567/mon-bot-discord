@@ -23,7 +23,12 @@ import traceback
 
 logger = logging.getLogger("bot.loop-watchdog")
 
-SEUIL_S = 1.0
+# 11/11/2026 : abaissé de 1,0 s à 0,4 s. À une seconde, ce détecteur n'avait rien
+# signalé depuis le 09/11 — alors que les blocages de 400 à 900 ms, eux, étaient
+# bien là : ils ressortaient en « requête DB lente » et faisaient accuser
+# PostgreSQL. Un gel de 400 ms est déjà un gel : pendant ce temps, aucune
+# commande, aucune règle AutoMod, aucun battement n'avance.
+SEUIL_S = float(os.getenv("SENTRIX_BOUCLE_SEUIL", "0.4"))
 INTERVALLE_S = 0.25
 _CE_FICHIER = os.path.abspath(__file__)
 _RACINE = os.path.dirname(os.path.dirname(_CE_FICHIER))
@@ -72,6 +77,20 @@ def _surveiller(fil_principal: int, generation: int) -> None:
         )
 
 
+def retard_de_la_boucle() -> float:
+    """Depuis combien de temps la boucle n'a pas donné signe de vie.
+
+    Zéro tant que le détecteur ne tourne pas : un audit hors ligne n'a pas de
+    boucle à surveiller, et doit lire « aucun gel », pas « gelée depuis toujours ».
+
+    Sert à l'observabilité : une attente DB mesurée pendant un gel n'accuse plus
+    PostgreSQL, puisqu'on sait que la boucle, elle, ne répondait pas.
+    """
+    if not _etat["actif"]:
+        return 0.0
+    return max(0.0, time.monotonic() - _etat["dernier"] - INTERVALLE_S)
+
+
 def demarrer(loop: asyncio.AbstractEventLoop | None = None) -> bool:
     """Idempotent. Renvoie True si le détecteur vient d'être lancé."""
     if _etat["actif"]:
@@ -92,4 +111,4 @@ def arreter() -> None:
     _etat["generation"] += 1
 
 
-__all__ = ["demarrer", "arreter", "cadres_sentrix", "SEUIL_S"]
+__all__ = ["demarrer", "arreter", "cadres_sentrix", "retard_de_la_boucle", "SEUIL_S"]
