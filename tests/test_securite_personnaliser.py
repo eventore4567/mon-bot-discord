@@ -18,7 +18,7 @@ SOURCE = (Path(__file__).resolve().parents[1] / "cogs" / "complete_security_setu
 def test_l_option_sanctionner_les_admins_est_sur_l_ecran():
     # Le bouton est construit avec les autres, pas dans global_exceptions.
     ecran = SOURCE.split("async def global_exceptions", 1)[0]
-    assert 'f"Sanctionner les admins : {\'Oui\' if strict else \'Non\'}"' in ecran
+    assert "Admins sanctionnés : {'Oui' if strict else 'Non'}" in ecran
     assert "boutons.append(button(" in ecran
 
 
@@ -48,3 +48,31 @@ def test_les_boutons_tiennent_dans_les_rangees_de_discord():
 def test_le_paragraphe_sur_la_verification_est_devenu_une_ligne():
     assert "choices.EXTRAS_NOT_INSTALLED" not in SOURCE
     assert "-# Salon piège et Vérification demandent d'installer la vérification." in SOURCE
+
+
+def test_les_boutons_portent_des_icones_sentrix():
+    """Un emoji de tête est déplacé vers emoji= par sentrix_emojis.appliquer_a_la_vue,
+    qui le remplace par l'icône animée du pack. Sans le pack, le libellé reste lisible."""
+    from utils.sentrix_emojis import EQUIVALENCES
+
+    for prefixe in ("🚫 Mots bloqués", "👥 Exceptions", "💾 Sauvegardes",
+                    "↩️ Retour", "✅ Installer la vérification"):
+        assert f'button("{prefixe}"' in SOURCE, prefixe
+        assert prefixe.split(" ", 1)[0] in EQUIVALENCES, prefixe
+    assert '🛡️ Admins sanctionnés' in SOURCE and "🛡️" in EQUIVALENCES
+
+
+def test_le_bouton_automod_discord_est_retire():
+    """La règle native se resynchronise seule : au démarrage (une fois par serveur)
+    et à chaque changement d'antimention. Un bouton manuel n'apportait rien."""
+    assert "AutoMod Discord" not in SOURCE
+    assert "_sync_native_antieveryone_rule" not in SOURCE
+    automod = (Path(__file__).resolve().parents[1] / "cogs" / "automod.py").read_text(encoding="utf-8")
+    assert "await self._sync_native_antieveryone_rule(guild)" in automod
+
+
+def test_une_seule_rangee_et_un_retour_vers_la_vue_simple():
+    assert 'button("↩️ Retour", retour_simple)' in SOURCE
+    assert '"Vue simple"' not in SOURCE
+    bloc = SOURCE.split("async def retour_simple(i):", 1)[1][:200]
+    assert 'self.mode = "simple"' in bloc

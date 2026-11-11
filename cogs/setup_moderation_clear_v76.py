@@ -128,39 +128,29 @@ async def _build_moderation_v76(self: v74.SentriXSetupV74) -> None:
         if action in dm_rows and bool(_row_value(dm_rows.get(action), "enabled", 0))
     )
 
-    status = discord.ui.Button(
-        label="Activée" if enabled else "Désactivée",
-        style=discord.ButtonStyle.success if enabled else discord.ButtonStyle.secondary,
-        disabled=True,
-    )
+    # 11/11/2026 : même présentation que la page Sécurité — la bande de bannière,
+    # un titre, et l'état dans la même phrase au lieu d'un bloc « État actuel ».
+    from cogs import securite_simple
+    from utils import sentrix_emojis as icons
 
-    container = discord.ui.Container()
-    container.add_item(
-        discord.ui.Section(
-            discord.ui.TextDisplay(
-                "# 🛡️ Modération\n"
-                "Comportement des sanctions. Les droits viennent des permissions Discord."
-            ),
-            accessory=v74.v73._thumbnail(self.bot),
-        )
+    container = securite_simple.conteneur(
+        self,
+        icons.titre("mod", "Modération"),
+        "Comportement des sanctions. Les droits viennent des permissions Discord.",
     )
-    container.add_item(discord.ui.Separator())
 
     threshold_text = (
         f"Ban automatique après **{warn_threshold} avertissements**"
         if warn_threshold > 0
         else "Ban automatique après avertissements : **désactivé**"
     )
-    summary = (
-        "### État actuel\n"
-        f"{threshold_text}\n"
-        f"MP de sanctions : **{active_dm_count}/{len(DM_ACTIONS)} actifs**"
-        + (f" · **{custom_dm_count} personnalisés**" if custom_dm_count else "")
-    )
-    container.add_item(discord.ui.Section(discord.ui.TextDisplay(summary), accessory=status))
+    container.add_item(discord.ui.TextDisplay(
+        f"{threshold_text} · MP de sanctions : **{active_dm_count}/{len(DM_ACTIONS)} actifs**"
+        + (f", dont **{custom_dm_count} personnalisés**" if custom_dm_count else "")
+    ))
 
     toggle = discord.ui.Button(
-        label="Désactiver la modération" if enabled else "Activer la modération",
+        label="🛡️ Désactiver la modération" if enabled else "🛡️ Activer la modération",
         style=discord.ButtonStyle.danger if enabled else discord.ButtonStyle.success,
     )
 
@@ -177,15 +167,7 @@ async def _build_moderation_v76(self: v74.SentriXSetupV74) -> None:
         await self.refresh(interaction)
 
     toggle.callback = toggle_moderation
-    container.add_item(discord.ui.ActionRow(toggle))
     container.add_item(discord.ui.Separator())
-
-    container.add_item(
-        discord.ui.TextDisplay(
-            "### Ban automatique\n"
-            "Nombre d'avertissements avant un ban."
-        )
-    )
 
     threshold_options = [
         discord.SelectOption(
@@ -241,13 +223,10 @@ async def _build_moderation_v76(self: v74.SentriXSetupV74) -> None:
     container.add_item(discord.ui.ActionRow(warn_select))
     container.add_item(discord.ui.Separator())
 
-    container.add_item(
-        discord.ui.TextDisplay(
-            "### MP de sanction\n"
-            "Par défaut, aucun ou votre texte.\n"
-            "-# `{membre}` `{serveur}` `{raison}` `{duree}` `{moderateur}` `{action}`"
-        )
-    )
+    container.add_item(discord.ui.TextDisplay(
+        "-# MP envoyé au membre sanctionné. Variables : `{membre}` `{serveur}` "
+        "`{raison}` `{duree}` `{moderateur}` `{action}`"
+    ))
 
     selected_action = getattr(self, "moderation_dm_action", "ban")
     if selected_action not in dict(DM_ACTIONS):
@@ -285,27 +264,20 @@ async def _build_moderation_v76(self: v74.SentriXSetupV74) -> None:
     else:
         dm_state = "Texte personnalisé"
 
-    state_button = discord.ui.Button(
-        label=f"{_dm_label(selected_action)} : {dm_state}"[:80],
-        style=(
-            discord.ButtonStyle.danger
-            if dm_state == "MP désactivé"
-            else discord.ButtonStyle.success
-        ),
-        disabled=True,
-    )
-    container.add_item(discord.ui.ActionRow(state_button))
+    container.add_item(discord.ui.TextDisplay(
+        f"**{_dm_label(selected_action)}** · {dm_state}"
+    ))
 
     use_default = discord.ui.Button(
-        label="Texte par défaut",
+        label="📝 Texte par défaut",
         style=discord.ButtonStyle.secondary,
     )
     customize = discord.ui.Button(
-        label="Personnaliser le MP",
+        label="✏️ Personnaliser",
         style=discord.ButtonStyle.primary,
     )
     disable_dm = discord.ui.Button(
-        label="Désactiver le MP",
+        label="🔇 Ne pas envoyer",
         style=discord.ButtonStyle.danger,
     )
 
@@ -355,7 +327,7 @@ async def _build_moderation_v76(self: v74.SentriXSetupV74) -> None:
     use_default.callback = use_default_dm
     customize.callback = customize_dm
     disable_dm.callback = disable_selected_dm
-    container.add_item(discord.ui.ActionRow(use_default, customize, disable_dm))
+    container.add_item(discord.ui.ActionRow(use_default, customize, disable_dm, toggle))
 
     self._add_navigation(container)
     self.add_item(container)
