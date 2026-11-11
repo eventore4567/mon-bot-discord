@@ -365,13 +365,24 @@ def _demarrer_la_sentinelle(bot: commands.Bot) -> None:
     """
     if getattr(bot, "_sentrix_sentinelle_boucle", False):
         return
+    try:
+        boucle = asyncio.get_running_loop()
+    except RuntimeError:
+        # Pas de boucle en cours : audit hors ligne, test, outil en ligne de
+        # commande. Il n'y a rien à surveiller, et démarrer le fil ferait croire
+        # à un gel permanent. On ne surveille que ce qui tourne vraiment.
+        return
+    attendre_pret = getattr(bot, "wait_until_ready", None)
+    est_ferme = getattr(bot, "is_closed", None)
+    if not callable(attendre_pret) or not callable(est_ferme):
+        return
 
     async def battre_sans_fin():
-        await bot.wait_until_ready()
-        while not bot.is_closed():
+        await attendre_pret()
+        while not est_ferme():
             boucle_sentinelle.sentinelle.battre()
             await asyncio.sleep(boucle_sentinelle.INTERVALLE_BATTEMENT)
 
     boucle_sentinelle.sentinelle.demarrer()
-    bot.loop.create_task(battre_sans_fin())
+    boucle.create_task(battre_sans_fin())
     bot._sentrix_sentinelle_boucle = True

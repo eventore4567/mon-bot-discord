@@ -53,6 +53,10 @@ class Sentinelle:
 
     def __init__(self) -> None:
         self._battement = time.monotonic()
+        #: Tant que personne ne bat, il n'y a pas de boucle à surveiller : un
+        #: audit hors ligne ou un test sans boucle ne doit pas lire « gelée
+        #: depuis toujours » et faire accuser un innocent.
+        self._actif = False
         self._fil_principal = threading.main_thread().ident
         self._fil: threading.Thread | None = None
         self._arret = threading.Event()
@@ -65,9 +69,16 @@ class Sentinelle:
     def battre(self) -> None:
         """Appelé par la boucle. Tant qu'elle appelle, elle n'est pas bloquée."""
         self._battement = time.monotonic()
+        self._actif = True
 
     def retard(self) -> float:
-        """Depuis combien de temps la boucle n'a pas donné signe de vie."""
+        """Depuis combien de temps la boucle n'a pas donné signe de vie.
+
+        Zéro tant que rien n'a battu : sans boucle à surveiller, il n'y a pas
+        de gel, et surtout pas un gel qui grandirait indéfiniment.
+        """
+        if not self._actif:
+            return 0.0
         return max(0.0, time.monotonic() - self._battement - INTERVALLE_BATTEMENT)
 
     # --------------------------------------------------------------- rapport
@@ -118,6 +129,7 @@ class Sentinelle:
     def demarrer(self) -> None:
         if self._fil is not None and self._fil.is_alive():
             return
+        self.battre()
         self._arret.clear()
         self._fil = threading.Thread(
             target=self._surveiller, name="sentrix-boucle", daemon=True
@@ -126,6 +138,7 @@ class Sentinelle:
 
     def arreter(self) -> None:
         self._arret.set()
+        self._actif = False
         self._fil = None
 
     def etat(self) -> dict:

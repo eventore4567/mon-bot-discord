@@ -98,3 +98,15 @@ def test_le_fil_attrape_un_vrai_blocage():
 def test_l_etat_reste_lisible_sans_aucun_gel():
     etat = Sentinelle().etat()
     assert etat["gels"] == 0 and etat["pire_gel_ms"] == 0.0 and etat["coupables"] == []
+
+
+def test_sans_boucle_a_surveiller_le_retard_reste_nul():
+    """Un audit hors ligne n'a pas de boucle : il ne doit pas lire « gelée depuis
+    toujours » et faire accuser PostgreSQL à la place du vrai coupable."""
+    sentinelle = Sentinelle()
+    time.sleep(0.2)
+    assert sentinelle.retard() == 0.0
+
+    sentinelle.battre()
+    time.sleep(0.2)
+    assert sentinelle.retard() > 0.0, "une fois la surveillance commencée, le gel compte"
