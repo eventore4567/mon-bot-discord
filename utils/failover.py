@@ -108,6 +108,14 @@ class SentriXFailoverCoordinator:
             # secours peut reprendre n'importe laquelle. Un seul cluster : clé inchangée.
             lock_name = f"{lock_name}:cluster-{_cluster.cluster_id()}"
         self.lock_key = storage_key(lock_name)
+        # 11/11/2026 : le leader qui s'en va ANNONCE sa sortie sur ce canal, au lieu
+        # de laisser son remplaçant la découvrir à son prochain sondage. Le canal se
+        # déduit du nom du verrou : deux déploiements distincts ne s'entendent pas.
+        self.canal_liberation = f"{self.lock_key}:libere"
+        #: Mis par l'annonce. Le sondage reste le filet : si le leader meurt sans
+        #: annoncer, ou si l'abonnement tombe, la reprise se fait comme avant.
+        self._reveil = asyncio.Event()
+        self._abonnement: asyncio.Task | None = None
         # Mémoire du dernier leader, indépendante du lease (qui expire, lui).
         # Elle permet de distinguer « je reprends la main après MON propre
         # redémarrage » (données locales encore valables) de « une autre instance
@@ -332,6 +340,8 @@ class SentriXFailoverCoordinator:
 
         started = time.monotonic()
         first_attempt = True
+        if self._abonnement is None or self._abonnement.done():
+            self._abonnement = asyncio.create_task(self._ecouter_les_liberations())
         while not self._stop.is_set():
             try:
                 if await self._try_acquire():
@@ -353,12 +363,26 @@ class SentriXFailoverCoordinator:
                 await self._drop_client()
 
             first_attempt = False
-            try:
-                await asyncio.wait_for(self._stop.wait(), timeout=self.poll_seconds)
-            except asyncio.TimeoutError:
-                pass
+            # On repart dès qu'un leader annonce sa sortie, sinon au prochain
+            # sondage. Réessayer plus tôt ne peut rien casser : _try_acquire est un
+            # SET NX atomique — soit il prend le verrou, soit il ne le prend pas.
+            await self._attendre_le_prochain_essai()
 
         raise asyncio.CancelledError
+
+    async def _attendre_le_prochain_essai(self) -> None:
+        self._reveil.clear()
+        attentes = [
+            asyncio.ensure_future(self._stop.wait()),
+            asyncio.ensure_future(self._reveil.wait()),
+        ]
+        try:
+            await asyncio.wait(
+                attentes, timeout=self.poll_seconds, return_when=asyncio.FIRST_COMPLETED
+            )
+        finally:
+            for attente in attentes:
+                attente.cancel()
 
     async def _renew_once(self) -> bool:
         await self._connect()
@@ -432,6 +456,35 @@ class SentriXFailoverCoordinator:
             )
         return self._watchdog_task
 
+    async def _annoncer_la_liberation(self) -> None:
+        """Prévenir le remplaçant plutôt que de le laisser sonder.
+
+        L'annonce est un RACCOURCI, jamais une dépendance : si elle échoue, si
+        personne n'écoute, ou si le leader meurt sans l'envoyer, le sondage de
+        secours reprend la main exactement comme avant.
+        """
+        try:
+            await self._redis.publish(self.canal_liberation, self.owner_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("HA: annonce de libération impossible (%s).", type(exc).__name__)
+
+    async def _ecouter_les_liberations(self) -> None:
+        """Réveille l'attente dès qu'un leader annonce sa sortie."""
+        while not self._stop.is_set():
+            try:
+                await self._connect()
+                canal = self._redis.pubsub()
+                await canal.subscribe(self.canal_liberation)
+                async for message in canal.listen():
+                    if self._stop.is_set():
+                        break
+                    if (message or {}).get("type") == "message":
+                        self._reveil.set()
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 — l'abonnement n'est jamais critique
+                await asyncio.sleep(self.poll_seconds)
+
     async def release(self) -> bool:
         if not self.enabled or self._redis is None or self.state != "leader":
             return False
@@ -446,6 +499,7 @@ class SentriXFailoverCoordinator:
             if released:
                 self._transition("released", "lease_released")
                 self.current_owner = None
+                await self._annoncer_la_liberation()
                 logger.info("HA: lease libéré proprement.")
             return released
         except Exception as exc:
@@ -455,6 +509,9 @@ class SentriXFailoverCoordinator:
 
     async def close(self, *, release: bool = True) -> None:
         self._stop.set()
+        if self._abonnement is not None:
+            self._abonnement.cancel()
+            self._abonnement = None
         task, self._watchdog_task = self._watchdog_task, None
         if task is not None:
             task.cancel()
