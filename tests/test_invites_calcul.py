@@ -65,16 +65,23 @@ def test_un_depart_prime_sur_le_soupcon():
 def test_la_fiche_montre_la_soustraction_complete():
     from cogs.invites import detail_du_calcul
 
-    # Le cas réel de la capture : 23 − 5 − 1 = 17.
+    # Le cas réel de la capture : 23 arrivées, 5 reparties, 1 suspecte signalée.
+    # La suspecte n'est plus retranchée : elle est dite, pas déduite.
     ligne = detail_du_calcul({"total": 23, "left": 5, "fake": 1, "pending": 0,
                               "rejoined": 0, "bonus": 0})
-    assert "**23** arrivées" in ligne and "−5 reparties" in ligne and "−1 suspecte" in ligne
+    assert "**23** arrivées" in ligne and "−5 reparties" in ligne
+    assert "1 suspecte signalée" in ligne and "−1 suspecte" not in ligne
 
     complet = detail_du_calcul({"total": 24, "left": 6, "fake": 0, "pending": 1,
                                 "rejoined": 2, "bonus": 3})
     for attendu in ("**24** arrivées", "−6 reparties", "−1 en attente",
-                    "−2 déjà comptées", "+3 bonus"):
+                    "2 déjà comptées", "+3 bonus"):
         assert attendu in complet, (attendu, complet)
+
+    # Le serveur qui demande explicitement d'écarter les suspectes les voit déduites.
+    strict = detail_du_calcul({"total": 23, "left": 5, "fake": 1, "pending": 0,
+                               "rejoined": 0, "bonus": 0, "fakes_deduits": True})
+    assert "−1 suspecte" in strict
 
     # Rien à retrancher : une seule mention, au singulier.
     seul = detail_du_calcul({"total": 1, "left": 0, "fake": 0, "pending": 0,
@@ -82,10 +89,9 @@ def test_la_fiche_montre_la_soustraction_complete():
     assert seul == "-# **1** arrivée"
 
 
-def test_le_total_credite_reste_reelles_plus_bonus():
-    """Le chiffre affiché ne change pas : seul le détail devient complet."""
+def _breakdown(reglages: dict):
+    """Le même serveur, les mêmes arrivées : seuls les réglages changent."""
     import asyncio
-    from types import SimpleNamespace
 
     lignes = [
         _ligne(member_id=1, id=1),                       # réelle
@@ -99,7 +105,7 @@ def test_le_total_credite_reste_reelles_plus_bonus():
             pass
 
         async def get_invite_detection_settings(self, guild_id):
-            return {}
+            return reglages
 
         async def fetchall(self, *_a, **_k):
             return lignes
@@ -107,9 +113,32 @@ def test_le_total_credite_reste_reelles_plus_bonus():
         async def fetchone(self, *_a, **_k):
             return {"s": 2}
 
-    b = asyncio.run(_DB().get_invite_breakdown(1, 1))
+    return asyncio.run(_DB().get_invite_breakdown(1, 1))
+
+
+def test_les_cinq_compteurs_couvrent_exactement_le_total():
+    b = _breakdown({})
     assert b["total"] == 4
     assert b["real"] == 1 and b["left"] == 1 and b["fake"] == 1 and b["rejoined"] == 1
     # Les cinq compteurs couvrent exactement le total : plus personne ne disparaît.
     assert b["left"] + b["fake"] + b["pending"] + b["rejoined"] + b["real"] == b["total"]
+
+
+def test_une_suspecte_est_creditee_comme_chez_invitelogger():
+    """11/11/2026 : SentriX affichait 17 là où InviteLogger affichait 18.
+
+    Un compte jugé « trop récent » était retiré du crédit sans que le serveur l'ait
+    demandé. Par défaut, SentriX crédite maintenant toutes les arrivées encore
+    présentes : réelles + revenues + suspectes, plus le bonus du staff.
+    """
+    b = _breakdown({})
+    assert b["fakes_deduits"] is False
+    assert b["credited"] == b["real"] + b["rejoined"] + b["fake"] + b["bonus"] == 5
+    # Seul un départ retire une invitation : 4 arrivées − 1 repartie + 2 bonus.
+    assert b["credited"] == b["total"] - b["left"] - b["pending"] + b["bonus"]
+
+
+def test_le_serveur_peut_encore_ecarter_les_suspectes():
+    b = _breakdown({"exclude_fakes": True})
+    assert b["fakes_deduits"] is True
     assert b["credited"] == b["real"] + b["bonus"] == 3

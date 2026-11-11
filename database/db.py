@@ -780,7 +780,8 @@ CREATE TABLE IF NOT EXISTS invite_detection_settings (
     block_rejoins INTEGER NOT NULL DEFAULT 1,
     required_role_id INTEGER NOT NULL DEFAULT 0,
     credit_delay_hours INTEGER NOT NULL DEFAULT 0,
-    quick_leave_seconds INTEGER NOT NULL DEFAULT 3600
+    quick_leave_seconds INTEGER NOT NULL DEFAULT 3600,
+    exclude_fakes INTEGER NOT NULL DEFAULT 0
 );
 
 -- Invitations "bonus" : un ajustement manuel et traçable accordé par le staff (ex: un
@@ -1268,6 +1269,9 @@ INVITE_DETECTION_NEW_COLUMNS = {
     "required_role_id": "INTEGER NOT NULL DEFAULT 0",
     "credit_delay_hours": "INTEGER NOT NULL DEFAULT 0",
     "quick_leave_seconds": "INTEGER NOT NULL DEFAULT 3600",
+    # 11/11/2026 : retirer une invitation suspecte du total crédité est devenu un
+    # choix du serveur, et il est désactivé par défaut (voir get_invite_breakdown).
+    "exclude_fakes": "INTEGER NOT NULL DEFAULT 0",
 }
 
 # Même principe, pour giveaways : "image_url" ajoutée pour permettre une image sur
@@ -2456,8 +2460,8 @@ class Database:
         """Règles propres au serveur : optionnelles, et figées pour les prochains joins."""
         row = await self.fetchone(
             "SELECT enabled,min_account_age_days,block_self_invite,require_avatar,"
-            "block_rejoins,required_role_id,credit_delay_hours,quick_leave_seconds "
-            "FROM invite_detection_settings WHERE guild_id=?",
+            "block_rejoins,required_role_id,credit_delay_hours,quick_leave_seconds,"
+            "exclude_fakes FROM invite_detection_settings WHERE guild_id=?",
             (guild_id,),
         )
         defaults = {
@@ -2469,9 +2473,17 @@ class Database:
             "required_role_id": 0,
             "credit_delay_hours": 0,
             "quick_leave_seconds": 3600,
+            "exclude_fakes": False,
         }
         if row is None:
             return defaults
+        # La colonne « exclude_fakes » est ajoutée par migration : une base lue
+        # avant la migration renvoie une ligne sans elle, et le réglage par défaut
+        # (ne rien retrancher) reste le bon.
+        try:
+            exclure_les_suspects = bool(row["exclude_fakes"])
+        except (KeyError, IndexError):
+            exclure_les_suspects = False
         return {
             "enabled": bool(row["enabled"]),
             "min_account_age_days": min(30, max(1, int(row["min_account_age_days"] or 7))),
@@ -2481,6 +2493,7 @@ class Database:
             "required_role_id": max(0, int(row["required_role_id"] or 0)),
             "credit_delay_hours": min(168, max(0, int(row["credit_delay_hours"] or 0))),
             "quick_leave_seconds": min(86400, max(0, int(row["quick_leave_seconds"] or 0))),
+            "exclude_fakes": exclure_les_suspects,
         }
 
     async def set_invite_detection_enabled(self, guild_id: int, enabled: bool) -> None:
@@ -2500,6 +2513,7 @@ class Database:
             "required_role_id": (0, 9223372036854775807),
             "credit_delay_hours": (0, 168),
             "quick_leave_seconds": (0, 86400),
+            "exclude_fakes": (0, 1),
         }
         if key not in allowed or not allowed[key][0] <= int(value) <= allowed[key][1]:
             raise ValueError("Règle ou valeur anti-fake invalide")
@@ -2577,6 +2591,14 @@ class Database:
         # Historique antérieur à cette version : conserver le calcul d'origine
         # (< 3 jours), même quand la détection renforcée est active aujourd'hui.
         legacy_threshold = FAKE_INVITE_ACCOUNT_AGE_DAYS
+        # 11/11/2026 : SentriX affichait 17 là où InviteLogger affichait 18, sur le
+        # même serveur et les mêmes arrivées. L'écart venait d'ici : un compte créé
+        # moins de sept jours avant son arrivée était retiré du total crédité SANS
+        # que personne l'ait demandé. Un soupçon n'est pas une preuve, et retirer
+        # une invitation à quelqu'un qui l'a réellement faite est le pire des deux
+        # risques. SentriX compte donc comme InviteLogger — les arrivées encore là —
+        # et ne déduit un compte suspect que si le serveur l'a explicitement réglé.
+        exclure_les_suspects = bool(settings.get("exclude_fakes"))
         rows = await self.fetchall(
             "SELECT id,member_id,joined_at,left_at,account_age_days,fake_flags,"
             "required_role_id,role_confirmed,pending_until,quick_leave_seconds "
@@ -2607,10 +2629,15 @@ class Database:
             (guild_id, inviter_id),
         )
         bonus = int(bonus_row["s"]) if bonus_row else 0
+        # Le crédit par défaut : les arrivées encore présentes, moins celles qui
+        # attendent un délai ou un rôle réclamé par le serveur. Les suspectes restent
+        # affichées — elles sont signalées, pas retirées.
+        credite = real if exclure_les_suspects else real + rejoined + fake
         return {
             "total": total, "left": left, "fake": fake, "real": real,
             "pending": pending, "rejoined": rejoined, "bonus": bonus,
-            "credited": real + bonus,
+            "fakes_deduits": exclure_les_suspects,
+            "credited": credite + bonus,
         }
 
     async def get_invite_member_assessment(self, guild_id: int, member_id: int) -> dict | None:
@@ -2648,9 +2675,10 @@ class Database:
         )
 
     async def get_invite_leaderboard_credited(self, guild_id: int, limit: int = 10):
-        """Classement basé sur les invitations CRÉDITÉES (réelles + bonus), pas sur le
-        total brut — sinon un membre qui invite volontairement des comptes jetables
-        remonterait artificiellement dans le classement."""
+        """Classement basé sur les invitations CRÉDITÉES, pas sur le total brut :
+        un membre qui amène des comptes qui repartent aussitôt ne doit pas remonter
+        artificiellement. Ce que « crédité » recouvre est décidé par
+        get_invite_breakdown, et suit donc le réglage du serveur."""
         rows = await self.fetchall(
             "SELECT DISTINCT inviter_id FROM member_invites WHERE guild_id = ? AND inviter_id IS NOT NULL "
             "UNION SELECT DISTINCT user_id FROM invite_bonuses WHERE guild_id = ?",

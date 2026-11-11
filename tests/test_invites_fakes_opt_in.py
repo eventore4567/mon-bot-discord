@@ -49,8 +49,17 @@ async def test_ancien_historique_age_3_jours_avant_activation():
 
 @pytest.mark.asyncio
 async def test_age_7_jours_classe_sur_l_arrivee():
+    """11/11/2026 : un compte jugé trop récent est signalé, plus retiré du crédit.
+
+    InviteLogger affichait 18 là où SentriX affichait 17, sur les mêmes arrivées :
+    un soupçon suffisait à retirer une invitation réellement faite. Le serveur qui
+    veut l'ancien calcul le demande explicitement (``exclude_fakes``).
+    """
     result = await stats([row(age=4, flags=1)], options=settings())
-    assert (result["real"], result["fake"], result["credited"]) == (0, 1, 0)
+    assert (result["real"], result["fake"], result["credited"]) == (0, 1, 1)
+
+    strict = await stats([row(age=4, flags=1)], options=settings(exclude_fakes=1))
+    assert (strict["real"], strict["fake"], strict["credited"]) == (0, 1, 0)
 
 
 @pytest.mark.asyncio
@@ -66,9 +75,10 @@ async def test_avatar_par_defaut_est_un_indice_pas_un_fake():
 
 
 @pytest.mark.asyncio
-async def test_retour_ne_credite_pas_et_n_est_pas_un_fake():
+async def test_retour_compte_une_seule_fois_et_n_est_pas_un_fake():
+    """Revenir n'est pas tricher : une seule invitation, comptée une seule fois."""
     result = await stats([row(index=2, member=20, flags=8, joined=9000), row(index=1, member=20, left=4000)], options=settings())
-    assert (result["total"], result["fake"], result["left"], result["credited"]) == (1, 0, 0, 0)
+    assert (result["total"], result["fake"], result["left"], result["credited"]) == (1, 0, 0, 1)
 
 
 @pytest.mark.asyncio
@@ -106,9 +116,13 @@ async def test_validation_apres_delai_automatique():
 
 
 @pytest.mark.asyncio
-async def test_plusieurs_signaux_ne_creditent_pas():
+async def test_plusieurs_signaux_restent_signales_sans_retirer_le_credit():
     result = await stats([row(flags=1 | 2 | 4 | 8)], options=settings(), bonus=2)
-    assert (result["total"], result["fake"], result["real"], result["credited"]) == (1, 1, 0, 2)
+    assert (result["total"], result["fake"], result["real"], result["credited"]) == (1, 1, 0, 3)
+
+    # Le serveur qui a demandé d'écarter les suspectes ne garde que le bonus.
+    strict = await stats([row(flags=1 | 2 | 4 | 8)], options=settings(exclude_fakes=1), bonus=2)
+    assert strict["credited"] == 2
 
 
 @pytest.mark.asyncio
@@ -321,7 +335,7 @@ async def test_huit_arrivees_trois_departs_cinq_valides_zero_fake():
     result = await stats(invites, options=settings())
     assert result == {
         "total": 8, "left": 3, "fake": 0, "real": 5,
-        "pending": 0, "rejoined": 0, "bonus": 0, "credited": 5,
+        "pending": 0, "rejoined": 0, "bonus": 0, "fakes_deduits": False, "credited": 5,
     }
     # Les compteurs couvrent exactement le total : aucune arrivée ne disparaît.
     assert sum(result[c] for c in ("left", "fake", "pending", "rejoined", "real")) == result["total"]
