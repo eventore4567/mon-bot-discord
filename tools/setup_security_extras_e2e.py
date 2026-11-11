@@ -55,8 +55,8 @@ async def main() -> int:
     values = [o.value for o in select_of(view).options]
     check("honeypot" not in values and "verification" not in values,
           "sans système de vérification, le menu ne propose ni Salon piège ni Vérification", str(values))
-    check("demandent d'installer la vérification" in texts(view) and button(view, "Ouvrir l’installation") is not None,
-          "la page explique pourquoi et propose « Ouvrir l'installation de la vérification »")
+    check("demandent d'installer la vérification" in texts(view) and button(view, "Installer la vérification") is not None,
+          "la page explique pourquoi et propose « Installer la vérification »")
     check(sum(1 for _ in items(view)) <= 40, f"la page tient dans la limite Discord ({len(items(view))} composants)")
 
     # 31/10/2026 (PR #596) : plus d'activation groupée, chaque protection se choisit.
@@ -107,7 +107,7 @@ async def main() -> int:
     _install_capture()
     opened = len(CAPTURE)
     since = len(h.CALLS)
-    await button(view, "Ouvrir l’installation").callback(interaction(bot))
+    await button(view, "Installer la vérification").callback(interaction(bot))
     await h.settle(idle=0.2, maximum=3)
     check(await flags() == (False, False) and not any(m == "POST" and p.endswith("/channels") for m, p, _ in h.CALLS[since:]),
           "ouvrir l'installateur ne crée rien et n'active rien")
