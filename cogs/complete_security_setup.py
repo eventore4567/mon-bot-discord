@@ -154,16 +154,16 @@ class SecurityCenterView(CompleteView):
                 )[0]
                 for key, *_ in available
             }
-            lines = []
-            for group in ("Messages", "Arrivées", "Serveur", "Réponse", "Avancé"):
-                entries = [x for x in available if x[2] == group]
-                lines.append(
-                    f"**{group}** · {sum(bool(states[x[0]]) for x in entries)}/{len(entries)} actives"
-                )
-            box = heading(
-                icons.titre("security", "Sécurité"),
-                "\n".join(lines)
-                + "\n\nChoisissez une protection : état, réglages et exceptions au même endroit.",
+            # 11/11/2026 : cinq compteurs par famille, dont « Avancé · 0/0 actives »
+            # qui ne veut rien dire. Un seul chiffre, et la bannière des autres écrans.
+            from cogs import securite_simple
+
+            actives = sum(1 for valeur in states.values() if valeur)
+            box = securite_simple.conteneur(
+                self,
+                icons.titre("security", "Sécurité · personnaliser"),
+                f"**{actives} protections actives sur {len(states)}.** "
+                "Choisissez-en une : état, réglages et exceptions au même endroit.",
             )
             from utils.protection_requirements import diagnostic
 
@@ -174,11 +174,10 @@ class SecurityCenterView(CompleteView):
             )
             blocked, degraded = diagnostic(perms, {k for k, v in states.items() if v})
             if blocked or degraded:
-                box.add_item(
-                    discord.ui.TextDisplay(
-                        f"**Permissions du bot :** {len(blocked)} protection(s) inopérante(s), {len(degraded)} dégradée(s). Ouvrez la protection concernée pour le détail."
-                    )
-                )
+                box.add_item(discord.ui.TextDisplay(
+                    f"-# ⚠️ {len(blocked)} protection(s) sans effet et {len(degraded)} limitée(s) "
+                    "par les permissions de SentriX. Le détail est dans chaque protection."
+                ))
             picker = discord.ui.Select(
                 placeholder="Configurer une protection",
                 options=[
@@ -201,7 +200,9 @@ class SecurityCenterView(CompleteView):
             picker.callback = choose
             box.add_item(discord.ui.ActionRow(picker))
             if not ready:
-                box.add_item(discord.ui.TextDisplay(choices.EXTRAS_NOT_INSTALLED))
+                box.add_item(discord.ui.TextDisplay(
+                    "-# Salon piège et Vérification demandent d'installer la vérification."
+                ))
 
                 async def install_verification(i):
                     from cogs.setup_v118_integrations import VerificationSetupView
@@ -222,10 +223,7 @@ class SecurityCenterView(CompleteView):
 
                 box.add_item(
                     discord.ui.ActionRow(
-                        button(
-                            "Ouvrir l’installation de la vérification",
-                            install_verification,
-                        )
+                        button("Installer la vérification", install_verification)
                     )
                 )
 
@@ -270,23 +268,38 @@ class SecurityCenterView(CompleteView):
                     ephemeral=True,
                 )
 
-            box.add_item(
-                discord.ui.ActionRow(
-                    button("Mots bloqués", words),
-                    button("Exceptions générales", exceptions),
-                    button("Sauvegardes et restauration", backups),
-                )
-            )
             async def simple(i):
                 self.mode = "simple"
                 await self.refresh(i)
 
-            box.add_item(
-                discord.ui.ActionRow(
-                    button("Actualiser AutoMod Discord", native),
-                    button("Vue simple", simple),
-                )
-            )
+            # 11/11/2026 : « remets le truc de sanction admin visible ». Il était
+            # enterré derrière « Exceptions générales » ; c'est un choix du
+            # propriétaire, il se voit ici.
+            cog = self.bot.get_cog("Automod")
+            boutons = [
+                button("Mots bloqués", words),
+                button("Exceptions", exceptions),
+                button("Sauvegardes", backups),
+            ]
+            if cog is not None and hasattr(cog, "admins_soumis"):
+                strict = bool(await cog.admins_soumis(self.guild.id))
+
+                async def admins(i, actuel=strict):
+                    if i.user.id != self.guild.owner_id:
+                        return await i.response.send_message(
+                            "Seul le propriétaire du serveur peut modifier cette option.",
+                            ephemeral=True,
+                        )
+                    await i.response.defer()
+                    await cog.definir_admins_soumis(self.guild.id, not actuel, i.user.id)
+                    await self.refresh(i)
+
+                boutons.append(button(
+                    f"Sanctionner les admins : {'Oui' if strict else 'Non'}", admins,
+                ))
+            boutons += [button("AutoMod Discord", native), button("Vue simple", simple)]
+            for debut in range(0, len(boutons), 5):
+                box.add_item(discord.ui.ActionRow(*boutons[debut:debut + 5]))
             if self.section == "global":
                 await self.global_exceptions(box)
             return self.finish(box)
