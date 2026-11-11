@@ -765,6 +765,15 @@ class Ai(commands.Cog, name="Ai"):
     @_cleanup_memory.before_loop
     async def _before_cleanup(self):
         await self.bot.wait_until_ready()
+        # 11/11/2026 : le SDK OpenAI se chargeait à la PREMIÈRE question posée,
+        # sur la boucle d'événements, et la gelait 1 à 1,4 seconde — mesuré en
+        # production. On paie ce coût ici, au démarrage, sur un fil, quand
+        # personne n'attend. Aucun nouvel écouteur : cette boucle existait déjà.
+        try:
+            if await ai_service.prechauffer_le_client():
+                logger.info("Client IA préchauffé hors de la boucle : plus de gel à la 1re question.")
+        except Exception:  # noqa: BLE001 — un préchauffage raté n'empêche pas de répondre
+            logger.debug("Préchauffage IA ignoré", exc_info=True)
 
     # ---------------------------------------------------------------- EMBED LEGACY (/sentrix, /ask...)
 
