@@ -116,9 +116,11 @@ async def test_work_cooldown_30_minutes_and_default_career(bot):
     ):
         await cog.work.callback(cog, ctx)
     assert cog._panneau_gain.await_count == 2
-    assert (
-        40 <= cog._panneau_gain.call_args.kwargs["montant"] <= 240
-    )  # événement inclus
+    # Le salaire du Stagiaire va de 40 à 120, et un événement peut le doubler
+    # (prime, 5 %) OU le diviser par deux (journée ratée, 6 %). La borne basse
+    # était à 40 : elle ignorait la journée ratée, et ce test tombait donc une
+    # fois sur seize, au hasard du tirage. 20 = 40 / 2, 240 = 120 × 2.
+    assert 20 <= cog._panneau_gain.call_args.kwargs["montant"] <= 240
 
 
 @pytest.mark.asyncio
