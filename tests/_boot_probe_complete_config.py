@@ -30,8 +30,8 @@ from cogs.setup_experience_v74 import SentriXSetupV74
 from utils import spam_sensitivity
 
 
-#: 10/11/2026 : l'écran simple de la Sécurité et le crash-test portent la couleur de
-#: l'état (protégé / partiel / exposé), pas le bleu des autres centres.
+#: 11/11/2026 : les écrans de la Sécurité portent la couleur standard, comme les
+#: autres centres. Ces trois teintes restent tolérées pour les écrans d'état existants.
 ETAT_SECURITE = {0x57F287, 0xF0A020, 0xED4245}
 
 
@@ -78,14 +78,14 @@ async def main():
         else:
             # 10/11/2026 : la page s'ouvre sur l'écran simple ; l'écran complet (menu
             # « Configurer une protection ») est derrière « Personnaliser ».
-            assert {"Activer la sécurité", "Tester ma sécurité", "Personnaliser"} <= set(labels) or {
-                "Sécurité active", "Tester ma sécurité", "Personnaliser"
-            } <= set(labels), (page, labels, type(facade)._build_security.__module__)
-            for mode in ("crash", "detail"):
-                facade.clear_items()
-                facade._securite_mode = mode
-                await facade._build_page(page)
-                valid(facade)
+            assert {"Personnaliser", "Mots bloqués"} <= set(labels), (
+                page, labels, type(facade)._build_security.__module__,
+            )
+            assert {"Activer la sécurité", "Sécurité active"} & set(labels), (page, labels)
+            facade.clear_items()
+            facade._securite_mode = "detail"
+            await facade._build_page(page)
+            valid(facade)
             assert any(
                 getattr(x, "placeholder", "") == "Configurer une protection"
                 for x in facade.walk_children()
@@ -95,9 +95,14 @@ async def main():
         view = await SecurityCenterView(bot, guild, h.ADMIN_ID, key).build()
         valid(view)
         if key == "antinuke":
-            lines = [x for x in view.walk_children() if isinstance(x, discord.ui.Section)]
-            assert len(lines) >= 4
-            assert all(isinstance(x.accessory, discord.ui.Button) for x in lines)
+            # 11/11/2026 : les actions étaient quatre blocs « titre + texte + bouton »,
+            # soit douze lignes pour quatre clics. Ce sont des boutons en rangée.
+            labels = {
+                str(x.label) for x in view.walk_children()
+                if isinstance(x, discord.ui.Button) and x.label
+            }
+            assert {"Sanctions", "Membres de confiance", "Toutes les protections"} <= labels, labels
+            assert {"Activer", "Désactiver"} & labels, labels
         if key in {"antispam", "antiinvite", "antimention", "antiscam"}:
             for section in ("exceptions", "sanctions"):
                 view.section = section
