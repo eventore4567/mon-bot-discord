@@ -118,6 +118,9 @@ EXTENSIONS = [
     "cogs.command_channel_gate",
     "cogs.server_builder",
     "cogs.logs",
+    # Ce qui s'est passé pendant une coupure : relu dans le journal d'audit de
+    # Discord au démarrage. Aucune commande, uniquement un rattrapage.
+    "cogs.rattrapage_logs",
     # log_history_center n'a pas de commandes : importé par les actions
     # persistantes dans setup_hook, sans ajouter une extension au catalogue.
     "cogs.snipe",
