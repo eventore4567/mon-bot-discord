@@ -148,11 +148,13 @@ def test_la_fiche_invites_reste_simple_en_slash_et_prefix():
     assert not hasattr(Invites, "fakeconfig")
     assert not hasattr(Invites, "fakeinfo")
     source = inspect.getsource(Invites.invites_cmd.callback)
-    assert [label for label in ("Réelles", "Reparties", "Bonus", "Fakes")
-            if f'name="{label}"' in source] == ["Réelles", "Reparties", "Bonus", "Fakes"]
+    # 11/11/2026 : les quatre chiffres isolés ne disaient pas d'où venait le total
+    # crédité. Ils tiennent dans une ligne de calcul sous le chiffre, qui part
+    # du total des arrivées et retranche ce qui n'est pas crédité.
+    assert "detail_du_calcul(b)" in source
+    assert "embed.add_field" not in source, "la fiche n'a plus de champs séparés"
     assert "panels.Bouton" not in source
     assert "boutons=" not in source
-    assert 'name="En attente"' not in source
 
 
 @pytest.mark.asyncio
@@ -319,5 +321,7 @@ async def test_huit_arrivees_trois_departs_cinq_valides_zero_fake():
     result = await stats(invites, options=settings())
     assert result == {
         "total": 8, "left": 3, "fake": 0, "real": 5,
-        "pending": 0, "bonus": 0, "credited": 5,
+        "pending": 0, "rejoined": 0, "bonus": 0, "credited": 5,
     }
+    # Les compteurs couvrent exactement le total : aucune arrivée ne disparaît.
+    assert sum(result[c] for c in ("left", "fake", "pending", "rejoined", "real")) == result["total"]
