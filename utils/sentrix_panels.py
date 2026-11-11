@@ -21,6 +21,7 @@ from typing import Any, Iterable, Sequence
 import discord
 
 import config as _config
+from utils import couleurs_domaines as _domaines
 from utils import titres_discrets as _titres_discrets  # noqa: F401  (installe la règle des titres)
 from utils.log_banners import (
     BANNER_DIR, ensure_banners, family_for_command, nom_fichier,
@@ -45,17 +46,20 @@ INTENTIONS: dict[str, tuple[int, str]] = {
     "info": (int(_config.COLOR_INFO), "info"),
     "brand": (int(_config.COLOR_BRAND), "special"),
     "neutral": (int(_config.COLOR_INFO), "info"),
-    # Domaines : la teinte est celle de la famille de bannière (utils/log_banners).
-    "moderation": (0xFF6B6B, "moderation"),
-    "securite": (0x22D3EE, "security"),
-    "tickets": (0x2DD4BF, "tickets"),
-    "economie": (0xF5C542, "economy"),
-    "niveaux": (0xA3E635, "levels"),
-    "musique": (0xFF5FC8, "music"),
-    "jeux": (0xFF8A3D, "games"),
-    "ia": (0xA855F7, "ai"),
-    "configuration": (0xC084FC, "config"),
-    "bienvenue": (0x34D399, "welcome"),
+    # Domaines : la teinte est celle de la famille de bannière (utils/log_banners),
+    # et elle est lue dans utils/couleurs_domaines — la MÊME table que les cartes
+    # classiques depuis le 11/11/2026, sans quoi un domaine changeait de couleur
+    # selon l'écran qui l'affichait.
+    "moderation": (_domaines.DOMAINES["moderation"], "moderation"),
+    "securite": (_domaines.DOMAINES["securite"], "security"),
+    "tickets": (_domaines.DOMAINES["tickets"], "tickets"),
+    "economie": (_domaines.DOMAINES["economie"], "economy"),
+    "niveaux": (_domaines.DOMAINES["niveaux"], "levels"),
+    "musique": (_domaines.DOMAINES["musique"], "music"),
+    "jeux": (_domaines.DOMAINES["jeux"], "games"),
+    "ia": (_domaines.DOMAINES["ia"], "ai"),
+    "configuration": (_domaines.DOMAINES["configuration"], "config"),
+    "bienvenue": (_domaines.DOMAINES["bienvenue"], "welcome"),
     # Giveaways, concours, évènements. Même indigo que leur bannière : le liseré
     # du conteneur et le trait de la bannière doivent être la même couleur, sinon
     # la carte a deux teintes qui se disputent.
