@@ -6,6 +6,7 @@ de messages et réponses IA ne sont jamais stockés dans l'état d'observabilit�
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -17,6 +18,7 @@ import discord
 from discord.ext import commands
 
 from core.module_health import is_technical_failure
+from utils import boucle_sentinelle
 
 logger = logging.getLogger("bot.runtime-observability")
 
@@ -88,15 +90,31 @@ def _record_db(bot: commands.Bot, method: str, query: Any, elapsed: float) -> No
     state["db_total_seconds"] += float(elapsed)
     state["db_by_method"][str(method)] += 1
     if elapsed >= _SLOW_DB_SECONDS:
+        # 11/11/2026 : cette durée est mesurée AUTOUR du await. Quand la boucle
+        # d'événements est bloquée par du code synchrone, tout ce qui attendait
+        # semble lent — et ce message accusait PostgreSQL, qui n'y était pour rien
+        # (preuve : deux requêtes différentes à 1048.8 ms et 1048.4 ms, reparties
+        # ensemble). On dit désormais lequel des deux est en cause.
+        gel = boucle_sentinelle.retard_de_la_boucle()
         state["slow_db"].append(
             {
                 "method": str(method),
                 "ms": round(elapsed * 1000, 1),
+                "boucle_bloquee_ms": round(gel * 1000, 1),
                 "query": _query_fingerprint(query),
                 "at": int(time.time()),
             }
         )
-        logger.warning("Requête DB lente : %s %.1fms — %s", method, elapsed * 1000, _query_fingerprint(query))
+        if gel >= _SLOW_DB_SECONDS:
+            logger.warning(
+                "Attente DB %s %.1fms — mais la boucle était bloquée %.0fms : "
+                "ce n'est pas la base. Voir « Boucle bloquée » pour le coupable. — %s",
+                method, elapsed * 1000, gel * 1000, _query_fingerprint(query),
+            )
+        else:
+            logger.warning(
+                "Requête DB lente : %s %.1fms — %s", method, elapsed * 1000, _query_fingerprint(query)
+            )
 
 
 def _wrap_db_method(bot: commands.Bot, method_name: str) -> None:
@@ -331,5 +349,40 @@ def install(bot: commands.Bot) -> None:
     bot.add_listener(prefix_error, "on_command_error")
     bot.add_listener(interaction_start, "on_interaction")
     bot.add_listener(slash_complete, "on_app_command_completion")
+    _demarrer_la_sentinelle(bot)
     bot._sentrix_observability_v26_installed = True
-    logger.info("Observabilité SentriX active : DB, commandes, erreurs et release; 0 nouvelle commande.")
+    logger.info(
+        "Observabilité SentriX active : DB, commandes, erreurs, release et gel de boucle; "
+        "0 nouvelle commande."
+    )
+
+
+def _demarrer_la_sentinelle(bot: commands.Bot) -> None:
+    """Le battement côté boucle, et le fil qui le surveille.
+
+    Le battement est une tâche asyncio ordinaire : s'il cesse d'être rafraîchi,
+    c'est précisément que la boucle est bloquée — ce que le fil, lui, verra.
+    """
+    if getattr(bot, "_sentrix_sentinelle_boucle", False):
+        return
+    try:
+        boucle = asyncio.get_running_loop()
+    except RuntimeError:
+        # Pas de boucle en cours : audit hors ligne, test, outil en ligne de
+        # commande. Il n'y a rien à surveiller, et démarrer le fil ferait croire
+        # à un gel permanent. On ne surveille que ce qui tourne vraiment.
+        return
+    attendre_pret = getattr(bot, "wait_until_ready", None)
+    est_ferme = getattr(bot, "is_closed", None)
+    if not callable(attendre_pret) or not callable(est_ferme):
+        return
+
+    async def battre_sans_fin():
+        await attendre_pret()
+        while not est_ferme():
+            boucle_sentinelle.sentinelle.battre()
+            await asyncio.sleep(boucle_sentinelle.INTERVALLE_BATTEMENT)
+
+    boucle_sentinelle.sentinelle.demarrer()
+    boucle.create_task(battre_sans_fin())
+    bot._sentrix_sentinelle_boucle = True

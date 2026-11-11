@@ -24,6 +24,8 @@ from typing import Optional
 
 import discord
 
+from utils import couleurs_domaines as _domaines
+
 import config as _config
 
 
@@ -42,17 +44,21 @@ class SentriXColors:
     warning: int = _config.COLOR_WARNING
     danger: int = _config.COLOR_ERROR
     neutral: int = _config.COLOR_NEUTRAL
-    # Teintes d'identite par categorie : propres a design_system, pas des etats.
-    economy: int = 0xF1C40F
-    moderation: int = 0xE74C3C
-    security: int = 0x9B59B6
-    tickets: int = 0x3498DB
-    levels: int = 0x2ECC71
-    music: int = 0xE91E63
-    giveaways: int = 0xF39C12
+    # Teintes d'identite par domaine. 11/11/2026 : elles etaient propres a
+    # design_system, et ne correspondaient a AUCUNE des couleurs que les panneaux
+    # Components V2 donnent aux memes domaines — huit desaccords sur huit. La
+    # Securite etait violette en carte et cyan en panneau. Les deux familles lisent
+    # desormais la meme table, utils/couleurs_domaines, accordee aux bannieres.
+    economy: int = _domaines.DOMAINES["economie"]
+    moderation: int = _domaines.DOMAINES["moderation"]
+    security: int = _domaines.DOMAINES["securite"]
+    tickets: int = _domaines.DOMAINES["tickets"]
+    levels: int = _domaines.DOMAINES["niveaux"]
+    music: int = _domaines.DOMAINES["musique"]
+    giveaways: int = _domaines.DOMAINES["evenements"]
     invites: int = 0x1ABC9C
-    games: int = 0x00BCD4
-    ai: int = 0x8E44AD
+    games: int = _domaines.DOMAINES["jeux"]
+    ai: int = _domaines.DOMAINES["ia"]
     verification: int = 0x2ECC71
 
 
