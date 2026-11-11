@@ -223,7 +223,7 @@ class SecurityCenterView(CompleteView):
 
                 box.add_item(
                     discord.ui.ActionRow(
-                        button("Installer la vérification", install_verification)
+                        button("✅ Installer la vérification", install_verification)
                     )
                 )
 
@@ -252,23 +252,7 @@ class SecurityCenterView(CompleteView):
                 self.section = "global"
                 await self.refresh(i)
 
-            async def native(i):
-                cog = self.bot.get_cog("Automod")
-                if cog is None:
-                    return await i.response.send_message(
-                        "AutoMod indisponible.", ephemeral=True
-                    )
-                await i.response.defer(ephemeral=True, thinking=True)
-                # La protection native existante reste celle du moteur courant.
-                ok = await cog._sync_native_antieveryone_rule(self.guild)
-                await i.followup.send(
-                    "Protection native des mentions générales actualisée."
-                    if ok
-                    else "La règle native ne peut pas être activée avec les réglages ou permissions actuels. Les filtres locaux restent indépendants.",
-                    ephemeral=True,
-                )
-
-            async def simple(i):
+            async def retour_simple(i):
                 self.mode = "simple"
                 await self.refresh(i)
 
@@ -277,9 +261,9 @@ class SecurityCenterView(CompleteView):
             # propriétaire, il se voit ici.
             cog = self.bot.get_cog("Automod")
             boutons = [
-                button("Mots bloqués", words),
-                button("Exceptions", exceptions),
-                button("Sauvegardes", backups),
+                button("🚫 Mots bloqués", words),
+                button("👥 Exceptions", exceptions),
+                button("💾 Sauvegardes", backups),
             ]
             if cog is not None and hasattr(cog, "admins_soumis"):
                 strict = bool(await cog.admins_soumis(self.guild.id))
@@ -295,9 +279,9 @@ class SecurityCenterView(CompleteView):
                     await self.refresh(i)
 
                 boutons.append(button(
-                    f"Sanctionner les admins : {'Oui' if strict else 'Non'}", admins,
+                    f"🛡️ Admins sanctionnés : {'Oui' if strict else 'Non'}", admins,
                 ))
-            boutons += [button("AutoMod Discord", native), button("Vue simple", simple)]
+            boutons.append(button("↩️ Retour", retour_simple))
             for debut in range(0, len(boutons), 5):
                 box.add_item(discord.ui.ActionRow(*boutons[debut:debut + 5]))
             if self.section == "global":
