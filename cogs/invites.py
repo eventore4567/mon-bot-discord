@@ -50,6 +50,29 @@ SUSPECT_ACCOUNT_AGE_DAYS = 3
 INVITE_PREFETCH_INTERVAL = 0.5
 
 
+#: 11/11/2026 : « 17 créditées » au-dessus de « Réelles 17, Reparties 5, Fakes 1 »
+#: n'expliquait rien — on ne pouvait pas vérifier d'où venait le 17, et le total des
+#: arrivées n'était écrit nulle part. La fiche montre maintenant la soustraction.
+def detail_du_calcul(b: dict) -> str:
+    """« 23 arrivées, −5 reparties, −1 suspecte » : le calcul se lit en entier."""
+    retraits = [
+        (int(b.get("left", 0)), "repartie", "reparties"),
+        (int(b.get("fake", 0)), "suspecte", "suspectes"),
+        (int(b.get("pending", 0)), "en attente", "en attente"),
+        (int(b.get("rejoined", 0)), "déjà comptée", "déjà comptées"),
+    ]
+    total = int(b.get("total", 0))
+    morceaux = [f"**{total}** arrivée{'s' if total > 1 else ''}"]
+    morceaux += [
+        f"−{nombre} {singulier if nombre == 1 else pluriel}"
+        for nombre, singulier, pluriel in retraits if nombre
+    ]
+    bonus = int(b.get("bonus", 0))
+    if bonus:
+        morceaux.append(f"+{bonus} bonus")
+    return "-# " + " · ".join(morceaux)
+
+
 class Invites(commands.Cog, name="Invites"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -334,17 +357,15 @@ class Invites(commands.Cog, name="Invites"):
         style = design_system.CATEGORY_STYLES["invites"]
         embed = design_system.create_embed(
             title=f"{style['emoji']} Invitations de {membre.display_name}",
-            description=f"**{design_system.format_number(b['credited'])}** invitation(s) créditée(s) au total.",
+            description=(
+                f"**{design_system.format_number(b['credited'])}** invitation(s) créditée(s).\n"
+                + detail_du_calcul(b)
+            ),
             colour=design.get("primary_color", style["colour"]),
             user=membre if design.get("show_avatars", True) else None,
             thumbnail=membre.display_avatar.url if design.get("show_avatars", True) else None,
             footer=design.get("footer"),
         )
-        # Fiche courte identique pour /invites et +i : aucun bouton, aucune commande fake.
-        embed.add_field(name="Réelles", value=design_system.format_number(b["real"]), inline=True)
-        embed.add_field(name="Reparties", value=design_system.format_number(b["left"]), inline=True)
-        embed.add_field(name="Bonus", value=design_system.format_number(b["bonus"]), inline=True)
-        embed.add_field(name="Fakes", value=design_system.format_number(b["fake"]), inline=True)
         await panels.envoyer(ctx, panels.depuis_embed(embed))
 
     @commands.hybrid_command(name="invite-leaderboard", description="Classement des membres ayant le plus invité (invitations créditées).")
@@ -510,13 +531,17 @@ class Invites(commands.Cog, name="Invites"):
             (ctx.guild.id, membre.id),
         )
         last_ts = int(latest["ts"] or 0) if latest else 0
+        # Les cinq compteurs s'additionnent pour donner le total brut : sans la
+        # ligne « Revenues », un membre revenu manquait à l'appel.
         description = (
+            f"Total des arrivées : **{b['total']}**\n"
             f"Réelles : **{b['real']}**\n"
-            f"Fake actives : **{b['fake']}**\n"
             f"Reparties : **{b['left']}**\n"
+            f"Suspectes : **{b['fake']}**\n"
+            f"En attente : **{b.get('pending', 0)}**\n"
+            f"Revenues (déjà comptées) : **{b.get('rejoined', 0)}**\n"
             f"Bonus staff : **{b['bonus']}**\n"
-            f"Total brut : **{b['total']}**\n"
-            f"Total crédité : **{b['credited']}**\n"
+            f"Total crédité : **{b['credited']}** (réelles + bonus)\n"
             f"Rétention : **{retention}%**"
         )
         if last_ts:

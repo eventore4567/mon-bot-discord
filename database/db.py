@@ -2559,12 +2559,16 @@ class Database:
         # Compteurs exclusifs : une invitation déjà partie relève uniquement de
         # « Reparties », même si elle était suspecte à son arrivée. Sinon le
         # même membre apparaît à la fois dans Reparties et Fakes.
+        # 11/11/2026 : « rejoined » servait de filtre à « real » mais n'était compté
+        # nulle part. Un membre revenu disparaissait donc du détail : total ≠ réelles
+        # + reparties + fakes + attente, et la fiche /invites ne tombait jamais juste.
+        # Les cinq compteurs sont désormais exclusifs ET exhaustifs.
         return {
             "reasons": reasons,
             "fake": left_at is None and bool(reasons),
             "pending": pending,
             "left": left_at is not None,
-            "rejoined": rejoined,
+            "rejoined": left_at is None and not reasons and not pending and rejoined,
             "real": left_at is None and not reasons and not pending and not rejoined,
         }
 
@@ -2581,7 +2585,7 @@ class Database:
             (guild_id, inviter_id),
         )
         unique_members: set[int] = set()
-        total = left = fake = real = pending = 0
+        total = left = fake = real = pending = rejoined = 0
         instant = now()
         for row in rows:
             member_id = row["member_id"]
@@ -2596,6 +2600,7 @@ class Database:
             left += int(detail["left"])
             fake += int(detail["fake"])
             pending += int(detail["pending"])
+            rejoined += int(detail["rejoined"])
             real += int(detail["real"])
         bonus_row = await self.fetchone(
             "SELECT COALESCE(SUM(amount),0) as s FROM invite_bonuses WHERE guild_id=? AND user_id=?",
@@ -2604,7 +2609,8 @@ class Database:
         bonus = int(bonus_row["s"]) if bonus_row else 0
         return {
             "total": total, "left": left, "fake": fake, "real": real,
-            "pending": pending, "bonus": bonus, "credited": real + bonus,
+            "pending": pending, "rejoined": rejoined, "bonus": bonus,
+            "credited": real + bonus,
         }
 
     async def get_invite_member_assessment(self, guild_id: int, member_id: int) -> dict | None:
