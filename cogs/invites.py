@@ -50,6 +50,11 @@ SUSPECT_ACCOUNT_AGE_DAYS = 3
 # longues minutes à grande échelle — celle dont l'AutoMod a besoin pour supprimer
 # le spam. Il part en tâche de fond, à débit borné, les plus gros serveurs d'abord.
 INVITE_PREFETCH_INTERVAL = 0.5
+#: Au-delà, la référence enregistrée ne veut plus rien dire (bot retiré puis réinvité,
+#: base restaurée) : on ne rattrape rien plutôt que d'inventer des invitations.
+RATTRAPAGE_FENETRE = 30 * 86400
+#: Un écart plus grand sur UN lien tient de l'anomalie, pas d'une coupure : on s'abstient.
+RATTRAPAGE_MAX_PAR_LIEN = 200
 
 
 #: 11/11/2026 : le résumé est revenu, en français et dans l'ordre d'InviteLogger.
@@ -86,12 +91,106 @@ class Invites(commands.Cog, name="Invites"):
         if self._prefetch_task is not None:
             self._prefetch_task.cancel()
 
-    async def cache_guild_invites(self, guild: discord.Guild):
+    async def cache_guild_invites(self, guild: discord.Guild, *, rattraper: bool = False):
         try:
             invites = await guild.invites()
-            self.invite_cache[guild.id] = {inv.code: (inv.uses or 0) for inv in invites}
         except discord.Forbidden:
             self.invite_cache[guild.id] = {}
+            return
+        # Au démarrage, AVANT d'écraser la référence : ce que son écart avec les
+        # compteurs d'aujourd'hui raconte, c'est ce qui s'est passé sans nous.
+        if rattraper:
+            try:
+                await self._rattraper_les_absences(guild, invites)
+            except Exception:  # noqa: BLE001 — un rattrapage raté ne bloque pas le démarrage
+                logger.warning("Rattrapage des invitations impossible guild=%s", guild.id, exc_info=True)
+        self.invite_cache[guild.id] = {inv.code: (inv.uses or 0) for inv in invites}
+        # La référence est aussi écrite en base : c'est elle qui permettra, au prochain
+        # démarrage, de savoir ce qui s'est passé pendant que SentriX était éteint.
+        await self._memoriser_les_compteurs(guild, invites)
+
+    async def _memoriser_les_compteurs(self, guild: discord.Guild, invites) -> None:
+        try:
+            await self.bot.db.save_invite_code_counters(
+                guild.id, {str(inv.code): int(inv.uses or 0) for inv in invites}
+            )
+        except Exception:  # noqa: BLE001 — la mémoire des compteurs n'est jamais bloquante
+            logger.debug("Compteurs d'invitation non enregistrés guild=%s", guild.id, exc_info=True)
+
+    async def _rattraper_les_absences(self, guild: discord.Guild, invites) -> int:
+        """Retrouve les arrivées survenues pendant que SentriX était hors ligne.
+
+        Le compteur d'utilisations d'un lien appartient à Discord : il monte même bot
+        éteint. En comparant le compteur enregistré au démarrage précédent avec celui
+        d'aujourd'hui, on sait combien d'arrivées ont eu lieu sans nous, et par quel lien
+        — donc par qui. Ce qu'on ne sait pas, c'est QUI est arrivé : un membre encore
+        présent et sans ligne est reconnu par sa date d'arrivée ; sinon la ligne est
+        enregistrée sans identité, jamais avec un membre inventé.
+        """
+        reference = await self.bot.db.get_invite_code_counters(guild.id)
+        if not reference:
+            return 0  # Premier démarrage sur ce serveur : pas de passé, rien à rattraper.
+        derniere_lecture = max((c["at"] for c in reference.values()), default=0)
+        if not derniere_lecture or time.time() - derniere_lecture > RATTRAPAGE_FENETRE:
+            # Référence trop vieille (bot retiré puis réinvité, base restaurée) : l'écart
+            # ne veut plus rien dire. On se tait plutôt que d'inventer des invitations.
+            return 0
+
+        ecarts = []
+        for inv in invites:
+            connu = reference.get(str(inv.code))
+            if connu is None or inv.inviter is None:
+                continue  # Lien créé depuis, ou sans auteur connu : rien à attribuer.
+            delta = int(inv.uses or 0) - int(connu["uses"])
+            if 0 < delta <= RATTRAPAGE_MAX_PAR_LIEN:
+                ecarts.append([inv, delta])
+        if not ecarts:
+            return 0
+
+        # Les membres arrivés depuis la dernière lecture dont SentriX n'a aucune trace :
+        # ce sont eux, les arrivées manquées, tant qu'ils sont encore là.
+        candidats = [
+            m for m in guild.members
+            if not m.bot and m.joined_at and m.joined_at.timestamp() >= derniere_lecture
+        ]
+        candidats.sort(key=lambda m: m.joined_at)
+        if candidats:
+            inconnus = await self.bot.db.membres_sans_arrivee_connue(
+                guild.id, [m.id for m in candidats]
+            )
+            candidats = [m for m in candidats if m.id in inconnus]
+
+        rattrapees = 0
+        # Un seul lien a bougé : chaque membre arrivé dans l'intervalle est forcément
+        # passé par lui. C'est le cas courant, et le seul où l'identité est certaine.
+        if len(ecarts) == 1 and candidats:
+            invitation, delta = ecarts[0]
+            for membre in candidats[:delta]:
+                await self.bot.db.record_invite_join(
+                    guild.id, membre.id, invitation.inviter.id, invitation.code,
+                    max(0, (discord.utils.utcnow() - membre.created_at).days),
+                    fake_flags=0, joined_at=int(membre.joined_at.timestamp()),
+                )
+                rattrapees += 1
+            ecarts[0][1] = delta - rattrapees
+
+        # Ce qui reste : le lien a servi, mais personne de nouveau n'est là pour le
+        # prouver — ces membres sont repartis. La ligne compte dans « Reparties » et ne
+        # crédite donc rien, exactement comme si SentriX les avait vus arriver et partir.
+        for invitation, restant in ecarts:
+            for _ in range(max(0, restant)):
+                await self.bot.db.record_invite_arrivee_rattrapee(
+                    guild.id, invitation.inviter.id, invitation.code,
+                    parti=True, joined_at=int(derniere_lecture),
+                )
+                rattrapees += 1
+
+        if rattrapees:
+            logger.info(
+                "Invitations : %s arrivée(s) rattrapée(s) hors ligne guild=%s",
+                rattrapees, guild.id,
+            )
+        return rattrapees
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -115,7 +214,7 @@ class Invites(commands.Cog, name="Invites"):
             if guild.id in self.invite_cache:
                 continue
             try:
-                await self.cache_guild_invites(guild)
+                await self.cache_guild_invites(guild, rattraper=True)
             except discord.HTTPException:
                 logger.debug("Invitations illisibles guild=%s", guild.id, exc_info=True)
             await asyncio.sleep(INVITE_PREFETCH_INTERVAL)
