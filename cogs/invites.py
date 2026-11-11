@@ -11,7 +11,10 @@ maintenant par utils/design_system et affichent un détail réelles/fake/reparti
 façon InviteLogger. AUCUNE de ces valeurs n'est inventée :
 - "fake" est un signal de suspicion calculé à partir de l'âge enregistré du
   compte (seuil de 3 jours par défaut, 7 jours quand le mode renforcé est activé
-  par un administrateur), ou d'un départ sous 1 h en mode renforcé.
+  par un administrateur), ou d'un départ sous 1 h en mode renforcé. Depuis le
+  11/11/2026 c'est un SIGNAL, pas une sanction : une arrivée suspecte reste
+  créditée, comme chez InviteLogger, tant que le serveur n'a pas explicitement
+  demandé le contraire (réglage "exclude_fakes").
 - "bonus" est un ajustement 100% manuel et traçable, accordé explicitement par un membre
   du staff via /addbonusinvites — jamais généré automatiquement par le bot.
 Voir database/db.py::get_invite_breakdown() pour le détail du calcul.
@@ -48,6 +51,33 @@ SUSPECT_ACCOUNT_AGE_DAYS = 3
 # longues minutes à grande échelle — celle dont l'AutoMod a besoin pour supprimer
 # le spam. Il part en tâche de fond, à débit borné, les plus gros serveurs d'abord.
 INVITE_PREFETCH_INTERVAL = 0.5
+
+
+#: 11/11/2026 : « 17 créditées » au-dessus de « Réelles 17, Reparties 5, Fakes 1 »
+#: n'expliquait rien — on ne pouvait pas vérifier d'où venait le 17, et le total des
+#: arrivées n'était écrit nulle part. La fiche montre maintenant la soustraction,
+#: et seulement les lignes réellement soustraites : une suspecte est signalée, pas
+#: retirée, tant que le serveur n'a pas demandé le contraire.
+def detail_du_calcul(b: dict) -> str:
+    """« 23 arrivées · −5 reparties · 1 suspecte signalée » : le calcul se lit en entier."""
+    strict = bool(b.get("fakes_deduits"))
+    retraits = [
+        (int(b.get("left", 0)), "repartie", "reparties", True),
+        (int(b.get("fake", 0)), "suspecte", "suspectes", strict),
+        (int(b.get("pending", 0)), "en attente", "en attente", True),
+        (int(b.get("rejoined", 0)), "déjà comptée", "déjà comptées", strict),
+    ]
+    total = int(b.get("total", 0))
+    morceaux = [f"**{total}** arrivée{'s' if total > 1 else ''}"]
+    for nombre, singulier, pluriel, soustrait in retraits:
+        if not nombre:
+            continue
+        mot = singulier if nombre == 1 else pluriel
+        morceaux.append(f"−{nombre} {mot}" if soustrait else f"{nombre} {mot} signalée{'s' if nombre > 1 else ''}")
+    bonus = int(b.get("bonus", 0))
+    if bonus:
+        morceaux.append(f"+{bonus} bonus")
+    return "-# " + " · ".join(morceaux)
 
 
 class Invites(commands.Cog, name="Invites"):
@@ -334,17 +364,15 @@ class Invites(commands.Cog, name="Invites"):
         style = design_system.CATEGORY_STYLES["invites"]
         embed = design_system.create_embed(
             title=f"{style['emoji']} Invitations de {membre.display_name}",
-            description=f"**{design_system.format_number(b['credited'])}** invitation(s) créditée(s) au total.",
+            description=(
+                f"**{design_system.format_number(b['credited'])}** invitation(s) créditée(s).\n"
+                + detail_du_calcul(b)
+            ),
             colour=design.get("primary_color", style["colour"]),
             user=membre if design.get("show_avatars", True) else None,
             thumbnail=membre.display_avatar.url if design.get("show_avatars", True) else None,
             footer=design.get("footer"),
         )
-        # Fiche courte identique pour /invites et +i : aucun bouton, aucune commande fake.
-        embed.add_field(name="Réelles", value=design_system.format_number(b["real"]), inline=True)
-        embed.add_field(name="Reparties", value=design_system.format_number(b["left"]), inline=True)
-        embed.add_field(name="Bonus", value=design_system.format_number(b["bonus"]), inline=True)
-        embed.add_field(name="Fakes", value=design_system.format_number(b["fake"]), inline=True)
         await panels.envoyer(ctx, panels.depuis_embed(embed))
 
     @commands.hybrid_command(name="invite-leaderboard", description="Classement des membres ayant le plus invité (invitations créditées).")
@@ -510,13 +538,22 @@ class Invites(commands.Cog, name="Invites"):
             (ctx.guild.id, membre.id),
         )
         last_ts = int(latest["ts"] or 0) if latest else 0
+        # Les cinq compteurs s'additionnent pour donner le total brut : sans la
+        # ligne « Revenues », un membre revenu manquait à l'appel.
+        # 11/11/2026 : le détail dit maintenant ce qui est réellement retiré du
+        # crédit — une suspecte est signalée, pas déduite, sauf réglage du serveur.
+        strict = bool(b.get("fakes_deduits"))
+        suspectes = "retirées du crédit" if strict else "signalées, toujours créditées"
+        formule = "réelles + bonus" if strict else "arrivées encore présentes + bonus"
         description = (
+            f"Total des arrivées : **{b['total']}**\n"
             f"Réelles : **{b['real']}**\n"
-            f"Fake actives : **{b['fake']}**\n"
             f"Reparties : **{b['left']}**\n"
+            f"Suspectes : **{b['fake']}** ({suspectes})\n"
+            f"En attente : **{b.get('pending', 0)}**\n"
+            f"Revenues (déjà comptées) : **{b.get('rejoined', 0)}**\n"
             f"Bonus staff : **{b['bonus']}**\n"
-            f"Total brut : **{b['total']}**\n"
-            f"Total crédité : **{b['credited']}**\n"
+            f"Total crédité : **{b['credited']}** ({formule})\n"
             f"Rétention : **{retention}%**"
         )
         if last_ts:
