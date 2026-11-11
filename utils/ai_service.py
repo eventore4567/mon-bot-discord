@@ -13,6 +13,7 @@ dans ce fichier :
   (type d'exception, message OpenAI) n'apparaît que dans les logs serveur (logger "bot.ai").
 """
 
+import asyncio
 import base64
 import json
 import logging
@@ -542,6 +543,35 @@ IMAGE_SIZE_4K = "3840x2160"
 
 _TEXT_CLIENT = None
 _IMAGE_CLIENT = None
+
+
+async def prechauffer_le_client() -> bool:
+    """Charge le SDK OpenAI et construit le client HORS de la boucle d'événements.
+
+    Le premier ``from openai import AsyncOpenAI`` charge des centaines de modules
+    et construit un contexte TLS. Mesuré en production par le détecteur de
+    blocage, à plusieurs reprises :
+
+        Boucle bloquée 1.2 s — utils/ai_service.py:548 get_client ← generate ← ...
+        Boucle bloquée 1.1 s — utils/ai_service.py:557 get_client ← translation._openai
+
+    Une seconde entière pendant laquelle la boucle ne répond plus : aucune
+    commande, aucune règle AutoMod, aucun battement n'avance. Et ce coût tombait
+    sur la PREMIÈRE question posée à l'IA, c'est-à-dire au pire moment possible,
+    quand quelqu'un attendait justement une réponse.
+
+    ``asyncio.to_thread`` déplace ce chargement sur un fil : la boucle continue
+    de tourner pendant ce temps. Une fois le module chargé, il reste en cache et
+    les appels suivants sont instantanés — c'est donc un coût payé une seule
+    fois, au démarrage, quand personne n'attend.
+    """
+    if not config.OPENAI_API_KEY:
+        return False
+    try:
+        return await asyncio.to_thread(lambda: get_client() is not None)
+    except Exception:  # noqa: BLE001 — un préchauffage raté n'empêche jamais de répondre
+        logger.debug("Préchauffage du client IA impossible", exc_info=True)
+        return False
 
 
 def get_client():

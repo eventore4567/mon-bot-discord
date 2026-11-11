@@ -73,3 +73,35 @@ def test_ancien_battement_ne_modifie_pas_l_etat_d_un_nouveau_cycle():
         assert loop_watchdog._etat["dernier"] == 123.0
     finally:
         loop_watchdog._etat.update(saved)
+
+
+# ---------------------------------------------------------------------------
+# 11/11/2026 : le détecteur existait, mais son seuil d'une seconde laissait
+# passer les gels de 400 à 900 ms — qui ressortaient alors en « requête DB
+# lente » et faisaient accuser PostgreSQL, innocent. Preuve en production :
+# deux requêtes sur deux tables différentes à 1048.8 ms et 1048.4 ms, reparties
+# ensemble parce que la boucle, elle, était bloquée.
+# ---------------------------------------------------------------------------
+def test_le_seuil_attrape_les_gels_de_moins_d_une_seconde():
+    assert loop_watchdog.SEUIL_S <= 0.5, (
+        "un gel de 400 ms est déjà un gel : pendant ce temps aucune commande, "
+        "aucune règle AutoMod, aucun battement n'avance"
+    )
+
+
+def test_sans_detecteur_actif_le_retard_est_nul():
+    """Un audit hors ligne n'a pas de boucle : il doit lire « aucun gel »,
+    pas « gelée depuis toujours », sinon l'observabilité accuse un innocent."""
+    loop_watchdog.arreter()
+    assert loop_watchdog.retard_de_la_boucle() == 0.0
+
+
+def test_le_retard_grandit_quand_la_boucle_ne_bat_plus():
+    import time as _time
+
+    loop_watchdog._etat["actif"] = True
+    loop_watchdog._etat["dernier"] = _time.monotonic() - 1.0
+    try:
+        assert loop_watchdog.retard_de_la_boucle() > 0.5
+    finally:
+        loop_watchdog.arreter()
