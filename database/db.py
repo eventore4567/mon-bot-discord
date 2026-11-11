@@ -780,8 +780,7 @@ CREATE TABLE IF NOT EXISTS invite_detection_settings (
     block_rejoins INTEGER NOT NULL DEFAULT 1,
     required_role_id INTEGER NOT NULL DEFAULT 0,
     credit_delay_hours INTEGER NOT NULL DEFAULT 0,
-    quick_leave_seconds INTEGER NOT NULL DEFAULT 3600,
-    exclude_fakes INTEGER NOT NULL DEFAULT 0
+    quick_leave_seconds INTEGER NOT NULL DEFAULT 3600
 );
 
 -- Invitations "bonus" : un ajustement manuel et traçable accordé par le staff (ex: un
@@ -1269,9 +1268,6 @@ INVITE_DETECTION_NEW_COLUMNS = {
     "required_role_id": "INTEGER NOT NULL DEFAULT 0",
     "credit_delay_hours": "INTEGER NOT NULL DEFAULT 0",
     "quick_leave_seconds": "INTEGER NOT NULL DEFAULT 3600",
-    # 11/11/2026 : retirer une invitation suspecte du total crédité est devenu un
-    # choix du serveur, et il est désactivé par défaut (voir get_invite_breakdown).
-    "exclude_fakes": "INTEGER NOT NULL DEFAULT 0",
 }
 
 # Même principe, pour giveaways : "image_url" ajoutée pour permettre une image sur
@@ -2460,40 +2456,38 @@ class Database:
         """Règles propres au serveur : optionnelles, et figées pour les prochains joins."""
         row = await self.fetchone(
             "SELECT enabled,min_account_age_days,block_self_invite,require_avatar,"
-            "block_rejoins,required_role_id,credit_delay_hours,quick_leave_seconds,"
-            "exclude_fakes FROM invite_detection_settings WHERE guild_id=?",
+            "block_rejoins,required_role_id,credit_delay_hours,quick_leave_seconds "
+            "FROM invite_detection_settings WHERE guild_id=?",
             (guild_id,),
         )
+        # 11/11/2026 : le seuil par défaut passe de 7 à 3 jours. À 7 jours, SentriX
+        # marquait « fake » des comptes qu'InviteLogger comptait normalement, et
+        # chaque faux positif retirait une invitation réellement faite à son auteur.
+        # Trois jours, c'est le seuil historique de SentriX, et ce qu'un humain
+        # appelle un compte jetable. Un serveur qui veut plus sévère le règle.
         defaults = {
             "enabled": True,
-            "min_account_age_days": 7,
+            "min_account_age_days": FAKE_INVITE_ACCOUNT_AGE_DAYS,
             "block_self_invite": True,
             "require_avatar": False,
             "block_rejoins": True,
             "required_role_id": 0,
             "credit_delay_hours": 0,
             "quick_leave_seconds": 3600,
-            "exclude_fakes": False,
         }
         if row is None:
             return defaults
-        # La colonne « exclude_fakes » est ajoutée par migration : une base lue
-        # avant la migration renvoie une ligne sans elle, et le réglage par défaut
-        # (ne rien retrancher) reste le bon.
-        try:
-            exclure_les_suspects = bool(row["exclude_fakes"])
-        except (KeyError, IndexError):
-            exclure_les_suspects = False
         return {
             "enabled": bool(row["enabled"]),
-            "min_account_age_days": min(30, max(1, int(row["min_account_age_days"] or 7))),
+            "min_account_age_days": min(
+                30, max(1, int(row["min_account_age_days"] or FAKE_INVITE_ACCOUNT_AGE_DAYS))
+            ),
             "block_self_invite": bool(row["block_self_invite"]),
             "require_avatar": bool(row["require_avatar"]),
             "block_rejoins": bool(row["block_rejoins"]),
             "required_role_id": max(0, int(row["required_role_id"] or 0)),
             "credit_delay_hours": min(168, max(0, int(row["credit_delay_hours"] or 0))),
             "quick_leave_seconds": min(86400, max(0, int(row["quick_leave_seconds"] or 0))),
-            "exclude_fakes": exclure_les_suspects,
         }
 
     async def set_invite_detection_enabled(self, guild_id: int, enabled: bool) -> None:
@@ -2513,7 +2507,6 @@ class Database:
             "required_role_id": (0, 9223372036854775807),
             "credit_delay_hours": (0, 168),
             "quick_leave_seconds": (0, 86400),
-            "exclude_fakes": (0, 1),
         }
         if key not in allowed or not allowed[key][0] <= int(value) <= allowed[key][1]:
             raise ValueError("Règle ou valeur anti-fake invalide")
@@ -2528,12 +2521,12 @@ class Database:
         )
 
     @staticmethod
-    def _invite_row_assessment(row, *, legacy_threshold: int, timestamp: int) -> dict:
+    def _invite_row_assessment(row, *, seuil_age: int, timestamp: int) -> dict:
         """Évalue une arrivée sans confondre soupçon d'alt, retour et départ.
 
-        Comme InviteLogger, l'âge est celui du compte AU MOMENT de l'arrivée :
-        le seuil des nouvelles arrivées est figé dans fake_flags. Les anciennes
-        lignes sans flags gardent leur seuil historique de 3 jours.
+        Comme InviteLogger, l'âge pris en compte est celui du compte AU MOMENT de
+        l'arrivée — il est enregistré avec la ligne et ne bouge plus. Le seuil, lui,
+        est celui du serveur aujourd'hui : corriger le seuil corrige l'historique.
         Le manque d'avatar et un retour ne prouvent pas un faux compte.
         """
         left_at = row["left_at"]
@@ -2543,13 +2536,15 @@ class Database:
         rejoined = False
         role_pending = False
 
-        if flags is None:
-            if age is not None and 0 <= int(age) < legacy_threshold:
-                reasons.append("Compte trop récent")
-        else:
+        # 11/11/2026 : l'âge est réévalué ICI, sur l'âge enregistré à l'arrivée,
+        # au lieu de croire le bit figé dans fake_flags. Ce bit avait été posé avec
+        # un seuil de 7 jours que personne n'avait choisi : un serveur qui corrige
+        # son seuil restait accusé par son propre historique. L'âge enregistré, lui,
+        # ne change pas — seule la règle qu'on lui applique change.
+        if age is not None and 0 <= int(age) < seuil_age:
+            reasons.append(f"Compte de moins de {seuil_age} jour(s) à l'arrivée")
+        if flags is not None:
             flags = int(flags)
-            if flags & 1:
-                reasons.append("Compte de moins de 7 jours à l'arrivée")
             if flags & 2:
                 reasons.append("Auto-invitation")
             # Bit 4 (avatar par défaut) est informatif : jamais une preuve de fake.
@@ -2588,17 +2583,9 @@ class Database:
 
     async def get_invite_breakdown(self, guild_id: int, inviter_id: int) -> dict:
         settings = await self.get_invite_detection_settings(guild_id)
-        # Historique antérieur à cette version : conserver le calcul d'origine
-        # (< 3 jours), même quand la détection renforcée est active aujourd'hui.
-        legacy_threshold = FAKE_INVITE_ACCOUNT_AGE_DAYS
-        # 11/11/2026 : SentriX affichait 17 là où InviteLogger affichait 18, sur le
-        # même serveur et les mêmes arrivées. L'écart venait d'ici : un compte créé
-        # moins de sept jours avant son arrivée était retiré du total crédité SANS
-        # que personne l'ait demandé. Un soupçon n'est pas une preuve, et retirer
-        # une invitation à quelqu'un qui l'a réellement faite est le pire des deux
-        # risques. SentriX compte donc comme InviteLogger — les arrivées encore là —
-        # et ne déduit un compte suspect que si le serveur l'a explicitement réglé.
-        exclure_les_suspects = bool(settings.get("exclude_fakes"))
+        # Le seuil appliqué est celui du serveur AUJOURD'HUI (3 jours par défaut),
+        # pas celui qui traînait dans les flags d'une arrivée d'il y a six mois.
+        seuil_age = int(settings.get("min_account_age_days") or FAKE_INVITE_ACCOUNT_AGE_DAYS)
         rows = await self.fetchall(
             "SELECT id,member_id,joined_at,left_at,account_age_days,fake_flags,"
             "required_role_id,role_confirmed,pending_until,quick_leave_seconds "
@@ -2615,9 +2602,7 @@ class Database:
             if unique_id in unique_members:
                 continue
             unique_members.add(unique_id)
-            detail = self._invite_row_assessment(
-                row, legacy_threshold=legacy_threshold, timestamp=instant
-            )
+            detail = self._invite_row_assessment(row, seuil_age=seuil_age, timestamp=instant)
             total += 1
             left += int(detail["left"])
             fake += int(detail["fake"])
@@ -2629,15 +2614,13 @@ class Database:
             (guild_id, inviter_id),
         )
         bonus = int(bonus_row["s"]) if bonus_row else 0
-        # Le crédit par défaut : les arrivées encore présentes, moins celles qui
-        # attendent un délai ou un rôle réclamé par le serveur. Les suspectes restent
-        # affichées — elles sont signalées, pas retirées.
-        credite = real if exclure_les_suspects else real + rejoined + fake
+        # Le calcul d'InviteLogger : les arrivées, moins les reparties, moins les
+        # suspectes, plus le bonus du staff. Les arrivées en attente d'un délai ou
+        # d'un rôle demandé par le serveur ne comptent pas encore.
         return {
             "total": total, "left": left, "fake": fake, "real": real,
             "pending": pending, "rejoined": rejoined, "bonus": bonus,
-            "fakes_deduits": exclure_les_suspects,
-            "credited": credite + bonus,
+            "credited": total - left - fake - pending + bonus,
         }
 
     async def get_invite_member_assessment(self, guild_id: int, member_id: int) -> dict | None:
@@ -2649,8 +2632,8 @@ class Database:
         if row is None:
             return None
         settings = await self.get_invite_detection_settings(guild_id)
-        threshold = FAKE_INVITE_ACCOUNT_AGE_DAYS
-        data = self._invite_row_assessment(row, legacy_threshold=threshold, timestamp=now())
+        seuil_age = int(settings.get("min_account_age_days") or FAKE_INVITE_ACCOUNT_AGE_DAYS)
+        data = self._invite_row_assessment(row, seuil_age=seuil_age, timestamp=now())
         return {
             **data,
             "inviter_id": row["inviter_id"],
