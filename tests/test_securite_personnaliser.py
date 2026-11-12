@@ -55,11 +55,31 @@ def test_les_boutons_portent_des_icones_sentrix():
     qui le remplace par l'icône animée du pack. Sans le pack, le libellé reste lisible."""
     from utils.sentrix_emojis import EQUIVALENCES
 
-    for prefixe in ("🚫 Mots bloqués", "👥 Exceptions", "💾 Sauvegardes",
-                    "↩️ Retour", "✅ Installer la vérification"):
+    for prefixe in ("👥 Exceptions", "↩️ Retour", "✅ Installer la vérification"):
         assert f'button("{prefixe}"' in SOURCE, prefixe
         assert prefixe.split(" ", 1)[0] in EQUIVALENCES, prefixe
     assert '🛡️ Admins sanctionnés' in SOURCE and "🛡️" in EQUIVALENCES
+
+
+def test_l_ecran_ne_garde_que_ce_qui_lui_appartient():
+    """12/11/2026 : « enlève quelques boutons sur la sécurité, y'en a trop ».
+
+    « Mots bloqués » était un doublon de l'écran Sécurité simple, c'est-à-dire
+    du même écran à un clic d'écart. « Sauvegardes » n'est pas une protection :
+    sauvegarder un serveur n'a rien à voir avec le défendre, et la fonction
+    garde sa commande +security backup.
+    """
+    # On vise les BOUTONS, pas la prose : le commentaire qui explique leur retrait
+    # cite forcément leurs noms, et le test tomberait sur sa propre justification.
+    assert 'button("🚫 Mots bloqués"' not in SOURCE, "doublon de l'écran Sécurité simple"
+    assert 'button("💾 Sauvegardes"' not in SOURCE
+    assert "BackupSetupView" not in SOURCE, "plus d'appel aux sauvegardes depuis la sécurité"
+    assert "mots_bloques.ouvrir" not in SOURCE
+
+    # Le doublon doit bien exister là où il a du sens, sinon ce n'est pas un
+    # doublon mais une suppression de fonctionnalité.
+    simple = (Path(__file__).resolve().parents[1] / "cogs" / "securite_simple.py").read_text(encoding="utf-8")
+    assert "Mots bloqués" in simple
 
 
 def test_le_bouton_automod_discord_est_retire():
