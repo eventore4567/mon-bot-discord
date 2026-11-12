@@ -94,7 +94,11 @@ def _record_db(bot: commands.Bot, method: str, query: Any, elapsed: float) -> No
         # semble lent — et ce message accusait PostgreSQL, qui n'y était pour rien
         # (preuve : deux requêtes différentes à 1048.8 ms et 1048.4 ms, reparties
         # ensemble). On dit désormais lequel des deux est en cause.
-        gel = loop_watchdog.retard_de_la_boucle()
+        # On demande s'il y a eu un gel PENDANT l'attente, pas s'il y en a un
+        # maintenant : au moment où ce code s'exécute, la boucle est forcément
+        # repartie. perf_counter et monotonic sont deux horloges différentes,
+        # d'où le début recalculé depuis l'instant présent.
+        gel = loop_watchdog.gel_pendant(time.monotonic() - float(elapsed))
         state["slow_db"].append(
             {
                 "method": str(method),

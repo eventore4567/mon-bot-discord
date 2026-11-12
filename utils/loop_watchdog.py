@@ -33,7 +33,14 @@ INTERVALLE_S = 0.25
 _CE_FICHIER = os.path.abspath(__file__)
 _RACINE = os.path.dirname(os.path.dirname(_CE_FICHIER))
 
-_etat = {"dernier": time.monotonic(), "actif": False, "generation": 0}
+_etat = {
+    "dernier": time.monotonic(),
+    "actif": False,
+    "generation": 0,
+    # Le dernier gel observé : quand il s'est TERMINÉ, et combien de temps il a duré.
+    "dernier_gel_fin": 0.0,
+    "dernier_gel_duree": 0.0,
+}
 
 
 def cadres_sentrix(frame, limite: int = 6) -> list[str]:
@@ -64,17 +71,49 @@ def _surveiller(fil_principal: int, generation: int) -> None:
             return
         retard = time.monotonic() - _etat["dernier"]
         if retard < SEUIL_S:
+            if signale:
+                # Le gel vient de se terminer : on retient QUAND, pour que
+                # l'observabilité puisse savoir après coup qu'une attente a
+                # chevauché un gel. Sans cette trace, interroger le détecteur
+                # une fois la boucle repartie renvoie toujours zéro.
+                _etat["dernier_gel_fin"] = time.monotonic()
             signale = False
             continue
         if signale:
+            # Gel toujours en cours : on tient la durée à jour, pour qu'un gel
+            # long soit imputable sans attendre qu'il se termine.
+            _etat["dernier_gel_duree"] = retard
             continue
         signale = True
+        _etat["dernier_gel_duree"] = retard
         frame = sys._current_frames().get(fil_principal)
         pile = cadres_sentrix(frame) if frame is not None else []
         logger.warning(
             "Boucle bloquée depuis %.1f s — %s",
             retard, " ← ".join(pile) if pile else "hors du code SentriX (bibliothèque ou E/S synchrone)",
         )
+
+
+def gel_pendant(debut: float) -> float:
+    """La durée du gel qui a chevauché une opération commencée à ``debut``.
+
+    Zéro s'il n'y en a pas eu. Interroger ``retard_de_la_boucle()`` après coup
+    donne TOUJOURS zéro : quand le code qui mesure s'exécute enfin, la boucle est
+    repartie et son battement vient d'être rafraîchi. C'est ce qui faisait encore
+    imputer à PostgreSQL un gel de 1,4 s le 12/11 — le détecteur tournait bien,
+    mais on l'interrogeait trop tard.
+
+    On regarde donc si un gel s'est TERMINÉ après le début de l'attente : c'est
+    la seule question qui a un sens une fois la boucle repartie.
+
+    ``debut`` est une valeur de ``time.monotonic()``.
+    """
+    if not _etat["actif"]:
+        return 0.0
+    fin = float(_etat.get("dernier_gel_fin", 0.0))
+    if fin <= 0.0 or fin < debut:
+        return 0.0
+    return float(_etat.get("dernier_gel_duree", 0.0))
 
 
 def retard_de_la_boucle() -> float:
@@ -111,4 +150,7 @@ def arreter() -> None:
     _etat["generation"] += 1
 
 
-__all__ = ["demarrer", "arreter", "cadres_sentrix", "retard_de_la_boucle", "SEUIL_S"]
+__all__ = [
+    "demarrer", "arreter", "cadres_sentrix", "gel_pendant",
+    "retard_de_la_boucle", "SEUIL_S",
+]

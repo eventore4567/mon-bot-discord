@@ -457,7 +457,18 @@ async def synchroniser(bot, *, forcer: bool = False) -> dict[str, int]:
     # recréées : même nom = même emoji Discord = mêmes ID dans les vieux logs.
     try:
         from tools.generer_emojis_application_v2 import generer
-        resultat = generer(DOSSIER)
+
+        # 12/11/2026 : cet appel était le seul des deux générateurs à rester sur
+        # la boucle d'événements. Le détecteur de blocage l'a nommé au premier
+        # démarrage où il surveillait enfin le boot :
+        #
+        #   Boucle bloquée depuis 0.5 s — tools/generer_emojis_application_v2.py:96
+        #     generer ← utils/sentrix_emojis.py:460 synchroniser ← ...
+        #
+        # Une demi-seconde d'encodage d'images pendant laquelle aucune commande
+        # n'avance. Le générateur de variantes colorées, juste en dessous, passait
+        # déjà par un fil : la leçon avait été tirée pour l'un et oubliée pour l'autre.
+        resultat = await asyncio.to_thread(generer, DOSSIER)
         logger.info("Variantes SentriX : %s nouveau(x) fichier(s), %s prévus.",
                     resultat["crees"], resultat["total_planifies"])
     except Exception:
