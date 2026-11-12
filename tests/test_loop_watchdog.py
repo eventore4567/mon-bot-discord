@@ -105,3 +105,29 @@ def test_le_retard_grandit_quand_la_boucle_ne_bat_plus():
         assert loop_watchdog.retard_de_la_boucle() > 0.5
     finally:
         loop_watchdog.arreter()
+
+
+# ---------------------------------------------------------------------------
+# 12/11/2026 : le détecteur démarrait trop tard pour voir ce qui compte.
+# Il attendait que le bot soit prêt PLUS 30 secondes, alors que les plus gros
+# gels sont ceux du démarrage. Mesuré le 11/11 en production : un gel de 1,28 s
+# à 23:40:38, détecteur actif seulement à 23:41:08. Il est passé inaperçu, et
+# l'observabilité, lisant un retard nul, l'a imputé à PostgreSQL.
+# ---------------------------------------------------------------------------
+def test_le_detecteur_demarre_des_le_chargement_du_cog():
+    import inspect
+
+    from cogs.loop_watchdog_cog import LoopWatchdog
+
+    source = inspect.getsource(LoopWatchdog.cog_load)
+    assert "demarrer" in source, "cog_load doit démarrer le détecteur lui-même"
+    assert "is_ready" not in source, "attendre d'être prêt laisse passer les gels du démarrage"
+    assert "sleep" not in source, "une marge après le démarrage rate exactement ce qu'on cherche"
+
+
+def test_un_meme_gel_ne_produit_qu_une_ligne():
+    """Démarrer tôt n'a de sens que si un démarrage chargé ne noie pas le journal."""
+    import inspect
+
+    source = inspect.getsource(loop_watchdog._surveiller)
+    assert "signale" in source, "le détecteur doit se taire tant que le même gel dure"

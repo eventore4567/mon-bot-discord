@@ -227,27 +227,6 @@ class SecurityCenterView(CompleteView):
                     )
                 )
 
-            async def words(i):
-                from cogs import mots_bloques
-
-                await mots_bloques.ouvrir(i, self.guild)
-
-            async def backups(i):
-                from cogs.complete_backup_setup import BackupSetupView
-
-                if not i.user.guild_permissions.administrator:
-                    return await i.response.send_message(
-                        "Les sauvegardes nécessitent la permission Administrateur.",
-                        ephemeral=True,
-                    )
-                await i.response.defer()
-                await i.edit_original_response(
-                    view=await BackupSetupView(
-                        self.bot, self.guild, self.owner_id
-                    ).build(),
-                    attachments=[],
-                )
-
             async def exceptions(i):
                 self.section = "global"
                 await self.refresh(i)
@@ -259,11 +238,17 @@ class SecurityCenterView(CompleteView):
             # 11/11/2026 : « remets le truc de sanction admin visible ». Il était
             # enterré derrière « Exceptions générales » ; c'est un choix du
             # propriétaire, il se voit ici.
+            # 12/11/2026 : « enlève quelques boutons sur la sécurité, y'en a trop ».
+            # Deux sont partis, et aucun des deux n'était à sa place ici :
+            #   « Mots bloqués » était un DOUBLON — il est déjà sur l'écran Sécurité
+            #   simple (cogs/securite_simple), c'est-à-dire juste derrière « Retour ».
+            #   « Sauvegardes » n'est pas une protection : sauvegarder un serveur
+            #   n'a rien à voir avec le fait de le défendre. Elle garde sa commande
+            #   +security backup, et sa place est dans la configuration, pas ici.
+            # Restent les trois qui appartiennent vraiment à cet écran, sur une rangée.
             cog = self.bot.get_cog("Automod")
             boutons = [
-                button("🚫 Mots bloqués", words),
                 button("👥 Exceptions", exceptions),
-                button("💾 Sauvegardes", backups),
             ]
             if cog is not None and hasattr(cog, "admins_soumis"):
                 strict = bool(await cog.admins_soumis(self.guild.id))
