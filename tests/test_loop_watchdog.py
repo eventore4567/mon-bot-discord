@@ -8,6 +8,8 @@ import time
 
 os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 
+from pathlib import Path  # noqa: E402
+
 from utils import loop_watchdog  # noqa: E402
 
 
@@ -131,3 +133,64 @@ def test_un_meme_gel_ne_produit_qu_une_ligne():
 
     source = inspect.getsource(loop_watchdog._surveiller)
     assert "signale" in source, "le détecteur doit se taire tant que le même gel dure"
+
+
+# ---------------------------------------------------------------------------
+# 12/11/2026 : le détecteur tournait, et PostgreSQL était ENCORE accusé.
+#
+#   17:36:57  Détecteur de blocage de boucle actif dès le chargement
+#   17:39:50  Requête DB lente : fetchall 1411.8ms — feature_suite_items
+#   17:39:50  Requête DB lente : fetchall 1411.6ms — platform_role_menus
+#
+# La signature jumelle d'un gel, trois minutes APRÈS le démarrage du détecteur.
+# La faute était dans la mesure : interroger le retard une fois la boucle
+# repartie renvoie toujours zéro, puisque le battement vient d'être rafraîchi.
+# Il fallait demander « y a-t-il eu un gel pendant cette attente ? ».
+# ---------------------------------------------------------------------------
+def test_un_gel_termine_reste_imputable_apres_coup():
+    import time as _time
+
+    loop_watchdog._etat["actif"] = True
+    try:
+        debut = _time.monotonic()
+        loop_watchdog._etat["dernier_gel_fin"] = debut + 0.1
+        loop_watchdog._etat["dernier_gel_duree"] = 1.4
+
+        # La boucle est repartie : le retard instantané ne dit plus rien...
+        loop_watchdog._etat["dernier"] = _time.monotonic()
+        assert loop_watchdog.retard_de_la_boucle() < 0.1
+        # ...mais le gel qui a chevauché l'attente reste imputable.
+        assert loop_watchdog.gel_pendant(debut) == 1.4
+    finally:
+        loop_watchdog.arreter()
+
+
+def test_un_gel_anterieur_n_est_pas_impute_a_une_attente_posterieure():
+    import time as _time
+
+    loop_watchdog._etat["actif"] = True
+    try:
+        loop_watchdog._etat["dernier_gel_fin"] = _time.monotonic() - 10.0
+        loop_watchdog._etat["dernier_gel_duree"] = 2.0
+        assert loop_watchdog.gel_pendant(_time.monotonic()) == 0.0
+    finally:
+        loop_watchdog.arreter()
+
+
+def test_sans_detecteur_aucun_gel_n_est_impute():
+    loop_watchdog.arreter()
+    assert loop_watchdog.gel_pendant(0.0) == 0.0
+
+
+def test_la_generation_des_emojis_ne_bloque_plus_la_boucle():
+    """Le détecteur l'a nommée au premier démarrage qu'il surveillait vraiment :
+
+        Boucle bloquée depuis 0.5 s — tools/generer_emojis_application_v2.py:96
+          generer ← utils/sentrix_emojis.py:460 synchroniser
+
+    Le générateur de variantes colorées, juste en dessous, passait déjà par un
+    fil : la leçon avait été tirée pour l'un et oubliée pour l'autre.
+    """
+    source = (Path(__file__).resolve().parents[1] / "utils" / "sentrix_emojis.py").read_text(encoding="utf-8")
+    assert "await asyncio.to_thread(generer, DOSSIER)" in source
+    assert "resultat = generer(DOSSIER)" not in source
