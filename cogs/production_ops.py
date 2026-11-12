@@ -68,6 +68,9 @@ def _ops_state(bot: commands.Bot) -> dict[str, Any]:
         "last_alert_at": None,
         "last_alert_key": None,
         "last_alert_error": None,
+        # Instant où la surveillance a commencé. Tout ce qui précède appartient au
+        # démarrage : la boucle d'alerte ne regardait pas, elle n'a pas à le rejouer.
+        "alertes_armees_a": None,
     }
     bot._sentrix_production_ops = current
     return current
@@ -203,7 +206,13 @@ def _health_alert(bot: commands.Bot) -> tuple[str | None, str | None]:
         detail = ", ".join(f"{name} ×{count}" for name, count in top)
         return f"errors:{detail}", f"{len(errors)} erreurs techniques en 5 min ({detail})."
 
-    slow_commands = list(state.get("slow_commands") or [])
+    # Rien d'antérieur à l'armement : voir le commentaire de _alert_loop.
+    depuis = int(_ops_state(bot).get("alertes_armees_a") or 0)
+
+    def _apres_l_armement(entrees):
+        return [e for e in entrees if int(e.get("at") or 0) >= depuis]
+
+    slow_commands = _apres_l_armement(list(state.get("slow_commands") or []))
     if slow_commands:
         latest = slow_commands[-1]
         ms = float(latest.get("ms") or 0)
@@ -211,12 +220,27 @@ def _health_alert(bot: commands.Bot) -> tuple[str | None, str | None]:
             command = str(latest.get("command") or "inconnue")[:100]
             return f"slow-command:{command}", f"Commande lente détectée : `{command}` ({ms:.0f} ms)."
 
-    slow_db = list(state.get("slow_db") or [])
+    slow_db = _apres_l_armement(list(state.get("slow_db") or []))
     if slow_db:
         latest = slow_db[-1]
         ms = float(latest.get("ms") or 0)
         if ms >= float(_positive_int_env("SENTRIX_ALERT_SLOW_DB_MS", 1500, minimum=500, maximum=120000)):
             method = str(latest.get("method") or "DB")[:40]
+            # 12/11/2026 : cette alerte partait en MP à chaque gel de boucle, en
+            # accusant la base. Une attente mesurée autour d'un await enregistre
+            # aussi le temps pendant lequel la boucle d'événements était bloquée
+            # par du code synchrone — et PostgreSQL n'y est alors pour rien.
+            # L'observabilité note désormais ce gel avec l'attente : quand il en
+            # explique l'essentiel, on alerte sur le vrai problème, qui est
+            # actionnable, au lieu d'envoyer chercher au mauvais endroit.
+            gel = float(latest.get("boucle_bloquee_ms") or 0)
+            if gel >= ms * 0.5:
+                return (
+                    f"loop-blocked:{method}",
+                    f"Boucle d'événements bloquée **{gel:.0f} ms** — l'attente de "
+                    f"`{method}` ({ms:.0f} ms) en découle, la base n'est pas en cause. "
+                    "Le code fautif est nommé dans les journaux « Boucle bloquée depuis »."
+                )
             return f"slow-db:{method}", f"Base de données lente : `{method}` ({ms:.0f} ms)."
 
     ops = _ops_state(bot)
@@ -299,6 +323,12 @@ async def _backup_loop(bot: commands.Bot) -> None:
 async def _alert_loop(bot: commands.Bot) -> None:
     await bot.wait_until_ready()
     await asyncio.sleep(60)
+    # 12/11/2026 : l'alerte partait en MP à chaque déploiement. Au premier
+    # passage, elle lisait la dernière attente enregistrée — forcément une du
+    # DÉMARRAGE, puisqu'elle venait seulement de s'armer — et l'annonçait comme
+    # un incident en cours. Un démarrage n'est pas un incident, et une alerte
+    # doit décrire ce qui se passe MAINTENANT, pas rejouer ce qu'elle n'a pas vu.
+    _ops_state(bot)["alertes_armees_a"] = int(time.time())
     while not bot.is_closed():
         key, detail = _health_alert(bot)
         if key and detail:
