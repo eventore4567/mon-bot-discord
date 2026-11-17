@@ -711,6 +711,74 @@ class AiSetupView(discord.ui.View):
 
 # ---------------------------------------------------------------- COG
 
+class AffichageProgressif:
+    """Montre la réponse de l'IA pendant qu'elle s'écrit, au lieu d'un bloc final.
+
+    17/11/2026, « l'IA est trop lente ». Elle ne l'était pas : OpenAI met 1,2 à
+    2,3 s à écrire une réponse (mesuré en production), et SentriX attendait la
+    dernière lettre avant d'afficher quoi que ce soit. L'attente était réelle,
+    mais elle était entièrement passée à regarder « SentriX est en train
+    d'écrire… ». Le premier texte apparaît maintenant vers 300 ms.
+
+    Deux règles qui rendent la chose sûre :
+
+    - on ne poste rien avant d'avoir de quoi lire (MINIMUM caractères), sinon on
+      afficherait un message quasi vide, aussitôt remplacé ;
+    - on ne modifie pas plus d'une fois par INTERVALLE seconde, parce que Discord
+      limite le débit et qu'une modification refusée vaut moins qu'une de retard.
+
+    Un affichage sauté n'a aucune conséquence : chaque appel reçoit le texte
+    CUMULÉ, donc le suivant rattrape tout ce qui a été manqué.
+    """
+
+    #: En dessous, l'aperçu n'apprend rien à personne et clignote.
+    MINIMUM = 40
+    #: Discord limite les modifications ; une de retard vaut mieux qu'une refusée.
+    INTERVALLE = 1.1
+
+    def __init__(self, envoyer):
+        self._envoyer = envoyer
+        self.message = None
+        self._derniere_ecriture = 0.0
+
+    async def afficher(self, texte_cumule: str) -> None:
+        if len(texte_cumule) < self.MINIMUM:
+            return
+        maintenant = time.monotonic()
+        if self.message is not None and maintenant - self._derniere_ecriture < self.INTERVALLE:
+            return
+        self._derniere_ecriture = maintenant
+        apercu = texte_cumule[:1900]
+        try:
+            if self.message is None:
+                self.message = await self._envoyer(content=apercu)
+            else:
+                await self.message.edit(content=apercu)
+        except Exception:  # noqa: BLE001 — l'aperçu ne doit jamais casser la réponse
+            logger.debug("Aperçu progressif ignoré", exc_info=True)
+
+    async def terminer(self, texte_final: str) -> bool:
+        """Pose le texte définitif. Retourne True si l'aperçu a servi de message."""
+        if self.message is None:
+            return False
+        try:
+            await self.message.edit(content=texte_final)
+            return True
+        except Exception:  # noqa: BLE001
+            logger.debug("Remplacement final de l'aperçu impossible", exc_info=True)
+            return False
+
+    async def abandonner(self) -> None:
+        """Rien à montrer finalement : on retire l'aperçu plutôt que de le laisser."""
+        if self.message is None:
+            return
+        try:
+            await self.message.delete()
+        except Exception:  # noqa: BLE001
+            logger.debug("Suppression de l'aperçu impossible", exc_info=True)
+        self.message = None
+
+
 class Ai(commands.Cog, name="Ai"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -829,7 +897,8 @@ class Ai(commands.Cog, name="Ai"):
 
     async def ask_ai(self, prompt, history: list = None, author_name: str = None, *,
                       guild_id: int = None, channel_id: int = None, user_id: int = None,
-                      command: str = None, image_urls: list[str] | None = None) -> str:
+                      command: str = None, image_urls: list[str] | None = None,
+                      on_delta=None) -> str:
         """Compatibilité : utilisé par /sentrix, /ask, /summarize, +image-prompt, +explain,
         +rewrite, +fact-check — délègue au moteur centralisé (Responses API, GPT-5.6
         Terra/Sol, nouvelles instructions) en gardant exactement la même signature.
@@ -885,6 +954,7 @@ class Ai(commands.Cog, name="Ai"):
             input_payload, model_key=model_key, reasoning_effort=reasoning_effort, instructions=instructions,
             guild_id=guild_id, channel_id=channel_id, user_id=user_id, command=command,
             web_search=ai_service.needs_web_search(prompt),
+            on_delta=on_delta,
         )
         if not result.ok:
             return result.error
@@ -979,18 +1049,30 @@ class Ai(commands.Cog, name="Ai"):
                 "Vision Discord transmise à l'IA : %s image(s), message=%s",
                 len(images), getattr(reply_to, "id", None),
             )
+        # 17/11/2026 : la réponse s'affiche pendant qu'elle s'écrit. Voir
+        # AffichageProgressif : rien ne change à ce qui est généré, seulement au
+        # moment où on le voit — 300 ms au lieu de 1,2 à 2,3 s d'écran vide.
+        apercu = AffichageProgressif(_send)
         answer = await self.ask_ai(question, history, author_name=author_name,
                                     guild_id=guild_id, channel_id=channel_id,
-                                    user_id=author.id, command=command, image_urls=images)
+                                    user_id=author.id, command=command, image_urls=images,
+                                    on_delta=apercu.afficher)
         if ai_service.is_error_code(answer):
             # Les conversations restent en texte libre, même en cas d'erreur.
+            # L'aperçu part : mieux vaut aucun texte qu'un texte interrompu.
+            await apercu.abandonner()
             return await _send(content=ai_service.error_message(answer)[:1800])
         history.append({"role": "user", "content": question})
         history.append({"role": "assistant", "content": answer})
         self.histories[author.id] = history[-10:]
 
         content = (answer or "…").strip()
-        for chunk in ai_service.split_for_discord(content):
+        morceaux = ai_service.split_for_discord(content) or ["…"]
+        # Le premier morceau remplace l'aperçu quand il y en a un ; sinon il part
+        # comme avant. Les suivants suivent dans tous les cas.
+        if not await apercu.terminer(morceaux[0]):
+            await _send(content=morceaux[0])
+        for chunk in morceaux[1:]:
             await _send(content=chunk)
 
     @commands.hybrid_command(name="sentrix", description="Demandez n'importe quoi à SentriX, l'IA du bot.")
