@@ -607,6 +607,51 @@ def get_image_client():
     return _IMAGE_CLIENT
 
 
+async def _repondre_en_flux(client, kwargs: dict, on_delta):
+    """Fait écrire la réponse sous les yeux de l'utilisateur, au lieu d'un bloc final.
+
+    17/11/2026. Ce que ça change : RIEN à ce qui est généré, seulement le moment
+    où on le voit. Mesuré en production, une réponse de chat met 1,2 à 2,3 s à
+    être écrite (pointes à 5 s) ; sans flux, on regarde « SentriX est en train
+    d'écrire… » pendant tout ce temps, puis tout arrive d'un coup.
+
+    ``on_delta`` reçoit le texte CUMULÉ, jamais le fragment seul : l'appelant
+    affiche donc toujours une réponse complète-à-cet-instant, et un affichage
+    sauté (limite de débit Discord) n'a aucune conséquence — le suivant rattrape.
+
+    Retourne (réponse finale ou None, texte). Si le flux échoue AVANT le premier
+    fragment, on retombe sur l'appel normal : le streaming est un confort, jamais
+    une condition pour obtenir sa réponse.
+    """
+    morceaux: list[str] = []
+    finale = None
+    try:
+        flux = await client.responses.create(**kwargs, stream=True)
+    except Exception:  # noqa: BLE001 — flux refusé : on répond quand même
+        logger.info("Flux indisponible, réponse en un bloc.", exc_info=True)
+        reponse = await client.responses.create(**kwargs)
+        return reponse, getattr(reponse, "output_text", None) or _extract_text(reponse)
+
+    async for evenement in flux:
+        genre = getattr(evenement, "type", "")
+        if genre == "response.output_text.delta":
+            fragment = getattr(evenement, "delta", "") or ""
+            if not fragment:
+                continue
+            morceaux.append(fragment)
+            try:
+                await on_delta("".join(morceaux))
+            except Exception:  # noqa: BLE001 — un affichage raté ne perd pas la réponse
+                logger.debug("Affichage progressif ignoré", exc_info=True)
+        elif genre == "response.completed":
+            finale = getattr(evenement, "response", None)
+
+    texte = "".join(morceaux)
+    if finale is not None:
+        texte = getattr(finale, "output_text", None) or texte
+    return finale, texte
+
+
 def _extract_text(resp) -> str:
     """Reconstruction défensive du texte si resp.output_text n'est pas disponible selon la
     version du SDK — parcourt resp.output (liste de messages) et concatène les segments texte."""
@@ -779,6 +824,7 @@ async def generate(
     reasoning_effort: str = "medium",
     previous_response_id: str | None = None,
     instructions: str = SYSTEM_PROMPT,
+    on_delta=None,
     guild_id: int | None = None,
     channel_id: int | None = None,
     user_id: int | None = None,
@@ -856,12 +902,15 @@ async def generate(
 
     try:
         started = time.monotonic()
-        resp = await client.responses.create(**kwargs)
+        if on_delta is None:
+            resp = await client.responses.create(**kwargs)
+            text = getattr(resp, "output_text", None) or _extract_text(resp)
+        else:
+            resp, text = await _repondre_en_flux(client, kwargs, on_delta)
         elapsed_ms = int((time.monotonic() - started) * 1000)
-        text = getattr(resp, "output_text", None) or _extract_text(resp)
         # 02/11/2026 : plus de bloc « Sources » sous chaque recherche web ; pour une
         # recherche de vidéos, les liens SONT la réponse et restent affichés.
-        if web_search and video_search:
+        if web_search and video_search and resp is not None:
             text = _append_web_citations(text, resp, max_sources=6)
         if contains_sensitive_content(text):
             logger.warning(
