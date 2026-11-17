@@ -45,20 +45,34 @@ class _Salon:
 
 # --------------------------------------------------------------------- aperçu
 @pytest.mark.asyncio
-async def test_rien_n_est_poste_avant_d_avoir_de_quoi_lire():
-    """Un aperçu de trois lettres clignoterait sans rien apprendre à personne."""
+async def test_une_reponse_courte_a_droit_a_son_apercu():
+    """17/11/2026 : le seuil était à 40 caractères, et c'était une erreur.
+
+    « ouais je suis là, dis-moi 👌 » en fait 28. Les réponses courtes —
+    justement celles où attendre trois secondes paraît absurde — n'avaient
+    AUCUN aperçu et arrivaient d'un bloc après toute l'attente.
+    """
     salon = _Salon()
     apercu = AffichageProgressif(salon.envoyer)
-    await apercu.afficher("Salut")
-    assert salon.envoyes == [] and apercu.message is None
+    await apercu.afficher("ouais je suis là, dis-moi 👌")
+    assert len(salon.envoyes) == 1 and apercu.message is not None
 
 
 @pytest.mark.asyncio
-async def test_le_premier_apercu_part_des_qu_il_y_a_du_texte():
+async def test_le_premier_apercu_part_des_le_premier_mot():
     salon = _Salon()
     apercu = AffichageProgressif(salon.envoyer)
-    await apercu.afficher("x" * AffichageProgressif.MINIMUM)
+    await apercu.afficher("Sal")
     assert len(salon.envoyes) == 1 and apercu.message is not None
+
+
+@pytest.mark.asyncio
+async def test_un_texte_vide_ne_poste_rien():
+    """Rien reçu, rien à montrer : pas de message vide posté puis corrigé."""
+    salon = _Salon()
+    apercu = AffichageProgressif(salon.envoyer)
+    await apercu.afficher("")
+    assert salon.envoyes == [] and apercu.message is None
 
 
 @pytest.mark.asyncio

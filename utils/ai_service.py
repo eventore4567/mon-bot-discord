@@ -625,6 +625,8 @@ async def _repondre_en_flux(client, kwargs: dict, on_delta):
     """
     morceaux: list[str] = []
     finale = None
+    premier_mot_ms = None
+    depart = time.monotonic()
     try:
         flux = await client.responses.create(**kwargs, stream=True)
     except Exception:  # noqa: BLE001 — flux refusé : on répond quand même
@@ -638,6 +640,12 @@ async def _repondre_en_flux(client, kwargs: dict, on_delta):
             fragment = getattr(evenement, "delta", "") or ""
             if not fragment:
                 continue
+            if premier_mot_ms is None:
+                # 17/11/2026 : la durée totale ne disait pas OÙ passait le temps.
+                # « ouais je suis là » (dix mots) a mis 3204 ms : ce n'est pas
+                # l'écriture. Séparer l'attente AVANT le premier mot de celle
+                # passée à écrire est la seule façon de savoir qui accuser.
+                premier_mot_ms = int((time.monotonic() - depart) * 1000)
             morceaux.append(fragment)
             try:
                 await on_delta("".join(morceaux))
@@ -649,6 +657,11 @@ async def _repondre_en_flux(client, kwargs: dict, on_delta):
     texte = "".join(morceaux)
     if finale is not None:
         texte = getattr(finale, "output_text", None) or texte
+    if premier_mot_ms is not None:
+        logger.info(
+            "Flux IA : premier mot en %sms, réponse complète en %sms (%s caractères).",
+            premier_mot_ms, int((time.monotonic() - depart) * 1000), len(texte),
+        )
     return finale, texte
 
 
