@@ -731,8 +731,12 @@ class AffichageProgressif:
     CUMULÉ, donc le suivant rattrape tout ce qui a été manqué.
     """
 
-    #: En dessous, l'aperçu n'apprend rien à personne et clignote.
-    MINIMUM = 40
+    #: 17/11/2026 : ce seuil était à 40 caractères, et c'était une erreur. « ouais
+    #: je suis là, dis-moi 👌 » en fait 28 : les réponses courtes — justement
+    #: celles où attendre trois secondes paraît absurde — n'avaient AUCUN aperçu.
+    #: On affiche donc dès le premier mot reçu ; l'espacement des modifications
+    #: suffit à protéger le débit Discord.
+    MINIMUM = 1
     #: Discord limite les modifications ; une de retard vaut mieux qu'une refusée.
     INTERVALLE = 1.1
 
