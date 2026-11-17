@@ -301,6 +301,23 @@ def install(bot: commands.Bot) -> None:
             kwargs["instructions"] = (
                 f"{kwargs.get('instructions', ai_service.SYSTEM_PROMPT)}\n\n{reel}"
             )
+        # 17/11/2026 : « pourquoi tu as banni Natix hier à 14h ? » — SentriX
+        # refusait d'inventer, ce qui était bien, mais l'information EXISTE en
+        # base. Voir utils/memoire_sanctions : lue uniquement quand on la
+        # demande, et uniquement pour un modérateur.
+        try:
+            from utils import memoire_sanctions
+
+            guild = bot.get_guild(int(kwargs.get("guild_id") or 0))
+            auteur = guild.get_member(int(kwargs.get("user_id") or 0)) if guild else None
+            historique = await memoire_sanctions.memoire(bot, guild, auteur, question_brute)
+        except Exception:  # noqa: BLE001 — jamais bloquant pour la réponse
+            logger.debug("Mémoire des sanctions indisponible.", exc_info=True)
+            historique = ""
+        if historique:
+            kwargs["instructions"] = (
+                f"{kwargs.get('instructions', ai_service.SYSTEM_PROMPT)}\n\n{historique}"
+            )
         if context:
             instructions = kwargs.get("instructions", ai_service.SYSTEM_PROMPT)
             kwargs["instructions"] = (
