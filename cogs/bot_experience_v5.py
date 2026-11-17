@@ -15,6 +15,7 @@ Aucune commande slash n'est ajoutée et aucun fichier du dashboard n'est modifi�
 from __future__ import annotations
 
 import difflib
+import inspect
 import logging
 import re
 import time
@@ -139,6 +140,24 @@ async def _ai_access_error(ai_cog: Any, author: discord.abc.User, guild_id: int 
     return None
 
 
+def _accepte_on_delta(fonction) -> bool:
+    """Vrai si cette implémentation de _prepare_and_generate sait streamer.
+
+    Cinq modules remplacent _prepare_and_generate, avec des signatures qui ont
+    divergé : community_v34.fast_prepare ne prenait déjà pas `image_urls`, et
+    l'appeler avec faisait planter tout le listener sans aucune réponse. On ne
+    passe donc `on_delta` qu'à une implémentation qui le déclare — sinon la
+    réponse part sans aperçu, ce qui est exactement l'ancien comportement.
+    """
+    try:
+        parametres = inspect.signature(fonction).parameters
+    except (TypeError, ValueError):
+        return False
+    if "on_delta" in parametres:
+        return True
+    return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parametres.values())
+
+
 def _install_ai_pipeline_upgrade(bot: commands.Bot) -> None:
     ai_cog = bot.get_cog("Ai")
     if ai_cog is None or getattr(ai_cog, "_sentrix_experience_v5_pipeline", False):
@@ -240,6 +259,14 @@ def _install_ai_pipeline_upgrade(bot: commands.Bot) -> None:
                 logger.debug("Accueil de mention localisé indisponible.", exc_info=True)
             return await _send(content="Je suis là. Dites-moi simplement ce que vous voulez faire.")
 
+        # 17/11/2026 : « sentrix ia trop lente ». Le streaming livré plus tôt
+        # vivait dans Ai.send_sentrix_reply — que CE pipeline remplace, donc il
+        # n'a jamais tourné en production (logs : « Reponse OpenAI terminee en
+        # 1482ms », jamais « Flux IA »). L'aperçu se branche ici, sur le chemin
+        # réellement emprunté par une mention ou une réponse à SentriX.
+        from .ai import AffichageProgressif
+        apercu = AffichageProgressif(_send)
+
         command_name = "ai-dm" if guild_id is None else ("ai-reply" if reply_to is not None else "sentrix")
         prepare_kwargs = {
             "guild_id": guild_id,
@@ -262,8 +289,11 @@ def _install_ai_pipeline_upgrade(bot: commands.Bot) -> None:
                 self, **prepare_kwargs, image_urls=image_urls,
             )
         else:
+            if _accepte_on_delta(self._prepare_and_generate):
+                prepare_kwargs["on_delta"] = apercu.afficher
             result = await self._prepare_and_generate(**prepare_kwargs)
         if not result["ok"]:
+            await apercu.abandonner()
             return await _send(embed=embeds.error(result["error"]))
 
         content = (result["text"] or "…").strip()
@@ -272,6 +302,8 @@ def _install_ai_pipeline_upgrade(bot: commands.Bot) -> None:
         from utils import ai_presentation
 
         if ai_presentation.doit_etre_en_carte(content):
+            # Une carte ne peut pas remplacer un message texte : on retire l'aperçu.
+            await apercu.abandonner()
             # Une carte refusée par Discord part en texte, sans renvoyer les cartes
             # déjà envoyées (pas de doublon).
             for partie, vue in ai_presentation.cartes_et_textes(content):
@@ -282,7 +314,11 @@ def _install_ai_pipeline_upgrade(bot: commands.Bot) -> None:
                     for chunk in ai_service.split_for_discord(partie):
                         await _send(content=chunk)
             return
-        for chunk in ai_service.split_for_discord(content):
+        morceaux = ai_service.split_for_discord(content)
+        if morceaux and await apercu.terminer(morceaux[0]):
+            # L'aperçu portait déjà le début : il devient le message final.
+            morceaux = morceaux[1:]
+        for chunk in morceaux:
             await _send(content=chunk)
 
     ai_cog.send_sentrix_reply = types.MethodType(upgraded_send_sentrix_reply, ai_cog)

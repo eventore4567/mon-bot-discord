@@ -348,7 +348,8 @@ def _install_fast_ai(bot: commands.Bot) -> None:
 
     async def fast_prepare(this, *, guild_id, channel_id, user_id, author_name,
                            question, forced_advanced: bool = False, suffix: str = "",
-                           command: str = "ai", force_web_search: bool = False) -> dict:
+                           command: str = "ai", force_web_search: bool = False,
+                           on_delta=None) -> dict:
         # `force_web_search` : +ai search / /ia recherche forcent la recherche web. Sans ce
         # paramètre le remplaçant V3.4 levait TypeError et la commande était cassée.
         settings = await ai_service.get_settings(bot, guild_id) if guild_id else dict(ai_service.DEFAULT_AI_SETTINGS)
@@ -409,6 +410,7 @@ def _install_fast_ai(bot: commands.Bot) -> None:
             user_id=user_id,
             command=command,
             web_search=force_web_search or ai_service.needs_web_search(question),
+            on_delta=on_delta,
         )
         if not result.ok:
             return {"ok": False, "error": _clean(ai_service.error_message(result.error))}

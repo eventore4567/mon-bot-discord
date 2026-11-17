@@ -3140,7 +3140,8 @@ class Ai(commands.Cog, name="Ai"):
     async def _prepare_and_generate(self, *, guild_id, channel_id, user_id, author_name,
                                      question, forced_advanced: bool = False, suffix: str = "",
                                      command: str = "ai", force_web_search: bool = False,
-                                     image_urls: list[str] | None = None) -> dict:
+                                     image_urls: list[str] | None = None,
+                                     on_delta=None) -> dict:
         """Pipeline complet partagé par +ai, +chat, +improve, +correct, +ai-translate, +code et
         les boutons de régénération : réglages serveur, modération, cooldown/limites, mémoire,
         sélection du modèle, appel réel, puis mise à jour mémoire + compteurs d'usage.
@@ -3230,6 +3231,7 @@ class Ai(commands.Cog, name="Ai"):
             previous_response_id=previous_response_id, instructions=instructions,
             guild_id=guild_id, channel_id=channel_id, user_id=user_id, command=command,
             web_search=force_web_search or ai_service.needs_web_search(question),
+            on_delta=on_delta,
         )
 
         if not result.ok:
