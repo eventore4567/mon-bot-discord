@@ -560,8 +560,14 @@ def _install_ai_context(bot: commands.Bot) -> None:
     original_ask = ai_cog.ask_ai
     original_prepare = ai_cog._prepare_and_generate
 
-    async def build_with_server_context(this, user_id: int | None, author_name: str | None = None):
-        text = await original_build(user_id, author_name)
+    async def build_with_server_context(this, user_id: int | None, *args, **kwargs):
+        # 20/11/2026 : ce wrapper ne déclarait que `author_name` et perdait le 3e
+        # argument `guild_id`. Toute demande contenant une image passait par
+        # Ai._prepare_and_generate, seul appelant à 3 arguments, et levait
+        # « takes from 2 to 3 positional arguments but 4 were given » — donc
+        # AUCUNE réponse. community_v32.build_clean avait déjà été corrigé ainsi
+        # le 07/11 ; la même correction manquait ici et dans ai_reply_recovery.
+        text = await original_build(user_id, *args, **kwargs)
         text += (
             "\n\nStyle SentriX V3 : sois naturel, direct et utile dans un contexte Discord. "
             "Évite les longs pavés quand quelques lignes suffisent. Si une commande existante répond mieux, indique-la clairement."

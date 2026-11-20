@@ -324,14 +324,38 @@ def is_video_search_request(text: str) -> bool:
     return has_target and (has_action or starts_like_request)
 
 
+#: 20/11/2026 : la liste littérale ci-dessus ratait tout ce qui n'était pas écrit
+#: au mot près. « donne moi le lien » passait, « donne le lien » non. Ces motifs
+#: rattrapent les formulations réelles : un verbe d'action suivi d'un lien ou
+#: d'une ressource, et les plateformes que les gens nomment directement.
+_WEB_SEARCH_PATTERNS = (
+    # « donne/envoie/trouve/cherche ... le lien / l'url / le site »
+    re.compile(r"\b(?:donne|envoie|envoi|trouve|cherche|recherche|montre|file|balance)\b"
+               r"[^.!?]{0,40}\b(?:lien|liens|url|site|adresse)\b", re.IGNORECASE),
+    # une plateforme nommée explicitement
+    re.compile(r"\b(?:spotify|spotif|deezer|soundcloud|apple\s*music|shazam|bandcamp|"
+               r"youtube|yt|tiktok|twitch|instagram|insta)\b", re.IGNORECASE),
+    # « c'est quoi / qui est / quand ... » sur une actualité ou une sortie
+    re.compile(r"\b(?:derni(?:er|ere|ère)s?|nouveau|nouvelle|sortie|sorti|actuel|actuelle|"
+               r"en\s+ce\s+moment|cette\s+semaine|ce\s+mois)\b", re.IGNORECASE),
+)
+
+
 def needs_web_search(text: str) -> bool:
-    """Détecte les demandes qui exigent des informations ou liens publics actuels."""
+    """Détecte les demandes qui exigent des informations ou liens publics actuels.
+
+    Ne sert plus qu'à FORCER la recherche sur une demande explicite : depuis le
+    20/11/2026 l'outil est de toute façon proposé au modèle à chaque appel, donc
+    un mot manquant ici ne l'empêche plus de chercher — il retarde seulement.
+    """
     if not isinstance(text, str):
         return False
     lowered = text.lower()
-    return is_video_search_request(text) or any(
-        keyword in lowered for keyword in _WEB_SEARCH_KEYWORDS
-    )
+    if is_video_search_request(text):
+        return True
+    if any(keyword in lowered for keyword in _WEB_SEARCH_KEYWORDS):
+        return True
+    return any(motif.search(text) for motif in _WEB_SEARCH_PATTERNS)
 
 
 # ---------------------------------------------------------------- ESTIMATION DE TOKENS
@@ -899,16 +923,28 @@ async def generate(
     }
     if previous_response_id:
         kwargs["previous_response_id"] = previous_response_id
-    if web_search:
-        search_tool = {"type": "web_search", "search_context_size": "low"}
-        if video_search:
-            search_tool = {
-                "type": "web_search",
-                "search_context_size": "medium",
-                "filters": {"allowed_domains": _VIDEO_SEARCH_DOMAINS},
-            }
-        kwargs["tools"] = [search_tool]
+    # 20/11/2026 : « il met du temps à comprendre ». Il ne comprenait pas mal — il
+    # ne pouvait RIEN chercher. L'outil de recherche n'était fourni au modèle que
+    # si la question contenait l'une d'une vingtaine de chaînes littérales :
+    # « donne moi le lien » passait, « donne le lien » non ; « spotify » n'y
+    # figurait même pas. Sans outil, le modèle ne peut qu'interroger
+    # l'utilisateur, d'où les quatre allers-retours avant d'obtenir un lien.
+    #
+    # L'outil est désormais TOUJOURS proposé, et c'est le modèle qui décide de
+    # s'en servir (tool_choice « auto »). Il ne cherche donc que lorsqu'il lui
+    # manque un fait, et une liste de mots-clés ne peut plus le lui interdire.
+    # La recherche reste FORCÉE quand la demande est explicite, pour ne jamais
+    # être moins capable qu'avant.
+    if video_search:
+        kwargs["tools"] = [{
+            "type": "web_search",
+            "search_context_size": "medium",
+            "filters": {"allowed_domains": _VIDEO_SEARCH_DOMAINS},
+        }]
         kwargs["tool_choice"] = "required"
+    else:
+        kwargs["tools"] = [{"type": "web_search", "search_context_size": "low"}]
+        kwargs["tool_choice"] = "required" if web_search else "auto"
 
     log_context = "modèle=%s commande=%s guild=%s salon=%s utilisateur=%s"
     log_args = (model_id, command, guild_id, channel_id, user_id)

@@ -216,9 +216,13 @@ async def setup(bot: commands.Bot) -> None:
         if callable(builder) and not getattr(builder, "_sentrix_reply_recovery_safe", False):
             ai_cog._sentrix_reply_recovery_original_builder = builder
 
-            async def safe_builder(user_id: int | None, author_name: str | None = None):
+            async def safe_builder(user_id: int | None, *args, **kwargs):
+                # 20/11/2026 : même défaut que community_v3 — ce wrapper perdait
+                # `guild_id` et cassait le chemin des images. Un wrapper transmet
+                # tout ou ne wrappe rien.
+                author_name = args[0] if args else kwargs.get("author_name")
                 try:
-                    return await builder(user_id, author_name)
+                    return await builder(user_id, *args, **kwargs)
                 except KeyError as exc:
                     _record_error(bot, "creator_context", exc)
                     instructions = ai_service.SYSTEM_PROMPT

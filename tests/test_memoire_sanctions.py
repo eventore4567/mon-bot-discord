@@ -45,10 +45,14 @@ def _sanction(numero, action, motif, *, moderateur=50, duree=0, quand=None):
 
 
 class _Bot:
-    def __init__(self, historique=None, casse=False):
+    def __init__(self, historique=None, casse=False, utilisateurs=()):
         self._historique = historique or []
         self._casse = casse
+        self._utilisateurs = {u.id: u for u in utilisateurs}
         self.db = self
+
+    def get_user(self, identifiant):
+        return self._utilisateurs.get(identifiant)
 
     async def get_sanction_history(self, guild_id, user_id, limit=10):
         if self._casse:
@@ -146,9 +150,79 @@ def test_un_nom_trop_court_n_attrape_pas_toute_la_phrase():
     court = _membre(5, "a")
     natix = _membre(99, "Natix")
     cibles = memoire.cibles_citees("pourquoi tu as banni Natix ?", _guild([court, natix]))
-    assert [m.id for m in cibles] == [99]
+    assert [c.identifiant for c in cibles] == [99]
 
 
 def test_les_bots_ne_sont_pas_des_cibles():
     robot = _membre(3, "Natix", bot=True)
     assert memoire.cibles_citees("pourquoi tu as banni Natix ?", _guild([robot])) == []
+
+
+# --------------------------------------------------- revue Codex du 17/11/2026
+BANNI = 1551256659668504746
+
+
+def test_un_membre_banni_reste_consultable():
+    """Le cas qui a motivé la fonctionnalité : un banni n'est PLUS dans le serveur.
+
+    La première version balayait guild.get_member puis guild.members. Un membre
+    banni n'est dans ni l'un ni l'autre, donc « pourquoi tu as banni X ? » ne
+    trouvait aucune cible et la mémoire ne lisait jamais rien.
+    """
+    modo = _membre(7, "Tomioka", moderateur=True)
+    guild = _guild([modo])  # le banni n'y est pas, c'est tout le problème
+    cibles = memoire.cibles_citees(f"pourquoi tu as banni <@{BANNI}> ?", guild)
+    assert [c.identifiant for c in cibles] == [BANNI]
+    assert str(BANNI) in cibles[0].nom, "sans profil connu, l'identifiant sert de nom"
+
+
+def test_un_banni_connu_du_bot_est_nomme():
+    modo = _membre(7, "Tomioka", moderateur=True)
+    bot = _Bot(utilisateurs=[_membre(BANNI, "Natix")])
+    cibles = memoire.cibles_citees(f"pourquoi <@{BANNI}> est banni ?", _guild([modo]), bot)
+    assert cibles[0].nom == "Natix"
+
+
+@pytest.mark.asyncio
+async def test_le_dossier_d_un_banni_est_vraiment_lu():
+    modo = _membre(7, "Tomioka", moderateur=True)
+    bot = _Bot(
+        [{**_sanction(42, "ban", "raid sur le serveur", moderateur=7), "user": BANNI}],
+        utilisateurs=[_membre(BANNI, "Natix")],
+    )
+    bloc = await memoire.memoire(
+        bot, _guild([modo]), modo, f"pourquoi tu as banni <@{BANNI}> hier ?"
+    )
+    assert "dossier #42" in bloc and "raid sur le serveur" in bloc
+    assert "Natix" in bloc
+
+
+@pytest.mark.asyncio
+async def test_un_historique_tronque_n_autorise_aucun_dementi():
+    """Avec plus de huit dossiers, nier une sanction serait un mensonge."""
+    modo = _membre(7, "Tomioka", moderateur=True)
+    natix = _membre(99, "Natix")
+    historique = [
+        {**_sanction(numero, "warn", f"motif {numero}", moderateur=7), "user": 99}
+        for numero in range(1, 13)
+    ]
+    bloc = await memoire.memoire(
+        _Bot(historique), _guild([natix, modo]), modo, "combien de warn a Natix ?"
+    )
+    assert "LES PLUS RÉCENTES" in bloc
+    assert "ne dis JAMAIS qu'une sanction n'existe pas" in bloc
+    assert "aucun total" in bloc
+    assert bloc.count("dossier #") == memoire._SANCTIONS_MAX
+
+
+@pytest.mark.asyncio
+async def test_un_historique_complet_autorise_le_dementi():
+    modo = _membre(7, "Tomioka", moderateur=True)
+    natix = _membre(99, "Natix")
+    historique = [{**_sanction(1, "warn", "pub", moderateur=7), "user": 99}]
+    bloc = await memoire.memoire(
+        _Bot(historique), _guild([natix, modo]), modo, "pourquoi Natix a un warn ?"
+    )
+    assert "Toutes les sanctions" in bloc
+    assert "dis qu'elle n'est pas enregistrée" in bloc
+    assert "LES PLUS RÉCENTES" not in bloc
