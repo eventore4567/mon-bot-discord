@@ -140,6 +140,22 @@ async def _ai_access_error(ai_cog: Any, author: discord.abc.User, guild_id: int 
     return None
 
 
+#: 20/11/2026, demande explicite : on ne discute pas avec SentriX en privé.
+#: Le silence serait déroutant (on croit le bot en panne), donc une ligne, puis
+#: rien d'autre : aucun appel au modèle, aucun coût, aucune mémoire à tenir.
+REFUS_MESSAGE_PRIVE = (
+    "Je ne discute qu'en serveur. Retrouve-moi dans un salon où SentriX est présent 👍"
+)
+
+
+def _est_en_prive(destination, reply_to=None) -> bool:
+    """Vrai si la conversation n'a aucun serveur derrière elle."""
+    for source in (destination, getattr(destination, "channel", None), reply_to):
+        if getattr(source, "guild", None) is not None:
+            return False
+    return True
+
+
 def _accepte_on_delta(fonction) -> bool:
     """Vrai si cette implémentation de _prepare_and_generate sait streamer.
 
@@ -204,6 +220,11 @@ def _install_ai_pipeline_upgrade(bot: commands.Bot) -> None:
             return await destination.send(
                 **kwargs, allowed_mentions=discord.AllowedMentions.none(),
             )
+
+        if _est_en_prive(destination, reply_to):
+            # Tous les chemins IA passent ici (mention, réponse, /sentrix, secours
+            # de ai_api_hotfix). Un seul garde suffit donc à fermer le privé.
+            return await _send(content=REFUS_MESSAGE_PRIVE)
 
         if await _is_blacklisted(self.bot, author.id):
             return await _send(embed=embeds.error("Vous n'êtes pas autorisé à utiliser ce bot."))
@@ -360,24 +381,18 @@ def _install_reply_and_dm_conversations(bot: commands.Bot) -> None:
         # En message privé, le bot devient conversationnel par défaut. Une vraie commande
         # préfixée reste gérée par le moteur commands.Bot et n'est jamais doublée ici.
         if message.guild is None:
+            # Les vraies commandes préfixées continuent de fonctionner en privé ;
+            # seule la CONVERSATION libre est fermée.
             try:
                 ctx = await bot.get_context(message)
                 if ctx.valid:
                     return
             except Exception:
                 logger.warning("Étape non critique ignorée dans natural_continuation", exc_info=True)
-            ai_cog = bot.get_cog("Ai")
-            if ai_cog is None:
-                return
             try:
-                from utils.ai_image_intents import is_image_creation_request
-                if is_image_creation_request(content):
-                    await ai_cog._send_generated_image_natural(message, content)
-                    return
-                async with message.channel.typing():
-                    await ai_cog.send_sentrix_reply(message.channel, message.author, content, reply_to=message)
-            except Exception:
-                logger.exception("Bot Core V5 : conversation privée impossible.")
+                await message.channel.send(REFUS_MESSAGE_PRIVE)
+            except discord.HTTPException:
+                logger.debug("Refus de conversation privée non remis.", exc_info=True)
             return
 
         # Les mentions et mots de réveil sont déjà pris en charge par les listeners
