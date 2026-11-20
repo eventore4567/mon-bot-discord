@@ -304,6 +304,12 @@ def _install_ai_pipeline_upgrade(bot: commands.Bot) -> None:
         if ai_presentation.doit_etre_en_carte(content):
             # Une carte ne peut pas remplacer un message texte : on retire l'aperçu.
             await apercu.abandonner()
+            # Revue Codex du 17/11/2026 : l'aperçu avait consommé l'unique
+            # réponse native (replied_once), et le supprimer laissait le drapeau
+            # posé — chaque carte partait alors sans citation du message
+            # d'origine, un lien que l'ancien chemin conservait. On rend son
+            # tour à la première carte.
+            replied_once = False
             # Une carte refusée par Discord part en texte, sans renvoyer les cartes
             # déjà envoyées (pas de doublon).
             for partie, vue in ai_presentation.cartes_et_textes(content):

@@ -27,6 +27,7 @@ from __future__ import annotations
 import logging
 import re
 from datetime import datetime, timezone
+from typing import NamedTuple
 
 logger = logging.getLogger("bot.memoire-sanctions")
 
@@ -84,16 +85,41 @@ def peut_consulter(membre) -> bool:
     )
 
 
-def cibles_citees(texte: str, guild) -> list:
-    """Les membres désignés dans la question, par mention ou par nom."""
-    phrase = str(texte or "")
-    trouves, vus = [], set()
+class Cible(NamedTuple):
+    """Quelqu'un dont on demande le dossier — membre du serveur ou non."""
 
-    for identifiant in _MENTION.findall(phrase):
-        membre = guild.get_member(int(identifiant)) if guild else None
-        if membre is not None and membre.id not in vus:
-            vus.add(membre.id)
-            trouves.append(membre)
+    identifiant: int
+    nom: str
+
+
+def cibles_citees(texte: str, guild, bot=None) -> list[Cible]:
+    """Les personnes désignées dans la question, par mention ou par nom.
+
+    Revue Codex du 17/11/2026 : la première version ne retenait que les
+    membres présents, via guild.get_member puis un balayage de guild.members.
+    Or un membre BANNI n'est plus dans le serveur, et un membre expulsé non
+    plus. La fonction échouait donc exactement sur « pourquoi tu as banni X »,
+    le cas qui a motivé toute la fonctionnalité. Un identifiant mentionné
+    explicitement est désormais conservé même sans appartenance : la base, elle,
+    garde le dossier. Un nom seul reste limité aux membres présents — on n'a
+    rien d'autre pour le résoudre.
+    """
+    phrase = str(texte or "")
+    trouves: list[Cible] = []
+    vus: set[int] = set()
+
+    def _ajouter(identifiant: int, nom: str) -> None:
+        if identifiant not in vus:
+            vus.add(identifiant)
+            trouves.append(Cible(identifiant, nom))
+
+    for brut in _MENTION.findall(phrase):
+        identifiant = int(brut)
+        membre = guild.get_member(identifiant) if guild else None
+        if membre is None and bot is not None:
+            membre = bot.get_user(identifiant)
+        nom = getattr(membre, "display_name", None) or getattr(membre, "name", None)
+        _ajouter(identifiant, nom or f"l'utilisateur {identifiant}")
 
     minuscule = phrase.casefold()
     for membre in (getattr(guild, "members", None) or []):
@@ -101,8 +127,7 @@ def cibles_citees(texte: str, guild) -> list:
             continue
         for nom in filter(None, (getattr(membre, "display_name", ""), getattr(membre, "name", ""))):
             if len(nom) >= _LONGUEUR_NOM_MINIMALE and nom.casefold() in minuscule:
-                vus.add(membre.id)
-                trouves.append(membre)
+                _ajouter(membre.id, getattr(membre, "display_name", None) or nom)
                 break
     return trouves[:3]
 
@@ -140,33 +165,61 @@ async def memoire(bot, guild, auteur, texte: str) -> str:
     if not peut_consulter(auteur):
         logger.debug("Historique refusé : %s n'est pas modérateur.", getattr(auteur, "id", None))
         return ""
-    membres = cibles_citees(texte, guild)
-    if not membres:
+    cibles = cibles_citees(texte, guild, bot)
+    if not cibles:
         return ""
 
-    blocs = []
-    for membre in membres:
+    blocs, tronque = [], False
+    for cible in cibles:
         try:
-            lignes = await bot.db.get_sanction_history(guild.id, membre.id, _SANCTIONS_MAX)
+            # Un dossier de plus que la limite : c'est ce qui permet de SAVOIR
+            # qu'il en reste, au lieu de le deviner.
+            lignes = await bot.db.get_sanction_history(
+                guild.id, cible.identifiant, _SANCTIONS_MAX + 1,
+            )
         except Exception:  # noqa: BLE001 — jamais bloquant pour la réponse
-            logger.debug("Historique illisible pour %s", membre.id, exc_info=True)
+            logger.debug("Historique illisible pour %s", cible.identifiant, exc_info=True)
             continue
-        nom = getattr(membre, "display_name", None) or str(membre)
+        lignes = list(lignes or ())
         if not lignes:
-            blocs.append(f"{nom} (id {membre.id}) : aucune sanction enregistrée sur ce serveur.")
+            blocs.append(
+                f"{cible.nom} (id {cible.identifiant}) : aucune sanction enregistrée sur ce serveur."
+            )
             continue
+        if len(lignes) > _SANCTIONS_MAX:
+            tronque = True
+            lignes = lignes[:_SANCTIONS_MAX]
+            entete = (
+                f"Les {_SANCTIONS_MAX} sanctions LES PLUS RÉCENTES de {cible.nom} "
+                f"(id {cible.identifiant}) — il en existe de plus anciennes, non listées ici"
+            )
+        else:
+            entete = (
+                f"Toutes les sanctions de {cible.nom} (id {cible.identifiant}), "
+                "de la plus récente à la plus ancienne"
+            )
         detail = "\n".join(_ligne(sanction, guild) for sanction in lignes)
-        blocs.append(f"Sanctions de {nom} (id {membre.id}), de la plus récente à la plus ancienne :\n{detail}")
+        blocs.append(f"{entete} :\n{detail}")
 
     if not blocs:
         return ""
+    # Revue Codex du 17/11/2026 : avec plus de huit dossiers, la consigne
+    # « dis qu'elle n'est pas enregistrée » transformait une liste tronquée en
+    # démenti faux. On ne nie une sanction que sur une liste complète.
+    consigne_absence = (
+        "Une partie de l'historique est tronquée : ne dis JAMAIS qu'une sanction "
+        "n'existe pas et ne donne aucun total — dis que tu ne vois que les plus "
+        "récentes et propose `+modhistory` pour le dossier complet."
+        if tronque else
+        "Si la question porte sur une action absente d'une liste annoncée comme "
+        "complète, dis qu'elle n'est pas enregistrée."
+    )
     return (
         "[Historique de modération lu dans la base SentriX. C'est la SOURCE DE VÉRITÉ : "
         "réponds à partir de ces lignes, cite le numéro de dossier, et n'invente jamais "
-        "une sanction, une date ou un motif qui n'y figure pas. Si la question porte sur "
-        "une action absente de cette liste, dis qu'elle n'est pas enregistrée.]\n"
+        f"une sanction, une date ou un motif qui n'y figure pas. {consigne_absence}]\n"
         + "\n\n".join(blocs)
     )
 
 
-__all__ = ["cibles_citees", "memoire", "peut_consulter", "question_sur_une_sanction"]
+__all__ = ["Cible", "cibles_citees", "memoire", "peut_consulter", "question_sur_une_sanction"]

@@ -744,9 +744,36 @@ class AffichageProgressif:
         self._envoyer = envoyer
         self.message = None
         self._derniere_ecriture = 0.0
+        self._bloque = False
+
+    @staticmethod
+    def _refuse_par_les_filtres(texte: str) -> bool:
+        """Les filtres de sortie, appliqués AVANT publication et non après.
+
+        Revue Codex du 17/11/2026, et elle a raison : ai_service vérifie
+        contains_sensitive_content après la fin du flux, et ai_context_v9
+        appelle ai_safety.filtrer après le retour de generate. Un aperçu
+        publiait donc le texte avant ces deux contrôles — et supprimer
+        l'aperçu ensuite n'annule pas ce qui a été lu. Les deux filtres sont
+        de simples fonctions de chaînes : les appeler ici ne coûte rien.
+        """
+        from utils import ai_safety
+        try:
+            return bool(
+                ai_service.contains_sensitive_content(texte)
+                or ai_safety.est_mode_emploi_dangereux(texte)
+            )
+        except Exception:  # noqa: BLE001 — en cas de doute, on ne publie pas
+            logger.debug("Filtres d'aperçu indisponibles : aperçu abandonné.", exc_info=True)
+            return True
 
     async def afficher(self, texte_cumule: str) -> None:
-        if len(texte_cumule) < self.MINIMUM:
+        if self._bloque or len(texte_cumule) < self.MINIMUM:
+            return
+        if self._refuse_par_les_filtres(texte_cumule):
+            # Définitif : la suite du texte contient toujours ce début.
+            self._bloque = True
+            await self.abandonner()
             return
         maintenant = time.monotonic()
         if self.message is not None and maintenant - self._derniere_ecriture < self.INTERVALLE:
@@ -763,7 +790,7 @@ class AffichageProgressif:
 
     async def terminer(self, texte_final: str) -> bool:
         """Pose le texte définitif. Retourne True si l'aperçu a servi de message."""
-        if self.message is None:
+        if self.message is None or self._bloque:
             return False
         try:
             await self.message.edit(content=texte_final)
