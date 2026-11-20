@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import random
 import re
 import unicodedata
 from urllib.parse import quote_plus, urlsplit
@@ -64,24 +65,35 @@ PLAYBACK_RESUME_PATTERN = re.compile(
 # Le modèle comprend déjà ces expressions, mais un fast-path déterministe évite qu'une
 # question de small-talk ultra courte soit parfois traitée comme une demande de définition.
 # Cela rend aussi « cv ? » quasi instantané puisqu'aucun appel OpenAI n'est nécessaire.
+# 20/11/2026 : chaque clé n'avait qu'UNE réponse, au mot près. Tout le monde
+# recevait donc exactement la même phrase, à chaque fois — « si il rep la même
+# chose a tout le monde c'est null ». Plusieurs formulations par clé, tirées au
+# hasard : le fast-path reste instantané, mais il ne sonne plus comme un
+# répondeur automatique.
 _CASUAL_REPLIES = {
-    "cv": "Oui tranquille, et toi ?",
-    "ca va": "Oui tranquille, et toi ?",
-    "sava": "Oui tranquille, et toi ?",
-    "sa va": "Oui tranquille, et toi ?",
-    "tu vas bien": "Oui tranquille, et toi ?",
-    "comment ca va": "Ça va bien, et toi ?",
-    "ca dit quoi": "Tranquille, et toi ?",
-    "bien ou quoi": "Oui tranquille, et toi ?",
-    "slt": "Salut !",
-    "salut": "Salut !",
-    "cc": "Coucou !",
-    "coucou": "Coucou !",
-    "yo": "Yo !",
-    "wsh": "Wsh, ça dit quoi ?",
-    "t es la": "Oui, je suis là.",
-    "tes la": "Oui, je suis là.",
-    "tu fais quoi": "Je suis là, je te réponds. Et toi ?",
+    "cv": ("Oui tranquille, et toi ?", "Ça va ouais, toi ?", "Tranquille, et de ton côté ?",
+           "Ouais nickel, toi ?"),
+    "ca va": ("Oui tranquille, et toi ?", "Ça roule, et toi ?", "Ouais ça va, toi ?",
+              "Tranquille, toi ?"),
+    "sava": ("Oui tranquille, et toi ?", "Ça va ouais, toi ?", "Ouais nickel, et toi ?"),
+    "sa va": ("Oui tranquille, et toi ?", "Ça roule, toi ?", "Ouais ça va, et toi ?"),
+    "tu vas bien": ("Oui tranquille, et toi ?", "Ouais ça va bien, toi ?",
+                    "Nickel de mon côté, et toi ?"),
+    "comment ca va": ("Ça va bien, et toi ?", "Tranquille, toi ?", "Ouais ça va, de ton côté ?"),
+    "ca dit quoi": ("Tranquille, et toi ?", "Pas grand-chose, toi ?", "Ça dit rien de ouf, toi ?"),
+    "bien ou quoi": ("Oui tranquille, et toi ?", "Bien ouais, toi ?", "Ça va, et toi ?"),
+    "slt": ("Salut !", "Salut, ça dit quoi ?", "Hey !", "Yo !"),
+    "salut": ("Salut !", "Salut, ça va ?", "Hey, ça dit quoi ?", "Yo !"),
+    "cc": ("Coucou !", "Hey !", "Salut !", "Coucou, ça va ?"),
+    "coucou": ("Coucou !", "Hey, ça va ?", "Salut !", "Coucou, ça dit quoi ?"),
+    "yo": ("Yo !", "Yo, ça dit quoi ?", "Hey !", "Wsh !"),
+    "wsh": ("Wsh, ça dit quoi ?", "Wsh !", "Yo, ça va ?", "Wsh, tranquille ?"),
+    "t es la": ("Oui, je suis là.", "Toujours là 👀", "Ouaip, je suis là.", "Présent !",
+                "Yep, dis-moi."),
+    "tes la": ("Oui, je suis là.", "Toujours là 👀", "Ouaip, dis-moi.", "Présent !",
+               "Yep, je t'écoute."),
+    "tu fais quoi": ("Je suis là, je te réponds. Et toi ?", "Rien de fou, je t'écoute. Et toi ?",
+                     "Je traîne ici. Toi ?", "J'attends qu'on me parle 😄 Et toi ?"),
 }
 
 _CASUAL_PROMPT_MARKER = "[SENTRIX_CASUAL_CHAT_V58]"
@@ -130,8 +142,14 @@ def _casual_reply(text: str) -> str | None:
 
     Les demandes de définition (« cv veut dire quoi ? ») ne correspondent volontairement
     à aucune clé exacte et continuent donc vers l'IA normalement.
+
+    Le tirage au hasard est voulu : deux personnes qui écrivent « slt » à une
+    seconde d'intervalle ne doivent pas lire le même mot.
     """
-    return _CASUAL_REPLIES.get(_normalize_casual_text(text))
+    choix = _CASUAL_REPLIES.get(_normalize_casual_text(text))
+    if not choix:
+        return None
+    return random.choice(choix)
 
 
 def _looks_like_link_request(text: str) -> bool:
