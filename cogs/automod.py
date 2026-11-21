@@ -4061,6 +4061,32 @@ class AutoMod(commands.Cog, name="Automod"):
         # Filtre multilingue d'insultes : uniquement si le serveur l'a activé. Il tournait
         # avant pour tout le monde, sans interrupteur, et appliquait un timeout.
         if conf.get("antiinsult") and await self.security_filter_applies_to(message, "antiinsult"):
+            # 21/11/2026 : captures d'un serveur harcelé — « Tu veut jte viol ta
+            # grand mère », « J'te d0x bb », « Vsy veski pas ou jte bz ». Le jeu
+            # de données multilingue n'en détectait AUCUNE : il cherche des MOTS,
+            # or une menace est une FORME, écrite en abrégé et parfois en leet.
+            #
+            # Pire, l'architecture rendait le rattrapage impossible :
+            # _insulte_selon_contexte ne pouvait qu'ANNULER une détection locale,
+            # jamais en créer une. L'IA n'était donc même pas consultée sur ces
+            # messages. On lui donne ici le droit d'accuser.
+            #
+            # L'asymétrie est volontaire : sur une menace, on sanctionne SAUF si
+            # l'IA dit explicitement « anodin ». Une IA injoignable ou hésitante
+            # laisse donc passer la sanction — rater une menace de viol coûte
+            # plus cher qu'un mute de dix minutes à retirer.
+            from utils import menaces
+
+            menace = menaces.menace_probable(message.content)
+            if menace is not None and await self._insulte_selon_contexte(message) is not False:
+                return await self._delete_and_timeout(
+                    message,
+                    "Menace directe détectée."
+                    if menace == "menace_violence"
+                    else "Menace de divulgation de données personnelles détectée.",
+                    detection_kind=menace,
+                )
+
             dataset_match = self.moderation_dataset.match(message.content)
             # 06/11/2026 : « analyse le contexte : rien de grave, rien ; insultant,
             # sanction ». « je te baise au foot mdr » n'est pas une insulte.
@@ -4318,10 +4344,14 @@ class AutoMod(commands.Cog, name="Automod"):
             )
             consigne_moderation = (
                 "Tu modères un serveur Discord francophone. Décide si le DERNIER message est une "
-                "vraie insulte ou attaque envers quelqu'un (y compris abrégée : ntm, fdp, tg, "
-                "bztmr…), ou s'il est anodin : vanne entre amis clairement sur le ton du jeu, "
-                "expression (« je te baise au foot » = je te bats), frustration contre un jeu, "
-                "citation, question. Réponds par un seul mot : OFFENSANT ou ANODIN."
+                "vraie insulte, une attaque ou une MENACE envers quelqu'un (y compris abrégée : "
+                "ntm, fdp, tg, bztmr, « jte viol », « jte d0x »…), ou s'il est anodin : vanne "
+                "entre amis clairement sur le ton du jeu, expression (« je te baise au foot » = "
+                "je te bats), frustration contre un jeu, citation, question.\n"
+                "Une menace de violence physique, de viol, ou de divulgation de données "
+                "personnelles (dox, swat, adresse, IP) est TOUJOURS offensante, même « pour "
+                "rire », même entre gens qui se connaissent.\n"
+                "Réponds par un seul mot : OFFENSANT ou ANODIN."
             )
             entree = (
                 (f"Conversation récente :\n{contexte[-1500:]}\n\n" if contexte else "")
