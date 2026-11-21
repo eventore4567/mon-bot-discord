@@ -176,22 +176,30 @@ def cibles_citees(texte: str, guild, bot=None) -> list[Cible]:
     correspondances.sort(key=lambda item: len(item[0]), reverse=True)
     occupes: list[tuple[int, int]] = []
 
-    def _occurrence_libre(plat: str) -> tuple[int, int] | None:
-        depart = 0
+    def _toutes_les_places(plat: str) -> list[tuple[int, int]]:
+        places, depart = [], 0
         while True:
             debut = minuscule.find(plat, depart)
             if debut < 0:
-                return None
-            fin = debut + len(plat)
-            if not any(d <= debut and fin <= f for d, f in occupes):
-                return debut, fin
+                return places
+            places.append((debut, debut + len(plat)))
             depart = debut + 1
 
     for plat, membre, nom in correspondances:
-        place = _occurrence_libre(plat)
-        if place is None:
-            continue  # ce nom n'apparaît que dans un nom plus long déjà retenu
-        occupes.append(place)
+        places = _toutes_les_places(plat)
+        # 21/11/2026 : on ne marquait que la PREMIÈRE occurrence du nom retenu.
+        # « Pourquoi Jean-Paul Dupont a été banni puis Jean-Paul Dupont a été
+        # débanni ? » laissait donc la seconde libre, et « Jean » y trouvait sa
+        # place : la mémoire chargeait le dossier de Jean sans aucune raison.
+        # Un nom retenu occupe TOUTES ses occurrences ; un « Jean » cité
+        # ailleurs dans la phrase reste trouvable, c'est tout l'intérêt.
+        libres = [
+            (d, f) for d, f in places
+            if not any(od <= d and f <= of for od, of in occupes)
+        ]
+        if not libres:
+            continue  # ce nom n'apparaît qu'à l'intérieur d'un nom plus long
+        occupes.extend(places)
         _ajouter(membre.id, getattr(membre, "display_name", None) or nom)
     return trouves[:3]
 
