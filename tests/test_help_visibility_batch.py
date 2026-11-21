@@ -28,7 +28,7 @@ class HelpVisibilityBatchTests(unittest.TestCase):
             "give-money", "reset-economy", "shoppanel", "shoprole", "shop", "weekly",
             "set-bio", "rep", "reputation", "repleaderboard", "rephistory",
             "voice-time", "level-roles",
-            "addemoji", "deleteemoji", "emoji-list",
+            "addemoji", "deleteemoji", "emoji-list", "emogi",
         }
         missing = expected - HELP_VISIBLE_EXTRA_COMMANDS
         self.assertEqual(missing, set(), f"toujours absentes : {missing}")

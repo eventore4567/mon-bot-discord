@@ -152,7 +152,7 @@ HELP_VISIBLE_EXTRA_COMMANDS = frozenset({
     "set-bio", "rep", "reputation", "repleaderboard", "rephistory",
     "voice-time", "level-roles",
     # Émojis : aucun chemin de découverte sans les connaître déjà par cœur.
-    "addemoji", "deleteemoji", "emoji-list",
+    "addemoji", "deleteemoji", "emoji-list", "emogi",
 })
 INTENTIONALLY_REMOVED_COMMANDS = PURE_DUPLICATE_COMMANDS | EXPLICITLY_REMOVED_COMMANDS
 CONFIRMED_DUPLICATE_COMMANDS = PURE_DUPLICATE_COMMANDS
