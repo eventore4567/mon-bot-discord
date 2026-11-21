@@ -35,9 +35,6 @@ import discord
 
 logger = logging.getLogger("bot.raid-mode")
 
-#: Un mode armé à la main ne doit pas expirer tout seul : on le prolonge
-#: largement et seul un désarmement explicite le referme.
-DUREE_MANUELLE = 86400
 RAID_MODE_DUREE = 600          # le mode reste actif 10 min après la dernière arrivée suspecte
 CALME_SECONDES = 45            # rapport quand plus personne n'arrive pendant 45 s
 FENETRE_VAGUE = 60             # les arrivées des 60 dernières secondes forment la vague
@@ -74,8 +71,21 @@ _etats: dict[int, EtatRaid] = {}
 
 
 def actif(guild_id: int) -> bool:
+    """Le mode raid tourne-t-il sur ce serveur.
+
+    ``manuel`` passe AVANT l'échéance, et pas seulement pour faire joli. Une
+    première version donnait au mode manuel une échéance de 24 h ; or
+    ``declencher()`` et ``sur_arrivee()`` écrasent ``jusqua`` par
+    ``maintenant + RAID_MODE_DUREE``. La toute première expulsion ramenait donc
+    les 24 h à dix minutes, et après dix minutes de calme la porte se
+    rouvrait — sans que personne ne l'ait décidé, et alors que le bouton
+    promettait le contraire. Un mode armé à la main n'a pas d'échéance : il se
+    désarme à la main.
+    """
     etat = _etats.get(int(guild_id))
-    return etat is not None and time.monotonic() < etat.jusqua
+    if etat is None:
+        return False
+    return bool(etat.manuel) or time.monotonic() < etat.jusqua
 
 
 #: 21/11/2026 : « un raid mode dans sécurité qui kick les nouveaux ».
@@ -93,8 +103,9 @@ CREATE TABLE IF NOT EXISTS sentrix_raid_manuel (
 
 
 def est_manuel(guild_id: int) -> bool:
+    """Armé à la main, donc sans échéance (voir ``actif``)."""
     etat = _etats.get(int(guild_id))
-    return bool(etat is not None and etat.manuel and actif(guild_id))
+    return bool(etat is not None and etat.manuel)
 
 
 async def armer_manuel(bot, guild, auteur_id: int) -> None:
@@ -105,10 +116,10 @@ async def armer_manuel(bot, guild, auteur_id: int) -> None:
         etat = _etats[guild.id] = EtatRaid(
             debut=maintenant, jusqua=maintenant, derniere_arrivee=maintenant,
         )
+    # Pas de minuterie, et surtout pas d'échéance posée ici : ``actif()`` lit
+    # ``manuel`` en premier, donc les écrasements de ``jusqua`` par la détection
+    # automatique ne peuvent plus raccourcir un armement décidé par un humain.
     etat.manuel = True
-    # Pas de minuterie : un mode armé à la main se désarme à la main. Expirer
-    # tout seul rouvrirait la porte sans que personne ne l'ait décidé.
-    etat.jusqua = maintenant + DUREE_MANUELLE
     if "mode armé manuellement" not in etat.mesures:
         etat.mesures.append("mode armé manuellement")
     try:
@@ -158,7 +169,6 @@ async def restaurer_manuels(bot) -> int:
                 debut=maintenant, jusqua=maintenant, derniere_arrivee=maintenant,
             )
         etat.manuel = True
-        etat.jusqua = maintenant + DUREE_MANUELLE
         restaures += 1
     if restaures:
         logger.info("Mode raid manuel restauré sur %s serveur(s).", restaures)

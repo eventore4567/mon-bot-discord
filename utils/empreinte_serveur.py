@@ -221,6 +221,44 @@ def disparus(
     return vide
 
 
+async def oublier(db, guild_id: int, *, roles: Iterable[int] = (), salons: Iterable[int] = ()) -> int:
+    """Retire de l'empreinte des objets qu'on vient de recréer.
+
+    21/11/2026, trouvé en revue. Deux auteurs sanctionnés pendant le même nuke
+    donnent deux restaurations ; la seconde relisait la même empreinte, où les
+    anciens IDs sont toujours cités. ``disparus()`` les jugeait donc encore
+    absents — ils le sont, au sens strict : les objets existent maintenant sous
+    de NOUVEAUX IDs — et le filet les recréait une deuxième fois.
+
+    Les oublier referme le cycle : ce que le filet a recréé ne peut plus être
+    recréé une seconde fois, et la capture suivante (dix minutes au plus) remet
+    de toute façon les vrais IDs dans l'empreinte.
+    """
+    a_oublier_roles = {int(x) for x in roles}
+    a_oublier_salons = {int(x) for x in salons}
+    if not a_oublier_roles and not a_oublier_salons:
+        return 0
+    empreinte = await lire(db, guild_id)
+    if empreinte is None:
+        return 0
+    gardes_roles = [r for r in (empreinte.get("roles") or [])
+                    if int(r.get("id") or 0) not in a_oublier_roles]
+    gardes_salons = [s for s in (empreinte.get("salons") or [])
+                     if int(s.get("id") or 0) not in a_oublier_salons]
+    retires = (len(empreinte.get("roles") or []) - len(gardes_roles)
+               + len(empreinte.get("salons") or []) - len(gardes_salons))
+    if not retires:
+        return 0
+    contenu = {"roles": gardes_roles, "salons": gardes_salons}
+    await db.execute(
+        f"INSERT INTO {TABLE}(guild_id, pris_le, contenu_json) VALUES(?, ?, ?) "
+        "ON CONFLICT(guild_id) DO UPDATE SET pris_le = excluded.pris_le, "
+        "contenu_json = excluded.contenu_json",
+        (int(guild_id), int(empreinte["pris_le"]), json.dumps(contenu, ensure_ascii=False)),
+    )
+    return retires
+
+
 def total(absents: dict[str, Iterable[dict[str, Any]]]) -> int:
     return sum(len(list(absents.get(cle) or [])) for cle in ORDRE)
 
@@ -237,6 +275,7 @@ __all__ = [
     "disparus",
     "installer",
     "lire",
+    "oublier",
     "total",
     "trop_vieille",
 ]

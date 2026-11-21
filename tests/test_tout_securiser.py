@@ -29,7 +29,15 @@ class _Db:
             self.inserts += 1
 
     async def set_automod(self, guild_id, champ, valeur):
+        # Fidèle à Database.set_automod : « anti-liens » est strict par
+        # définition depuis V2026.09, donc toucher à l'un des deux champs écrit
+        # les DEUX. Ma première doublure ne le faisait pas, et c'est exactement
+        # ce qui a masqué le bug : la commande rallumait le blocage total des
+        # liens en passant par ``antilink``, et le test applaudissait.
         self.valeurs[champ] = int(valeur)
+        if champ in {"antilink", "antilink_strict"}:
+            self.valeurs["antilink"] = int(valeur)
+            self.valeurs["antilink_strict"] = int(valeur)
 
 
 @pytest.fixture
@@ -77,7 +85,10 @@ async def test_le_blocage_total_des_liens_reste_a_part(envoyes):
     cog = _cog(db, {cle: 0 for cle in TOGGLE_FIELDS})
     await AutoMod.tout_securiser.callback(cog, _ctx())
 
-    assert "antilink_strict" in TOUT_SECURISER_EXCLUES
+    # Les DEUX noms sont exclus, pas seulement « strict » : la base les
+    # synchronise, donc allumer ``antilink`` allumait aussi le blocage total.
+    assert {"antilink", "antilink_strict"} <= TOUT_SECURISER_EXCLUES
+    assert db.valeurs.get("antilink", 0) == 0
     assert db.valeurs.get("antilink_strict", 0) == 0
 
 

@@ -1019,10 +1019,17 @@ TOGGLE_FIELDS = [
 #: messages : seulement ce qui protège le serveur sans toucher aux conversations.
 SECURITE_DE_BASE = ("antinuke", "antiraid", "escalation")
 
-#: Protections que « +tout-securiser » n'allume PAS. ``antilink_strict`` coupe
+#: Protections que « +tout-securiser » n'allume PAS. Le blocage des liens coupe
 #: aussi les liens légitimes (YouTube, GitHub, un lien d'aide) : c'est un choix
 #: éditorial, pas une protection, il reste donc à activer à la main.
-TOUT_SECURISER_EXCLUES = frozenset({"antilink_strict"})
+#:
+#: Les DEUX noms y figurent, et ce n'est pas une ceinture de sécurité :
+#: ``Database.set_automod`` écrit ``antilink`` et ``antilink_strict`` ensemble
+#: dès qu'on touche à l'un des deux (depuis V2026.09, « anti-liens » est strict
+#: par définition). N'exclure que ``antilink_strict`` laissait donc l'appel sur
+#: ``antilink`` rallumer le blocage total — exactement ce que la commande
+#: promet de ne pas faire.
+TOUT_SECURISER_EXCLUES = frozenset({"antilink", "antilink_strict"})
 
 
 # Protections qui inspectent un message et permettent le bypass par rôle
@@ -5633,9 +5640,17 @@ class AutoMod(commands.Cog, name="Automod"):
 
         # 07/11/2026 : mode raid. Pendant un raid confirmé, chaque arrivant suspect
         # (bot non autorisé, compte récent, avatar par défaut) est expulsé aussitôt.
-        if conf.get("antiraid"):
-            from cogs import raid_mode
+        #
+        # 21/11/2026 : le mode armé À LA MAIN passe même si l'option anti-raid est
+        # coupée — et elle l'est par défaut (``antiraid INTEGER DEFAULT 0``). Le
+        # bouton annonçait « Mode raid ARMÉ » sur un serveur où plus rien
+        # n'arrivait jusqu'à ``sur_arrivee`` : la porte restait grande ouverte.
+        # Quelqu'un qui ferme la porte exprès a décidé ; ça ne se négocie pas
+        # avec un interrupteur qu'il n'a pas touché.
+        from cogs import raid_mode
 
+        manuel = raid_mode.est_manuel(member.guild.id)
+        if conf.get("antiraid") or manuel:
             raid_mode.noter_arrivee(member)
             if raid_mode.actif(member.guild.id):
                 try:

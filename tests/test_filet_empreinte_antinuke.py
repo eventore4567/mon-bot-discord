@@ -48,6 +48,7 @@ def _cog(db):
     cog._restore_deleted_channel = AsyncMock(
         side_effect=lambda g, s, cm, rm: SimpleNamespace(id=s["id"])
     )
+    cog._reconcile_restored_channels = AsyncMock()
     return cog
 
 
@@ -72,7 +73,7 @@ async def test_tout_ce_qui_manque_est_recree():
     db = _Db(_empreinte(roles=[10, 11], salons=[(20, "category"), (21, "text")]))
     cog = _cog(db)
     # Le serveur a tout perdu, et la table des dégâts est vide.
-    bilan = await cog._restaurer_depuis_empreinte(_guild(), {}, {})
+    bilan = await cog._restaurer_depuis_empreinte(_guild(), {}, {}, {})
 
     assert bilan == {"roles_restored": 2, "channels_restored": 2, "failed": 0}
 
@@ -86,7 +87,7 @@ async def test_les_categories_passent_avant_les_salons():
     """
     db = _Db(_empreinte(salons=[(21, "text"), (20, "category")]))
     cog = _cog(db)
-    await cog._restaurer_depuis_empreinte(_guild(), {}, {})
+    await cog._restaurer_depuis_empreinte(_guild(), {}, {}, {})
 
     ordre = [appel.args[1]["id"] for appel in cog._restore_deleted_channel.await_args_list]
     assert ordre == [20, 21]
@@ -97,7 +98,7 @@ async def test_ce_qui_a_survecu_n_est_pas_touche():
     """Le filet ne doit pas créer de doublons de ce qui est encore là."""
     db = _Db(_empreinte(roles=[10, 11], salons=[(20, "text")]))
     cog = _cog(db)
-    bilan = await cog._restaurer_depuis_empreinte(_guild(roles=[11], salons=[20]), {}, {})
+    bilan = await cog._restaurer_depuis_empreinte(_guild(roles=[11], salons=[20]), {}, {}, {})
 
     assert bilan["roles_restored"] == 1
     assert bilan["channels_restored"] == 0
@@ -108,7 +109,7 @@ async def test_ce_qui_a_survecu_n_est_pas_touche():
 async def test_sans_empreinte_le_filet_ne_fait_rien_et_ne_plante_pas():
     """Serveur jamais capturé, ou table absente sur une vieille base."""
     cog = _cog(_Db(None))
-    bilan = await cog._restaurer_depuis_empreinte(_guild(), {}, {})
+    bilan = await cog._restaurer_depuis_empreinte(_guild(), {}, {}, {})
     assert bilan == {"roles_restored": 0, "channels_restored": 0, "failed": 0}
     cog._restore_role.assert_not_awaited()
 
@@ -122,7 +123,7 @@ async def test_une_empreinte_trop_vieille_ne_ressuscite_pas_le_serveur():
     """
     db = _Db(_empreinte(roles=[10], salons=[(20, "text")]), pris_le=0)
     cog = _cog(db)
-    bilan = await cog._restaurer_depuis_empreinte(_guild(), {}, {})
+    bilan = await cog._restaurer_depuis_empreinte(_guild(), {}, {}, {})
     assert bilan == {"roles_restored": 0, "channels_restored": 0, "failed": 0}
 
 
@@ -132,7 +133,7 @@ async def test_un_echec_de_recreation_est_compte():
     cog = _cog(db)
     cog._restore_role = AsyncMock(return_value=None)
     cog._restore_deleted_channel = AsyncMock(return_value=None)
-    bilan = await cog._restaurer_depuis_empreinte(_guild(), {}, {})
+    bilan = await cog._restaurer_depuis_empreinte(_guild(), {}, {}, {})
     assert bilan["failed"] == 2
 
 
@@ -148,7 +149,7 @@ async def test_le_filet_partage_la_correspondance_des_roles():
     cog = _cog(db)
     role_map: dict = {}
     channel_map: dict = {}
-    await cog._restaurer_depuis_empreinte(_guild(), channel_map, role_map)
+    await cog._restaurer_depuis_empreinte(_guild(), channel_map, role_map, {})
 
     assert cog._restore_role.await_args.args[2] is role_map
     assert cog._restore_deleted_channel.await_args.args[3] is role_map
