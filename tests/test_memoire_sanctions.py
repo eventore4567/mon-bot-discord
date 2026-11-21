@@ -363,3 +363,40 @@ def test_un_seul_pseudo_cite_ne_ramene_pas_les_homonymes():
 
     cibles = memoire.cibles_citees("pourquoi Alex a ete banni ?", _guild([alice, bob]))
     assert [c.identifiant for c in cibles] == [11]
+
+
+def test_un_nom_long_repete_occupe_toutes_ses_occurrences():
+    """Seule la PREMIÈRE occurrence du nom retenu était marquée occupée.
+
+    « Pourquoi Jean-Paul Dupont a été banni puis Jean-Paul Dupont a été
+    débanni ? » laissait la seconde libre, et « Jean » y trouvait sa place :
+    la mémoire chargeait le dossier de Jean sans aucune raison.
+    """
+    jean = _membre_double(11, "jean_user", "Jean")
+    vise = _membre_double(14, "jp_user", "Jean-Paul Dupont")
+    guild = _guild([jean, vise])
+
+    cibles = memoire.cibles_citees(
+        "Pourquoi Jean-Paul Dupont a ete banni puis Jean-Paul Dupont a ete debanni ?",
+        guild,
+    )
+    assert [c.identifiant for c in cibles] == [14]
+
+
+def test_les_cinq_cas_de_noms_cohabitent():
+    """Chaque correction a cassé la précédente : on les vérifie ensemble."""
+    jean = _membre_double(11, "jean_user", "Jean")
+    paul = _membre_double(12, "paul_user", "Paul")
+    dupont = _membre_double(13, "dup_user", "Dupont")
+    vise = _membre_double(14, "jp_user", "Jean-Paul Dupont")
+    guild = _guild([jean, paul, dupont, vise])
+
+    attendus = {
+        "pourquoi tu as banni Jean-Paul Dupont ?": [14],
+        "Pourquoi Jean et Jean-Paul Dupont ont ete bannis ?": [11, 14],
+        "pourquoi Jean et Paul sont ban ?": [11, 12],
+        "Pourquoi Jean-Paul Dupont a ete banni puis Jean-Paul Dupont a ete debanni ?": [14],
+    }
+    for question, attendu in attendus.items():
+        obtenu = sorted(c.identifiant for c in memoire.cibles_citees(question, guild))
+        assert obtenu == attendu, f"« {question} » -> {obtenu}, attendu {attendu}"
