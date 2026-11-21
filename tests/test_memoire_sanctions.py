@@ -417,3 +417,47 @@ def test_un_membre_deja_retenu_ne_reserve_plus_de_place():
 
     cibles = memoire.cibles_citees("Pourquoi QueenAlice et Bob ont ete bannis ?", guild)
     assert sorted(c.identifiant for c in cibles) == [11, 12]
+
+
+def test_l_alias_d_un_membre_retenu_masque_encore_ses_morceaux():
+    """Le revers exact du correctif précédent, et les deux doivent tenir.
+
+    « Jean-Paul Dupont » a pour nom d'utilisateur « JeanPaul ». Dans
+    « Pourquoi Jean-Paul Dupont (JeanPaul) a été banni ? », sauter cet alias
+    parce que son membre était déjà retenu laissait « Jean » et « Paul »
+    ressortir de « JeanPaul » : trois dossiers chargés au lieu d'un.
+
+    Un nom masque donc TOUJOURS ses occurrences ; c'est au sein d'un groupe
+    de noms identiques que la place revient d'abord à un membre non retenu.
+    """
+    jean = _membre_double(11, "jean_u", "Jean")
+    paul = _membre_double(12, "paul_u", "Paul")
+    vise = _membre_double(14, "JeanPaul", "Jean-Paul Dupont")
+    guild = _guild([jean, paul, vise])
+
+    cibles = memoire.cibles_citees(
+        "Pourquoi Jean-Paul Dupont (JeanPaul) a ete banni ?", guild
+    )
+    assert [c.identifiant for c in cibles] == [14]
+
+
+def test_les_deux_exigences_opposees_tiennent_ensemble():
+    """Masquer sans accaparer : les deux cas qui se contredisaient."""
+    jean = _membre_double(11, "jean_u", "Jean")
+    paul = _membre_double(12, "paul_u", "Paul")
+    vise = _membre_double(14, "JeanPaul", "Jean-Paul Dupont")
+    assert [
+        c.identifiant for c in memoire.cibles_citees(
+            "Pourquoi Jean-Paul Dupont (JeanPaul) a ete banni ?",
+            _guild([jean, paul, vise]),
+        )
+    ] == [14], "l'alias doit masquer ses morceaux"
+
+    queenalice = _membre_double(21, "bob", "QueenAlice")
+    bob = _membre_double(22, "bob_user", "Bob")
+    assert sorted(
+        c.identifiant for c in memoire.cibles_citees(
+            "Pourquoi QueenAlice et Bob ont ete bannis ?",
+            _guild([queenalice, bob]),
+        )
+    ) == [21, 22], "mais il ne doit pas accaparer le nom d'un autre"

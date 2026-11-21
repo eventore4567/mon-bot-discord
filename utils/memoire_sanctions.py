@@ -173,6 +173,17 @@ def cibles_citees(texte: str, guild, bot=None) -> list[Cible]:
     # endroit de la phrase. On raisonne donc sur les POSITIONS et non sur les
     # noms : un nom n'est écarté que si toutes ses occurrences tombent à
     # l'intérieur d'un nom plus long déjà retenu.
+    # 21/11/2026, septième et dernière passe sur ce tri. Deux exigences se
+    # contredisaient tant qu'on raisonnait candidat par candidat :
+    #
+    #   a) l'alias d'un membre déjà retenu doit MASQUER les noms courts qu'il
+    #      contient — « Jean-Paul Dupont (JeanPaul) » ne cite ni Jean ni Paul ;
+    #   b) il ne doit PAS accaparer un nom autonome appartenant à quelqu'un
+    #      d'autre — « QueenAlice (alias bob) et Bob » cite bien deux personnes.
+    #
+    # On traite donc les noms par GROUPE de chaînes identiques, du plus long au
+    # plus court. Un nom masque toujours toutes ses occurrences (a), et au sein
+    # d'un groupe la place revient d'abord à un membre pas encore retenu (b).
     correspondances.sort(key=lambda item: len(item[0]), reverse=True)
     occupes: list[tuple[int, int]] = []
 
@@ -185,29 +196,31 @@ def cibles_citees(texte: str, guild, bot=None) -> list[Cible]:
             places.append((debut, debut + len(plat)))
             depart = debut + 1
 
-    for plat, membre, nom in correspondances:
-        # 21/11/2026 : un membre déjà retenu ne doit plus rien réserver. Avec
-        # « QueenAlice » (nom d'utilisateur « bob ») et « Bob », la question
-        # « Pourquoi QueenAlice et Bob ont été bannis ? » faisait consommer le
-        # « Bob » autonome par l'alias de QueenAlice : _ajouter ignorait le
-        # doublon, mais la place était prise et le vrai Bob disparaissait.
-        if membre.id in vus:
-            continue
+    indice = 0
+    while indice < len(correspondances):
+        plat = correspondances[indice][0]
+        groupe = []
+        while indice < len(correspondances) and correspondances[indice][0] == plat:
+            groupe.append(correspondances[indice])
+            indice += 1
+
         places = _toutes_les_places(plat)
-        # 21/11/2026 : on ne marquait que la PREMIÈRE occurrence du nom retenu.
-        # « Pourquoi Jean-Paul Dupont a été banni puis Jean-Paul Dupont a été
-        # débanni ? » laissait donc la seconde libre, et « Jean » y trouvait sa
-        # place : la mémoire chargeait le dossier de Jean sans aucune raison.
-        # Un nom retenu occupe TOUTES ses occurrences ; un « Jean » cité
-        # ailleurs dans la phrase reste trouvable, c'est tout l'intérêt.
         libres = [
             (d, f) for d, f in places
             if not any(od <= d and f <= of for od, of in occupes)
         ]
         if not libres:
             continue  # ce nom n'apparaît qu'à l'intérieur d'un nom plus long
+
+        # Le masquage vaut même si aucun nouveau membre n'est retenu ici : c'est
+        # ce qui empêche « Jean » de ressortir de « JeanPaul ».
         occupes.extend(places)
-        _ajouter(membre.id, getattr(membre, "display_name", None) or nom)
+
+        # Une place libre = une personne. Un membre déjà trouvé par un autre de
+        # ses noms laisse la sienne à quelqu'un qui n'en a pas encore.
+        a_servir = [membre for _, membre, _nom in groupe if membre.id not in vus]
+        for membre, _place in zip(a_servir, libres):
+            _ajouter(membre.id, getattr(membre, "display_name", None) or membre.name)
     return trouves[:3]
 
 
