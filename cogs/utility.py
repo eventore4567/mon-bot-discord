@@ -13,6 +13,7 @@ import ipaddress
 import logging
 import re
 import socket
+from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import aiohttp
@@ -33,7 +34,7 @@ EMOJI_DIMENSION = 128
 EMOJI_EXPORT_CHUNK_SIZE = 1_850
 
 
-def _emoji_markup(emoji: discord.Emoji | discord.ApplicationEmoji) -> str:
+def _emoji_markup(emoji: Any) -> str:
     """Retourne le format Discord copiable, avec l'identifiant réel de l'emoji.
 
     Les emojis d'application et les emojis de serveur partagent ce format.  La
@@ -44,9 +45,7 @@ def _emoji_markup(emoji: discord.Emoji | discord.ApplicationEmoji) -> str:
     return f"<{prefix}:{emoji.name}:{emoji.id}>"
 
 
-def emoji_export_chunks(
-    emojis: list[discord.Emoji | discord.ApplicationEmoji], *, animated: bool
-) -> list[str]:
+def emoji_export_chunks(emojis: list[Any], *, animated: bool) -> list[str]:
     """Découpe les emojis en blocs de code qui restent copiables en MP.
 
     Discord limite un message à 2 000 caractères. Chaque ligne est volontairement
@@ -79,7 +78,7 @@ class EmojiExportView(discord.ui.View):
     def __init__(
         self,
         author: discord.abc.User,
-        emojis: list[discord.ApplicationEmoji],
+        emojis: list[Any],
     ) -> None:
         super().__init__(timeout=120)
         self.author_id = author.id
