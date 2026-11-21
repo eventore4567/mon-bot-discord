@@ -203,3 +203,35 @@ async def test_le_schema_strict_n_est_cree_qu_une_fois():
         await AutoMod.admins_soumis(cog, 1)
 
     assert db.ddl == 1, f"{db.ddl} CREATE TABLE pour trois sanctions"
+
+
+@pytest.mark.asyncio
+async def test_une_lecture_en_vol_ne_ressuscite_pas_l_ancienne_allowlist():
+    """Vider l'entrée ne suffisait pas.
+
+    Une lecture partie AVANT la modification pouvait revenir après et réécrire
+    l'ancienne photo : un bot autorisé serait resté expulsable jusqu'au
+    redémarrage. Les vérifications de raid tournant en parallèle, cet
+    entrelacement est devenu banal.
+    """
+    from cogs.automod import AutoMod
+
+    porte = asyncio.Event()
+
+    class _DbLente:
+        async def fetchall(self, requete, params=()):
+            await porte.wait()          # la requête « vole » pendant ce temps
+            return []                    # l'ANCIENNE allowlist, vide
+
+    cog = SimpleNamespace(bot=SimpleNamespace(db=_DbLente()), __dict__={})
+
+    lecture = asyncio.create_task(AutoMod._bot_allowlist_cached(cog, 1))
+    await asyncio.sleep(0)               # la lecture est partie
+    AutoMod._oublier_allowlist_bots(cog, 1)   # quelqu'un autorise un bot
+    porte.set()
+    await lecture
+
+    cache = cog.__dict__.get("_bot_allowlist_cache", {})
+    assert 1 not in cache, (
+        "la photo périmée a été publiée : le bot autorisé reste expulsable"
+    )

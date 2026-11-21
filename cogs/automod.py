@@ -1605,10 +1605,20 @@ class AutoMod(commands.Cog, name="Automod"):
 
         Un cache sans invalidation est un bug : autoriser un bot n'aurait eu
         aucun effet tant que l'entrée restait en mémoire.
+
+        21/11/2026, revue : vider l'entrée ne suffisait pas. Une lecture PARTIE
+        AVANT la modification pouvait revenir après et réécrire l'ancienne
+        photo — un bot autorisé serait alors resté expulsable jusqu'au
+        redémarrage. Les vérifications de raid tournant désormais en parallèle,
+        l'entrelacement devient banal. On incrémente donc un compteur de
+        génération : une lecture ne publie son résultat que si rien n'a changé
+        pendant son vol.
         """
         cache = getattr(self, "_bot_allowlist_cache", None)
         if cache is not None:
             cache.pop(guild_id, None)
+        generations = self.__dict__.setdefault("_bot_allowlist_generation", {})
+        generations[guild_id] = generations.get(guild_id, 0) + 1
 
     async def _bot_allowlist_cached(self, guild_id: int) -> frozenset[int]:
         """Toute l'allowlist du serveur en UNE requête, mise en cache.
@@ -1622,13 +1632,22 @@ class AutoMod(commands.Cog, name="Automod"):
         cache = getattr(self, "_bot_allowlist_cache", None)
         if cache is None:
             cache = self._bot_allowlist_cache = {}
-        if guild_id not in cache:
-            lignes = await self.bot.db.fetchall(
-                "SELECT bot_id FROM automod_bot_allowlist WHERE guild_id = ?",
-                (guild_id,),
-            )
-            cache[guild_id] = frozenset(int(l["bot_id"]) for l in (lignes or ()))
-        return cache[guild_id]
+        if guild_id in cache:
+            return cache[guild_id]
+
+        generations = self.__dict__.setdefault("_bot_allowlist_generation", {})
+        avant = generations.get(guild_id, 0)
+        lignes = await self.bot.db.fetchall(
+            "SELECT bot_id FROM automod_bot_allowlist WHERE guild_id = ?",
+            (guild_id,),
+        )
+        allowlist = frozenset(int(l["bot_id"]) for l in (lignes or ()))
+        # L'allowlist a-t-elle changé pendant que cette requête volait ? Si oui,
+        # cette photo est périmée : on la rend à l'appelant mais on ne la publie
+        # pas, sinon elle écraserait la modification qui vient d'avoir lieu.
+        if generations.get(guild_id, 0) == avant:
+            cache[guild_id] = allowlist
+        return allowlist
 
     async def _bot_is_allowlisted(self, guild_id: int, bot_id: int) -> bool:
         return int(bot_id) in await self._bot_allowlist_cached(guild_id)

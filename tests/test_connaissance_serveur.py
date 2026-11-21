@@ -276,3 +276,22 @@ async def test_sans_troncature_le_dementi_reste_permis():
     )
     assert "dis que tu ne l'as pas sous les yeux" in bloc
     assert "ATTENTION" not in bloc
+
+
+@pytest.mark.asyncio
+async def test_un_ticket_supprime_n_est_pas_un_ticket_ouvert():
+    """« status != 'ferme' » comptait les tickets SUPPRIMÉS comme ouverts.
+
+    cogs/tickets.py conserve la ligne avec status='supprime'. Un serveur
+    n'ayant qu'un ticket supprimé s'entendait donc dire qu'il avait un ticket
+    ouvert, et ces lignes mortes chassaient de vrais tickets de la liste.
+    """
+    import inspect
+
+    from utils import connaissance_tickets
+
+    source = inspect.getsource(connaissance_tickets.lire)
+    requetes = [l for l in source.splitlines() if "FROM tickets" in l]
+    assert requetes, "les requêtes doivent rester lisibles dans la fonction"
+    for requete in requetes:
+        assert "status = 'ouvert'" in requete, f"statut trop large : {requete.strip()}"
