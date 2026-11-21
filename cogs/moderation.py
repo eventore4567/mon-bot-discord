@@ -290,23 +290,44 @@ class Moderation(commands.Cog):
             return raw_duration, raw_reason or "Aucune raison"
         return candidate, rest[0] if rest else "Aucune raison"
 
-    async def _reply(self, ctx: commands.Context, message: str, *, ephemere: bool = False):
-        """Confirmation courte dans le salon de la commande (texte brut, sans ping)."""
-        return await panels.texte_court(ctx, message, ephemere=ephemere)
+    PRIVATE_SLASH_FEEDBACK_COMMANDS = frozenset({
+        "ban", "tempban", "unban", "kick", "mute", "unmute", "warn", "unwarn",
+        "clear", "clearwarnings", "slowmode", "lock", "unlock", "hide", "show",
+        "nickname", "resetnick", "move", "disconnect",
+    })
 
-    async def _ack(self, ctx: commands.Context):
-        """Accuse réception IMMÉDIATEMENT, avant tout appel API/DB. Corrige la lenteur
-        perçue du système de modération : chaque sanction enchaîne plusieurs appels
-        séquentiels (DM au membre, action Discord, écriture en base du dossier, envoi
-        du log, PUIS seulement la réponse) — sans accusé de réception immédiat, une
-        commande slash dépasse facilement les 3 secondes de Discord et affiche
-        « L'application ne répond plus », et une commande texte ne donne aucun signe
-        de vie pendant tout ce temps. Pour une interaction, on defer() tout de suite
-        (le petit indicateur "réflexion en cours" apparaît instantanément) ; pour une
-        commande texte, on affiche l'indicateur de frappe."""
+    async def _reply(
+        self,
+        ctx: commands.Context,
+        message: str,
+        *,
+        ephemere: bool | None = None,
+    ):
+        """Confirmation courte, privée automatiquement pour les actions mutantes slash."""
+        if ephemere is None:
+            command = getattr(ctx, "command", None)
+            name = str(
+                getattr(command, "name", "")
+                or getattr(ctx, "invoked_with", "")
+                or ""
+            ).casefold().strip()
+            ephemere = bool(
+                getattr(ctx, "interaction", None)
+                and name in self.PRIVATE_SLASH_FEEDBACK_COMMANDS
+            )
+        return await panels.texte_court(ctx, message, ephemere=bool(ephemere))
+
+    async def _ack(self, ctx: commands.Context, *, ephemere: bool = False):
+        """Accuse réception immédiatement avant les appels API/DB.
+
+        Pour une sanction lancée en slash, ephemere=True rend aussi la réponse
+        différée privée : Discord fixe le caractère éphémère au moment du defer(),
+        pas au moment du message final. Les commandes d'information gardent leur
+        comportement normal.
+        """
         if ctx.interaction:
             if not ctx.interaction.response.is_done():
-                await ctx.interaction.response.defer()
+                await ctx.interaction.response.defer(ephemeral=ephemere)
         else:
             await ctx.typing()
 
@@ -497,7 +518,7 @@ class Moderation(commands.Cog):
         raison = clean_reason(raison)
         if self._sanction_duplicate(ctx, "ban", membre.id):
             return await self._reply(ctx, "Cette sanction vient déjà d'être lancée sur ce membre.", ephemere=True)
-        await self._ack(ctx)
+        await self._ack(ctx, ephemere=True)
 
         template = await self._get_sanction_dm_template(ctx.guild.id, "ban")
         dm_text = None
@@ -539,7 +560,7 @@ class Moderation(commands.Cog):
             duree, raison = self._normalise_prefix_duration(duree, raison)
         if self._sanction_duplicate(ctx, "tempban", membre.id):
             return await self._reply(ctx, "Cette sanction vient déjà d'être lancée sur ce membre.", ephemere=True)
-        await self._ack(ctx)
+        await self._ack(ctx, ephemere=True)
         existing = await self.bot.db.fetchone(
             "SELECT id FROM tempactions WHERE guild_id=? AND user_id=? AND action='ban' AND expires_at>? LIMIT 1",
             (ctx.guild.id, membre.id, now()),
@@ -593,7 +614,7 @@ class Moderation(commands.Cog):
             return await self._reply(ctx, "Identifiant Discord invalide.", ephemere=True)
         if self._sanction_duplicate(ctx, "unban", uid):
             return await self._reply(ctx, "Ce débannissement vient déjà d'être lancé.", ephemere=True)
-        await self._ack(ctx)
+        await self._ack(ctx, ephemere=True)
 
         template = await self._get_sanction_dm_template(ctx.guild.id, "unban")
 
@@ -630,7 +651,7 @@ class Moderation(commands.Cog):
         raison = clean_reason(raison)
         if self._sanction_duplicate(ctx, "kick", membre.id):
             return await self._reply(ctx, "Cette sanction vient déjà d'être lancée sur ce membre.", ephemere=True)
-        await self._ack(ctx)
+        await self._ack(ctx, ephemere=True)
 
         template = await self._get_sanction_dm_template(ctx.guild.id, "kick")
         dm_text = None
@@ -678,7 +699,7 @@ class Moderation(commands.Cog):
         raison = clean_reason(raison)
         if self._sanction_duplicate(ctx, "mute", membre.id):
             return await self._reply(ctx, "Cette sanction vient déjà d'être lancée sur ce membre.", ephemere=True)
-        await self._ack(ctx)
+        await self._ack(ctx, ephemere=True)
 
         template = await self._get_sanction_dm_template(ctx.guild.id, "mute")
 
@@ -719,7 +740,7 @@ class Moderation(commands.Cog):
         raison = clean_reason(raison)
         if self._sanction_duplicate(ctx, "unmute", membre.id):
             return await self._reply(ctx, "Cette action vient déjà d'être lancée sur ce membre.", ephemere=True)
-        await self._ack(ctx)
+        await self._ack(ctx, ephemere=True)
 
         template = await self._get_sanction_dm_template(ctx.guild.id, "unmute")
         dm_text = None
@@ -763,7 +784,7 @@ class Moderation(commands.Cog):
         raison = clean_reason(raison)
         if self._sanction_duplicate(ctx, "warn", membre.id):
             return await self._reply(ctx, "Cet avertissement vient déjà d'être lancé sur ce membre.", ephemere=True)
-        await self._ack(ctx)
+        await self._ack(ctx, ephemere=True)
 
         template = await self._get_sanction_dm_template(ctx.guild.id, "warn")
         dm_text = None
@@ -850,7 +871,7 @@ class Moderation(commands.Cog):
     @app_commands.describe(warn_id="L'identifiant de l'avertissement (voir /warnings)")
     @checks.has_permission_or_modrole("moderate_members")
     async def unwarn(self, ctx: commands.Context, warn_id: int):
-        await self._ack(ctx)
+        await self._ack(ctx, ephemere=True)
         row = await self.bot.db.fetchone(
             "SELECT * FROM warnings WHERE id = ? AND guild_id = ?", (warn_id, ctx.guild.id)
         )
@@ -887,7 +908,7 @@ class Moderation(commands.Cog):
     @app_commands.describe(membre="Le membre concerné")
     @checks.has_permission_or_modrole("moderate_members")
     async def clearwarnings(self, ctx: commands.Context, membre: discord.Member):
-        await self._ack(ctx)
+        await self._ack(ctx, ephemere=True)
         if not await self.check_targetable(ctx, membre):
             return
         await self.bot.db.execute(
@@ -1111,7 +1132,7 @@ class Moderation(commands.Cog):
     @app_commands.describe(duree="Ex: 5s, 30s, 1m, 10m, 1h — ou 0 / off pour désactiver (maximum 6 heures)")
     @checks.has_permission_or_modrole("manage_channels")
     async def slowmode(self, ctx: commands.Context, duree: str):
-        await self._ack(ctx)
+        await self._ack(ctx, ephemere=True)
         raw = duree.strip().lower()
         if raw in ("0", "off", "desactive", "désactive", "désactivé", "aucun", "none", "stop"):
             secondes = 0
@@ -1135,7 +1156,7 @@ class Moderation(commands.Cog):
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("manage_channels",), target="channel_target")
     async def lock(self, ctx: commands.Context, raison: str = "Aucune raison fournie"):
-        await self._ack(ctx)
+        await self._ack(ctx, ephemere=True)
         error = checks.check_channel_target(ctx.author, ctx.channel)
         if error:
             return await self._reply(ctx, error, ephemere=True)
@@ -1149,7 +1170,7 @@ class Moderation(commands.Cog):
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("manage_channels",), target="channel_target")
     async def unlock(self, ctx: commands.Context):
-        await self._ack(ctx)
+        await self._ack(ctx, ephemere=True)
         error = checks.check_channel_target(ctx.author, ctx.channel)
         if error:
             return await self._reply(ctx, error, ephemere=True)
@@ -1161,14 +1182,14 @@ class Moderation(commands.Cog):
     @commands.hybrid_command(name="hide", description="Cacher le salon aux membres (@everyone).", with_app_command=False)
     @checks.has_permission_or_modrole("manage_channels")
     async def hide(self, ctx: commands.Context):
-        await self._ack(ctx)
+        await self._ack(ctx, ephemere=True)
         if await self._set_everyone_visibility(ctx, visible=False):
             await self._reply(ctx, f"{ctx.channel.mention} est maintenant caché aux membres.")
 
     @commands.hybrid_command(name="show", description="Rendre le salon à nouveau visible.", with_app_command=False)
     @checks.has_permission_or_modrole("manage_channels")
     async def show(self, ctx: commands.Context):
-        await self._ack(ctx)
+        await self._ack(ctx, ephemere=True)
         if await self._set_everyone_visibility(ctx, visible=True):
             await self._reply(ctx, f"{ctx.channel.mention} est à nouveau visible.")
 
@@ -1210,7 +1231,7 @@ class Moderation(commands.Cog):
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("manage_nicknames",), target="member_moderation")
     async def nickname(self, ctx: commands.Context, membre: discord.Member, *, pseudo: str):
-        await self._ack(ctx)
+        await self._ack(ctx, ephemere=True)
         if not await self.check_targetable(ctx, membre):
             return
         await membre.edit(nick=pseudo[:32])
@@ -1222,7 +1243,7 @@ class Moderation(commands.Cog):
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("manage_nicknames",), target="member_moderation")
     async def resetnick(self, ctx: commands.Context, membre: discord.Member):
-        await self._ack(ctx)
+        await self._ack(ctx, ephemere=True)
         if not await self.check_targetable(ctx, membre):
             return
         await membre.edit(nick=None)
@@ -1232,7 +1253,7 @@ class Moderation(commands.Cog):
     @app_commands.describe(membre="Le membre à déplacer", salon="Le salon vocal de destination")
     @checks.has_permission_or_modrole("move_members")
     async def move(self, ctx: commands.Context, membre: discord.Member, salon: discord.VoiceChannel):
-        await self._ack(ctx)
+        await self._ack(ctx, ephemere=True)
         if not await self.check_targetable(ctx, membre):
             return
         if not membre.voice:
@@ -1244,7 +1265,7 @@ class Moderation(commands.Cog):
     @app_commands.describe(membre="Le membre à déconnecter")
     @checks.has_permission_or_modrole("move_members")
     async def disconnect(self, ctx: commands.Context, membre: discord.Member):
-        await self._ack(ctx)
+        await self._ack(ctx, ephemere=True)
         if not await self.check_targetable(ctx, membre):
             return
         if not membre.voice:

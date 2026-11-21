@@ -209,7 +209,7 @@ class ThemeSelect(discord.ui.Select):
             visual_v5.theme_settings(key, compact_mode=self.view_ref.compact),
         )
         self.view_ref.rebuild()
-        await interaction.response.edit_message(embed=self.view_ref.embed(saved=True), view=self.view_ref)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(self.view_ref.embed(saved=True)), self.view_ref))
 
 
 class ThemeView(discord.ui.View):

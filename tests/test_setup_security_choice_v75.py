@@ -26,3 +26,8 @@ def test_command_permissions_are_not_manual_security_options():
 def test_module_state_tracks_selected_protections():
     assert '"security",\n        bool(chosen)' in SOURCE
     assert 'states["security"] = "● ACTIF" if selected else "○ INACTIF"' in SOURCE
+
+
+def test_v75_security_and_logs_keep_setup_banner():
+    assert "container = self._container()" in SOURCE
+    assert "discord.ui.Container(accent_colour=v74.v73.ACCENT)" not in SOURCE

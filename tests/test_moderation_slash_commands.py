@@ -13,10 +13,9 @@ le wrapper, ce qui restaure une signature introspectable via `inspect.signature`
 (discord.py s'appuie dessus pour construire les options slash) sans changer le
 comportement runtime (toujours `*args, **kwargs`).
 
-En parallèle, clearwarnings et slowmode ont été ajoutées à NORMAL_DIRECT_COMMANDS (à la
-place de quarantine/unquarantine, retirées : le budget slash est plafonné à 100 racines
-globales et était déjà à saturation — voir cogs/slash_command_budget.py). lock/unlock
-étaient déjà correctement couverts par ce même mécanisme, non touchés ici.
+En parallèle, clearwarnings et slowmode restent des commandes directes importantes.
+La surface slash est désormais volontairement regroupée par familles (/music, /economy,
+/info...) au lieu de viser un nombre fixe de commandes racines.
 """
 from __future__ import annotations
 
@@ -94,12 +93,18 @@ class ModerationCatalogSurfaceTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertIn(name, NORMAL_DIRECT_COMMANDS)
 
-    def test_normal_direct_commands_reste_exactement_a_97(self):
-        """Contrat imposé par tools/command_runtime_audit.py : la surface directe
-        contient désormais 97 commandes — Démineur puis +collec, la collection de
-        prises, sont deux vrais nouveaux jeux publics.
-        Les retraits produit blacklist-add/blacklist-users restent supprimés."""
-        self.assertEqual(len(NORMAL_DIRECT_COMMANDS), 97)
+    def test_surface_directe_garde_les_commandes_de_moderation_essentielles(self):
+        """Le catalogue ne doit plus dépendre d'un ancien quota numérique fixe.
+
+        On verrouille plutôt les commandes de modération réellement nécessaires et on
+        laisse les autres familles être regroupées sans faire échouer ce test.
+        """
+        essentiels = {
+            "ban", "tempban", "unban", "kick", "mute", "unmute", "warn",
+            "warnings", "clearwarnings", "clear", "lock", "unlock", "slowmode",
+        }
+        self.assertTrue(essentiels <= set(NORMAL_DIRECT_COMMANDS))
+        self.assertLess(len(NORMAL_DIRECT_COMMANDS), 97)
 
 
 if __name__ == "__main__":

@@ -98,6 +98,50 @@ def test_mute_accepte_une_duree_francaise_en_deux_mots():
 # ------------------------------------------------------------------ réponses courtes
 
 @pytest.mark.asyncio
+async def test_reply_slash_mutant_est_prive_mais_consultation_reste_normale():
+    cog = _cog()
+
+    interaction = SimpleNamespace()
+    ctx = _ctx(interaction=interaction)
+    ctx.command = SimpleNamespace(name="warn")
+    with patch.object(panels, "texte_court", AsyncMock()) as court:
+        await cog._reply(ctx, "ok")
+    assert court.await_args.kwargs["ephemere"] is True
+
+    ctx = _ctx(interaction=interaction)
+    ctx.command = SimpleNamespace(name="warnings")
+    with patch.object(panels, "texte_court", AsyncMock()) as court:
+        await cog._reply(ctx, "liste")
+    assert court.await_args.kwargs["ephemere"] is False
+
+
+@pytest.mark.asyncio
+async def test_ack_slash_peut_etre_ephemere():
+    response = SimpleNamespace(is_done=lambda: False, defer=AsyncMock())
+    interaction = SimpleNamespace(response=response)
+    cog = _cog()
+    ctx = _ctx(interaction=interaction)
+
+    await cog._ack(ctx, ephemere=True)
+
+    response.defer.assert_awaited_once_with(ephemeral=True)
+
+
+@pytest.mark.parametrize(
+    "command_name",
+    [
+        "ban", "tempban", "unban", "kick", "mute", "unmute", "warn", "unwarn",
+        "clearwarnings", "slowmode", "lock", "unlock", "hide", "show",
+        "nickname", "resetnick", "move", "disconnect",
+    ],
+)
+def test_actions_de_moderation_slash_demandent_un_ack_prive(command_name):
+    command = getattr(Moderation, command_name)
+    source = inspect.getsource(command.callback)
+    assert "_ack(ctx, ephemere=True)" in source
+
+
+@pytest.mark.asyncio
 async def test_ban_repond_par_une_ligne_et_journalise_la_fiche_complete():
     cog = _cog()
     cog._ack = AsyncMock()
@@ -114,6 +158,7 @@ async def test_ban_repond_par_une_ligne_et_journalise_la_fiche_complete():
          patch.object(panels, "envoyer", AsyncMock()) as envoyer:
         await Moderation.ban.callback(cog, ctx, membre, raison="spam")
 
+    cog._ack.assert_awaited_once_with(ctx, ephemere=True)
     cog.log_sanction.assert_awaited_once()
     court.assert_awaited_once()
     assert court.await_args.args[1] == "<@7> a été banni."

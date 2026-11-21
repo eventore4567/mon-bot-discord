@@ -507,7 +507,9 @@ class Verification(commands.Cog, name="Verification"):
                 "Ce défi expire dans quelques minutes et n'est visible que par vous."
             ),
         )
-        await interaction.response.send_message(embed=embed, file=file, view=CaptchaOpenModalView(self, member.id), ephemeral=True)
+        view = CaptchaOpenModalView(self, member.id)
+        panel = panels.depuis_embed(embed, image="attachment://captcha.png")
+        await panels.envoyer(interaction.response, panels.avec_composants(panel, view), file=file, ephemere=True)
 
     async def do_verify(self, interaction: discord.Interaction) -> None:
         guild = interaction.guild

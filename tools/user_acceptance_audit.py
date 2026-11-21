@@ -208,7 +208,11 @@ async def runtime_journey(path: str) -> dict[str, int | float]:
         assert help_complete._category_for(bot.get_command("gamesetup")).key == "configuration"
 
         slash_roots = list(bot.tree.get_commands())
-        assert len(slash_roots) <= 100, f"budget slash dépassé: {len(slash_roots)} racines"
+        from cogs import slash_command_budget
+        assert len(slash_roots) <= slash_command_budget.PUBLIC_CHAT_INPUT_TARGET, (
+            f"surface slash trop large: {len(slash_roots)}/"
+            f"{slash_command_budget.PUBLIC_CHAT_INPUT_TARGET} racines"
+        )
 
         assert command_response_guard._INSTALLED, "filet de réponse des commandes absent"
         assert getattr(bot, "_sentrix_official_embed_transport", False), "transport d'embed officiel non appliqué au bot"

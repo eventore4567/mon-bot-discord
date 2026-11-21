@@ -24,7 +24,8 @@ quand même. Le budget doit absorber ce refus au lieu de le laisser remonter.
 from __future__ import annotations
 
 import os
-from unittest.mock import Mock
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 os.environ.setdefault("DISCORD_TOKEN", "x")
 
@@ -68,6 +69,33 @@ def test_une_racine_refusee_par_discord_py_est_absorbee_pas_propagee():
     assert "embed" in bot._sentrix_skipped_global_slash
 
 
+def test_finalize_reduit_la_surface_publique_a_la_cible_produit():
+    class Tree:
+        def __init__(self):
+            self.items = [SimpleNamespace(name=f"root-{index}") for index in range(90)]
+
+        def get_commands(self, **_kwargs):
+            return list(self.items)
+
+        def remove_command(self, name, **_kwargs):
+            self.items = [item for item in self.items if item.name != name]
+
+    tree = Tree()
+    bot = SimpleNamespace(tree=tree)
+    required = {f"root-{index}" for index in range(10)}
+    preferred = required | {f"root-{index}" for index in range(10, 30)}
+
+    with (
+        patch.object(slash_command_budget, "_required_names", return_value=required),
+        patch.object(slash_command_budget, "_preferred_names", return_value=preferred),
+        patch.object(slash_command_budget, "_excluded_names", return_value=set()),
+    ):
+        slash_command_budget.finalize(bot)
+
+    assert len(tree.items) == slash_command_budget.PUBLIC_CHAT_INPUT_TARGET
+    assert required <= {item.name for item in tree.items}
+
+
 def test_les_ajouts_normaux_continuent_de_fonctionner():
     """Le filet de sécurité ne doit pas empêcher les ajouts qui réussissent
     normalement."""
@@ -90,3 +118,30 @@ if __name__ == "__main__":
     import unittest
 
     unittest.main()
+
+
+def test_owner_et_more_ne_sont_plus_des_racines_slash_publiques():
+    assert "owner" in slash_command_budget.LOW_VALUE_LEGACY_ROOTS
+    assert "more" in slash_command_budget.LOW_VALUE_LEGACY_ROOTS
+    assert "owner" not in slash_command_budget._canonical_group_root_names()
+    assert "more" not in slash_command_budget._canonical_group_root_names()
+
+
+def test_les_sources_v110_regroupees_ou_renommees_sont_exclues_des_racines():
+    sources = slash_command_budget._v110_source_names()
+    for name in ("daily", "weekly", "timestamp", "channelinfo", "membercount", "set-xp", "add-xp", "nickname"):
+        assert name in sources
+
+    excluded = slash_command_budget._excluded_names()
+    for name in ("daily", "weekly", "timestamp", "set-xp", "add-xp", "nickname"):
+        assert name in excluded
+
+
+def test_les_mini_jeux_ne_sont_plus_des_racines_slash_preferees():
+    from cogs.command_catalog_cleanup import GAME_COMMANDS
+
+    excluded = slash_command_budget._excluded_names()
+    preferred = slash_command_budget._preferred_names()
+
+    assert set(GAME_COMMANDS) <= excluded
+    assert not (set(GAME_COMMANDS) & preferred)

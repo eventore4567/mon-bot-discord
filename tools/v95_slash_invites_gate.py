@@ -94,18 +94,22 @@ async def run() -> int:
         root_names = [str(item.name).casefold() for item in roots]
         if len(root_names) != len(set(root_names)):
             errors.append("racines slash dupliquées")
-        if len(roots) > 100:
-            errors.append(f"budget slash dépassé: {len(roots)}/100")
+        from cogs import slash_command_budget
+        if len(roots) > slash_command_budget.PUBLIC_CHAT_INPUT_TARGET:
+            errors.append(
+                f"surface slash trop large: {len(roots)}/"
+                f"{slash_command_budget.PUBLIC_CHAT_INPUT_TARGET}"
+            )
 
-        # V110 : les commandes les plus familières doivent être directes, comme sur les
-        # principaux bots Discord. On garde les groupes pour les fonctions avancées.
+        # V110 : les actions quotidiennes restent directes, tandis que les familles
+        # secondaires sont regroupées pour garder le menu slash compact.
         required_roots = (
             "help", "setup", "ping", "sentrix",
             "moderation", "security", "ticket", "giveaway", "invites", "games", "roles",
             "ban", "unban", "kick", "mute", "unmute", "warn", "warnings",
             "clearwarnings", "clear", "lock", "unlock", "slowmode",
             "userinfo", "serverinfo", "avatar", "level", "leaderboard",
-            "balance", "play", "pause", "queue", "role",
+            "balance", "play", "role", "music", "economy", "info",
         )
         for required in required_roots:
             if required not in root_names:

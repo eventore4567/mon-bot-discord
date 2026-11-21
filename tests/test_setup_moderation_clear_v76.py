@@ -45,3 +45,9 @@ def test_v76_is_loaded_after_v75_security_patch():
     install_security = source.index("cls._build_security = _build_security_v75")
     install_v76 = source.index("moderation_v76.install(bot)")
     assert install_security < install_v76
+
+
+def test_v76_moderation_page_keeps_setup_banner():
+    source = V76.read_text(encoding="utf-8")
+    assert "container = self._container()" in source
+    assert "discord.ui.Container(accent_colour=v74.v73.ACCENT)" not in source

@@ -633,6 +633,7 @@ def depuis_embed(
     pied: str | None = None,
     boutons: Sequence[Bouton] = (),
     compact: bool = True,
+    image: str | None = None,
 ) -> Panneau:
     """Convertit un embed deja construit en panneau compose.
 
@@ -683,6 +684,7 @@ def depuis_embed(
         sections=sections,
         boutons=boutons,
         pied=pied or pied_embed or "SentriX",
+        image=image,
     )
 
 

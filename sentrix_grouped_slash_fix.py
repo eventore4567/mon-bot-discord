@@ -28,6 +28,7 @@ import sentrix_v95_runtime as v95
 
 logger = logging.getLogger("bot.grouped-slash-fix")
 
+_private_slash_response = v95._private_slash_response
 _INSTALLED = False
 
 
@@ -389,7 +390,10 @@ async def _invoke_original_fixed(
     kwargs: dict,
 ) -> None:
     if not interaction.response.is_done():
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(
+            thinking=True,
+            ephemeral=_private_slash_response(command),
+        )
 
     ctx = await _make_context(bot, interaction)
     try:

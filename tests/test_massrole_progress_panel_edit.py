@@ -15,10 +15,9 @@ né en panneau. Ce test vérifie que c'est bien panels.editer qui est appelé �
 `progress` est un objet nu sans `.edit()` : l'ancien code lèverait donc une
 AttributeError ici si la régression revenait.
 
-Le seuil de mise à jour (tous les 2000 membres traités) n'est atteint que si
-``processed`` (qui n'augmente que par lots de 15, ``batch_size``) tombe
-exactement sur un multiple de 2000 — le plus petit tel nombre est
-PPCM(15, 2000) = 6000, d'où le nombre de membres simulés ci-dessous."""
+La progression est maintenant rafraîchie par seuil de membres + délai minimal,
+avec ETA, durée écoulée et vitesse moyenne. Le test simule quelques centaines de membres, suffisant pour déclencher plusieurs
+mises à jour sans alourdir inutilement la CI."""
 from __future__ import annotations
 
 import asyncio
@@ -71,6 +70,30 @@ class _ProgressMessage:
 
 
 class MassroleProgressPanelEditTests(unittest.IsolatedAsyncioTestCase):
+    def test_la_progression_affiche_compteur_temps_et_eta(self):
+        from pathlib import Path
+
+        source = (
+            Path(__file__).resolve().parents[1] / "cogs" / "server_choice_roles.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("membres traités", source)
+        self.assertIn("sur tous les membres du serveur", source)
+        self.assertIn("Temps écoulé", source)
+        self.assertIn("Restants :", source)
+        self.assertIn("Vitesse moyenne", source)
+        self.assertIn('"▰" * filled + "▱" * (10 - filled)', source)
+        self.assertIn("Fin estimée dans", source)
+        self.assertIn("Durée totale estimée", source)
+        self.assertIn("finish_unix = int(time.time() + eta)", source)
+        self.assertIn('guild.member_count or len(getattr(guild, "members", ()))', source)
+        self.assertIn("<t:{finish_unix}:R>", source)
+        self.assertIn("processed - last_reported >= 100", source)
+        self.assertIn("now_mono - last_progress_edit >= 2.0", source)
+        self.assertIn("await panels.editer(progress, panels.depuis_embed(result))", source)
+        self.assertIn("handled_member_ids", source)
+        self.assertIn("pending_ids", source)
+        self.assertIn("for member in [*batch, *guild.members]", source)
+
     async def test_la_progression_est_editee_via_panels_editer_pas_edit_embed(self):
         role = _FakeRole(position=1)
         me = SimpleNamespace(
@@ -79,8 +102,8 @@ class MassroleProgressPanelEditTests(unittest.IsolatedAsyncioTestCase):
         )
         guild = SimpleNamespace(
             me=me,
-            member_count=6000,
-            fetch_members=lambda limit=None: _members(6000),
+            member_count=300,
+            fetch_members=lambda limit=None: _members(300),
         )
         progress = _ProgressMessage()
         ctx = SimpleNamespace(guild=guild, author=SimpleNamespace())

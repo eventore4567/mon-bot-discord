@@ -23,30 +23,41 @@ GAME_COMMANDS = frozenset({
     "dailygames",
 })
 
+# Catalogue public court : les autres mini-jeux restent disponibles par leur
+# commande historique, mais ne saturent plus le menu d'aide.
+PUBLIC_GAME_COMMANDS = frozenset({
+    "blackjack", "coinflip", "dice", "trivia", "minesweeper",
+    "duel", "tictactoe", "hangman", "emoji-race", "adventure",
+})
+
 NORMAL_DIRECT_COMMANDS = frozenset({
-    "help", "setup", "ping", "avatar", "userinfo", "translate", "timestamp", "afk", "setprefix", "setmodrole",
+    "help", "setup", "ping", "avatar", "userinfo", "translate", "timestamp", "afk", "setprefix",
     "ban", "unban", "kick", "mute", "unmute", "warn", "warnings", "clear",
     "lock", "unlock", "clearwarnings", "slowmode", "nickname", "resetnick",
     "giverole", "removerole",
     "security", "antiraid", "antinuke", "panic", "syncbl",
-    "sentrix", "image", "ai-translate", "chat-reset",
+    "sentrix", "image", "chat-reset",
     "balance", "daily", "work", "pay", "inventory", "banque",
-    "economyleaderboard", "leaderboard-money",
+    "economyleaderboard",
     "level", "stats", "set-xp", "add-xp", "set-level-role", "remove-level-role",
     "reset-levels",
     "ticket", "giveaway", "giveaway-reroll",
     # Le nouveau moteur expose pause/skip/stop sous le groupe /music. Seul +play
     # reste volontairement une commande directe pour compatibilité rapide.
     "play",
-}) | GAME_COMMANDS
+}) | PUBLIC_GAME_COMMANDS
 
 # Commandes admin encore découvrables. Les commandes owner privées (blacklist globale,
 # sync global et wipe serveur) restent chargées/permissionnées mais ne sont plus montrées
 # dans +help : elles ne doivent pas apparaître dans la surface administrative publique.
-ADMIN_DIRECT_COMMANDS = frozenset({
+# Outils internes/maintenance : ils restent chargés et permissionnés, mais ne
+# doivent plus encombrer +help ni le menu slash. Les administrateurs qui les
+# connaissent peuvent toujours les utiliser en préfixe.
+INTERNAL_MAINTENANCE_COMMANDS = frozenset({
     "setstatus", "status-rotate", "footer", "theme", "set-bot",
-    "bot-servers", "bot-leave", "roleall", "massrole",
+    "bot-servers", "bot-leave", "roleall",
 })
+ADMIN_DIRECT_COMMANDS = frozenset({"massrole"})
 
 PRIVATE_OWNER_COMMANDS = frozenset({
     "bl", "blinfo", "unbl", "editbl", "sync", "syncguild", "wipe-server",
@@ -55,7 +66,7 @@ PRIVATE_OWNER_COMMANDS = frozenset({
 # Commandes explicitement retirées du bot à la demande du produit. Elles ne doivent
 # rester ni en préfixe, ni en slash, ni être réinjectées par les couches de restauration.
 EXPLICITLY_REMOVED_COMMANDS = frozenset({
-    "blacklist-add", "blacklist-users",
+    "blacklist-add", "blacklist-users", "set-bio",
     # Ancien alias du profil retiré : +stats est la surface préfixe canonique et
     # la carte profil vit dans la surface slash/dashboard.
     "me",
@@ -64,19 +75,22 @@ EXPLICITLY_REMOVED_COMMANDS = frozenset({
 # Nouveau système transverse : visible dans +help sans le classer dans les anciennes
 # commandes admin « + uniquement ». Le budget slash décide séparément quelles racines
 # peuvent être publiées sans dépasser la limite Discord de 100 commandes globales.
+# Ne montrer que les points d'entrée du module de preuves.
+# Les commandes d'exemples et de réinitialisation restent utilisables par les
+# administrateurs qui les connaissent, sans encombrer +help.
 PROOF_VISIBLE_COMMANDS = frozenset({
-    "proof", "proofstatus", "proofsetup", "proofexample", "proofexample-remove",
-    "proofexamples", "proofpanel", "proofreset",
+    "proof", "proofstatus", "proofsetup", "proofpanel",
 })
 
 PURE_DUPLICATE_COMMANDS = frozenset({
     "rank", "buyrole", "ask", "chat", "embed-create", "latency", "levelroles",
+    "economy", "leaderboard-money",
     # raccourci texte de +info role (/serverinfo est, lui, une racine slash canonique V110)
     "roleinfo",
 })
 
 SETUP_MERGED_COMMANDS = frozenset({
-    "config-view", "config-reset", "create-logs", "logsetup", "logs-status",
+    "config-view", "config-reset", "create-logs", "logs-status",
     "designsetup", "welcome-config", "shopsetup", "aisetup",
     "setwelcomechannel", "setwelcomemessage", "setgoodbyechannel",
     "setgoodbyemessage", "setlogchannel", "setticketlogchannel", "setwarnrole",
@@ -111,7 +125,11 @@ SECURITY_MERGED_COMMANDS = frozenset({
 })
 
 LOW_VALUE_HIDDEN_COMMANDS = frozenset({
-    "aidiag", "diagnostic", "bot-status", "command-stats", "levelcheck",
+    # Compatibilité legacy : la valeur mod_role existante continue d'être lue pour
+    # les anciens serveurs/logs, mais les nouveaux setups utilisent les permissions
+    # Discord natives et ne doivent plus proposer cette commande dans la surface courte.
+    "setmodrole",
+    "aidiag", "ai-translate", "diagnostic", "bot-status", "command-stats", "levelcheck",
     "levelrepair", "weekly", "rewrite", "shop", "resume", "queue", "profile",
 })
 
@@ -141,15 +159,16 @@ HELP_VISIBLE_EXTRA_COMMANDS = frozenset({
     # Logs/notifications/serveur : seules commandes réelles pour ces réglages,
     # jamais fusionnées dans /setup contrairement à leurs voisines (logsetup,
     # create-logs, automod-status...).
+    "logsetup",
     "notifs-ping", "notifs-list", "notifs-remove",
-    "logs", "logevent", "logsearch",
-    "server-audit", "server-health", "server-growth", "server-managed",
-    # Économie/niveaux : commandes membres et admin de base, masquées par accident
-    # (buy/sell/gamble sans leur propre commande "shop"/"economy" visible, weekly
-    # traité différemment de daily/work sans raison documentée).
-    "economy", "rob", "buy", "sell", "gamble", "deposit", "withdraw",
-    "give-money", "reset-economy", "shoppanel", "shoprole", "shop", "weekly",
-    "set-bio", "rep", "reputation", "repleaderboard", "rephistory",
+    "logevent", "logsearch",
+    # Les diagnostics serveur avancés (server-audit/health/growth/managed) restent
+    # utilisables par les admins qui les connaissent, mais ne chargent plus +help.
+    # Économie/niveaux : commandes membres utiles qui n'ont pas déjà une porte d'entrée
+    # courte en préfixe. Les actions d'administration économie/boutique restent cachées :
+    # elles sont accessibles via /setup, le dashboard ou leur nom historique.
+    "rob", "buy", "sell", "gamble", "deposit", "withdraw",
+    "rep", "reputation", "repleaderboard",
     "voice-time", "level-roles",
     # Émojis : aucun chemin de découverte sans les connaître déjà par cœur.
     "addemoji", "deleteemoji", "emoji-list",
@@ -205,7 +224,9 @@ def apply_surface(bot: commands.Bot) -> None:
         elif name in direct:
             command.hidden = False
         elif name in PURE_DUPLICATE_COMMANDS:
-            continue
+            # Le prune principal les retire du registre. Si une couche historique les
+            # réinjecte temporairement, elles restent au minimum invisibles dans +help.
+            command.hidden = True
         else:
             command.hidden = True
 
@@ -244,8 +265,8 @@ def install(bot: commands.Bot) -> None:
 
     apply_surface(bot)
     logger.info(
-        "Surface SentriX : %s commandes directes normales, %s admin visibles, %s owner privées, %s proof, %s jeux; "
+        "Surface SentriX : %s commandes directes normales, %s admin visibles, %s owner privées, %s proof, %s jeux publics/%s chargés; "
         "anciennes commandes fusionnées conservées en + mais masquées.",
         len(NORMAL_DIRECT_COMMANDS), len(ADMIN_DIRECT_COMMANDS), len(PRIVATE_OWNER_COMMANDS),
-        len(PROOF_VISIBLE_COMMANDS), len(GAME_COMMANDS),
+        len(PROOF_VISIBLE_COMMANDS), len(PUBLIC_GAME_COMMANDS), len(GAME_COMMANDS),
     )

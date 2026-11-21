@@ -1168,7 +1168,7 @@ class SetupTextModal(discord.ui.Modal, title="Préfixe & messages"):
             self.view_ref.choices["goodbye_message"] = self.depart.value
         self.view_ref.dirty = True
         await self.view_ref.persist_session()
-        await interaction.response.edit_message(embed=await self.view_ref.build_embed(), view=self.view_ref)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(await self.view_ref.build_embed()), self.view_ref))
 
 
 class LevelRoleModal(discord.ui.Modal, title="Ajouter un rôle de niveau"):
@@ -1253,7 +1253,7 @@ class DeleteLevelRoleModal(discord.ui.Modal, title="Supprimer un palier de nivea
         await self.view_ref.bot.db.execute(
             "DELETE FROM level_roles WHERE guild_id = ? AND level = ?", (self.view_ref.guild_id, level)
         )
-        await interaction.response.edit_message(embed=await self.view_ref.build_embed(), view=self.view_ref)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(await self.view_ref.build_embed()), self.view_ref))
 
 
 # ---------------------------------------------------------------- CRÉATEUR DE RÔLE (page Rôles)
@@ -1649,14 +1649,14 @@ class LogsSetupView(discord.ui.View):
         self.current_type = None
         self._render_home()
         e, _ = await self.cog._build_logs_home(self.guild_id)
-        await interaction.response.edit_message(embed=e, view=self)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(e), self))
 
     async def _refresh(self, interaction: discord.Interaction):
         e = await self._render_detail(interaction.guild)
         if interaction.response.is_done():
-            await interaction.edit_original_response(embed=e, view=self)
+            await panels.editer(interaction, panels.avec_composants(panels.depuis_embed(e), self))
         else:
-            await interaction.response.edit_message(embed=e, view=self)
+            await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(e), self))
 
 
 class SetupLockPromptView(discord.ui.View):

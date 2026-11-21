@@ -15,6 +15,7 @@ from discord.ext import commands
 
 from utils import embeds
 from utils import sentrix_panels as panels
+from utils.log_banners import nom_fichier
 from . import setup_control_center as setup_ui
 from . import setup_ticket_autoconfig_v72 as v72
 
@@ -22,6 +23,7 @@ logger = logging.getLogger("bot.setup-components-v73")
 
 RUNTIME_MARKER = "Control Center Components V2 V73"
 ACCENT = discord.Colour(0x6D5DFB)
+SETUP_BANNER_FAMILY = "config"
 
 CATEGORY_META: dict[str, tuple[str, str, str]] = {
     "moderation": (
@@ -241,6 +243,17 @@ class SentriXSetupV73(discord.ui.LayoutView):
         self.page: str | None = None
         self.backend = self._new_backend(None)
 
+    def fichiers(self) -> list[discord.File]:
+        fichier = panels.fichier_de_famille(SETUP_BANNER_FAMILY)
+        return [fichier] if fichier is not None else []
+
+    def _container(self) -> discord.ui.Container:
+        container = discord.ui.Container(accent_colour=ACCENT)
+        galerie = discord.ui.MediaGallery()
+        galerie.add_item(media=f"attachment://{nom_fichier(SETUP_BANNER_FAMILY)}")
+        container.add_item(galerie)
+        return container
+
     def _new_backend(self, page: str | None):
         backend = setup_ui.SetupView(self.bot, self.guild, self.author_id)
         backend.category = page
@@ -268,12 +281,7 @@ class SentriXSetupV73(discord.ui.LayoutView):
         if not interaction.response.is_done():
             await interaction.response.defer()
         await self.rebuild()
-        await interaction.edit_original_response(
-            content=None,
-            embed=None,
-            attachments=[],
-            view=self,
-        )
+        await panels.editer(interaction, self)
 
     async def rebuild(self) -> None:
         self.clear_items()
@@ -300,7 +308,7 @@ class SentriXSetupV73(discord.ui.LayoutView):
         active = sum("ACTIF" in value and "INACTIF" not in value for value in states.values())
         problems = sum("CORRIGER" in value for value in states.values())
 
-        container = discord.ui.Container(accent_colour=ACCENT)
+        container = self._container()
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -365,7 +373,7 @@ class SentriXSetupV73(discord.ui.LayoutView):
         status_label, status_style = _status_button_text(state)
         status = discord.ui.Button(label=status_label, style=status_style, disabled=True)
 
-        container = discord.ui.Container(accent_colour=ACCENT)
+        container = self._container()
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -511,10 +519,11 @@ async def _send_setup_v73(self, target):
     await view.prepare()
 
     if isinstance(target, commands.Context):
-        return await target.send(view=view)
+        # Une commande préfixée ne peut pas être éphémère sur Discord.
+        return await panels.envoyer(target, view)
     if target.response.is_done():
-        return await target.followup.send(view=view)
-    return await target.response.send_message(view=view)
+        return await panels.envoyer(target.followup, view, ephemere=True)
+    return await panels.envoyer(target.response, view, ephemere=True)
 
 
 def install(bot: commands.Bot) -> None:

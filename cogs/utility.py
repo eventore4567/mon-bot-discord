@@ -501,7 +501,8 @@ class SearchModal(discord.ui.Modal, title="🔎 Rechercher une commande"):
 
         if not results:
             e = embeds.brand("🔎 Recherche", f"Aucune commande trouvée pour `{self.mot_cle.value}`.")
-            return await interaction.response.edit_message(embed=e, view=HelpView(self.bot, self.prefix, self.is_staff))
+            view = HelpView(self.bot, self.prefix, self.is_staff)
+            return await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(e), view))
 
         lines = [f"*{label}*\n{format_command_line(cmd, self.prefix, slash_names)}" for label, cmd in results]
         chunks = [lines[i:i + 6] for i in range(0, len(lines), 6)] or [[]]
@@ -513,7 +514,7 @@ class SearchModal(discord.ui.Modal, title="🔎 Rechercher une commande"):
 
         home_embed = build_help_home(self.bot, interaction.guild, self.prefix, self.is_staff)
         view = CategoryHelpView(self.bot, self.prefix, self.is_staff, pages, interaction.user.id, home_embed)
-        await interaction.response.edit_message(embed=pages[0], view=view)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(pages[0]), view))
 
 
 class HelpSelect(discord.ui.Select):
@@ -545,7 +546,7 @@ class HelpSelect(discord.ui.Select):
 
         if not lines:
             e = embeds.brand(label, "Aucune commande visible dans cette catégorie pour vous.")
-            return await interaction.response.edit_message(embed=e, view=self.view)
+            return await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(e), self.view))
 
         chunks = [lines[i:i + 8] for i in range(0, len(lines), 8)] or [[]]
         pages = []
@@ -556,7 +557,7 @@ class HelpSelect(discord.ui.Select):
 
         home_embed = build_help_home(self.bot, interaction.guild, self.prefix, self.is_staff)
         view = CategoryHelpView(self.bot, self.prefix, self.is_staff, pages, interaction.user.id, home_embed)
-        await interaction.response.edit_message(embed=pages[0], view=view)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(pages[0]), view))
 
 
 class CategoryHelpView(discord.ui.View):
@@ -593,18 +594,18 @@ class CategoryHelpView(discord.ui.View):
     async def previous_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.index = max(0, self.index - 1)
         self._update_buttons()
-        await interaction.response.edit_message(embed=self.pages[self.index], view=self)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(self.pages[self.index]), self))
 
     @discord.ui.button(label="🏠 Accueil", style=discord.ButtonStyle.primary, row=1)
     async def home(self, interaction: discord.Interaction, button: discord.ui.Button):
         view = HelpView(self.bot, self.prefix, self.is_staff)
-        await interaction.response.edit_message(embed=self.home_embed, view=view)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(self.home_embed), view))
 
     @discord.ui.button(label="▶", style=discord.ButtonStyle.secondary, row=1)
     async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.index = min(len(self.pages) - 1, self.index + 1)
         self._update_buttons()
-        await interaction.response.edit_message(embed=self.pages[self.index], view=self)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(self.pages[self.index]), self))
 
     @discord.ui.button(label="🔎 Rechercher", style=discord.ButtonStyle.secondary, row=2)
     async def search(self, interaction: discord.Interaction, button: discord.ui.Button):
