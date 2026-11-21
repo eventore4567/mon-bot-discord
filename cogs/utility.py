@@ -103,9 +103,16 @@ class EmojiExportView(discord.ui.View):
             )
         self.member = selected
         self.send_export.disabled = False
-        await interaction.response.edit_message(
-            content=f"Destinataire sélectionné : {selected.mention}. Cliquez sur **Envoyer la liste**.",
-            view=self,
+        # Le message est un panneau Components V2 (voir la commande +emogi) :
+        # Discord refuse ``content`` sur ce type de message, et l'édition
+        # échouerait en 400 au premier choix de destinataire. La confirmation
+        # passe donc en éphémère, et l'édition ne touche qu'à la vue — c'est
+        # elle qui porte le changement utile, le bouton devenu cliquable.
+        await interaction.response.edit_message(view=self)
+        await interaction.followup.send(
+            f"Destinataire sélectionné : {selected.mention}. "
+            "Cliquez sur **Envoyer la liste**.",
+            ephemeral=True,
         )
 
     @discord.ui.button(label="Envoyer la liste", style=discord.ButtonStyle.primary, emoji="📨")
@@ -2018,7 +2025,17 @@ class Utility(commands.Cog, name="Utility"):
             ),
             kind="primary",
         )
-        await ctx.send(embed=embed, view=EmojiExportView(ctx.author, ctx.guild))
+        # Convention du dépôt (tests/test_panneau_interactif) : un embed et une
+        # vue ne partent jamais ensemble par ctx.send — c'est ce mélange qui
+        # avait fait passer 37 commandes pour migrées alors qu'elles rendaient
+        # encore un embed. Le panneau reloge les composants lui-même.
+        await panels.envoyer(
+            ctx,
+            panels.avec_composants(
+                panels.depuis_embed(embed), EmojiExportView(ctx.author, ctx.guild)
+            ),
+        )
+
     @commands.hybrid_command(name="remind", description="Définir un rappel personnel.")
     @app_commands.describe(duree="Durée (ex: 10m, 2h, 1j)", texte="Le texte du rappel")
     async def remind(self, ctx: commands.Context, duree: str, *, texte: str):

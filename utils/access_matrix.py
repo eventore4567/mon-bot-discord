@@ -351,6 +351,12 @@ DISCORD_PERMISSION_COMMANDS: dict[str, str] = {
 
 CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
     "configuration": frozenset({
+        # 21/11/2026 : « emogi » (export des emojis du serveur en MP) est arrivée
+        # sur la base sans classement, donc elle tombait en fail-closed et les
+        # quatre portes de permission étaient rouges. Son auteur l'a voulue
+        # réservée aux admins (@checks.is_owner_or_admin dans cogs/utility.py) :
+        # la configuration est le niveau qui correspond.
+        "emogi",
         # Actions d'invitation réservées : elles écrivent ou effacent des
         # données. Chacune porte is_owner_or_admin_for("configuration") dans
         # cogs/invites.py.
