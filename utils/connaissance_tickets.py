@@ -44,13 +44,18 @@ def _age(depuis: int | None) -> str:
 async def lire(bot, guild, auteur, texte: str) -> str:
     lignes = await bot.db.fetchall(
         "SELECT channel_id, user_id, status, category, priority, claimed_by, created_at "
-        "FROM tickets WHERE guild_id = ? AND status != 'ferme' "
+        # 21/11/2026, revue : « status != 'ferme' » incluait les tickets
+        # SUPPRIMÉS, que cogs/tickets.py conserve avec status='supprime'. Un
+        # serveur n'ayant qu'un ticket supprimé s'entendait dire qu'il avait un
+        # ticket ouvert, et ces lignes mortes chassaient de vrais tickets de la
+        # liste des huit. On nomme donc le seul statut qui compte.
+        "FROM tickets WHERE guild_id = ? AND status = 'ouvert' "
         "ORDER BY created_at ASC LIMIT ?",
         (guild.id, _MAX_LIGNES + 1),
     )
     lignes = list(lignes or ())
     total = await bot.db.fetchone(
-        "SELECT COUNT(*) AS c FROM tickets WHERE guild_id = ? AND status != 'ferme'",
+        "SELECT COUNT(*) AS c FROM tickets WHERE guild_id = ? AND status = 'ouvert'",
         (guild.id,),
     )
     ouverts = int(total["c"]) if total else len(lignes)

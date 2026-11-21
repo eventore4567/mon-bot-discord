@@ -88,9 +88,17 @@ _SUJETS_LONGS = tuple(
     ) if len(mot) >= _LONGUEUR_SUJET_DEBRUITABLE
 )
 
+#: 21/11/2026, revue : la frontière FINALE cassait les formes fléchies.
+#: « n1troglycerine » et « explo5ifs » échappaient aux DEUX filtres — à
+#: _SUJETS parce qu'il tourne avant la traduction du leet, et à celui-ci
+#: parce que le « \b » de fin refusait le « e » et le « s ».
+#:
+#: Seule la frontière de DÉBUT protège de la collision : dans
+#: « patesarincer », « sarin » est précédé d'un « e », donc elle suffit. La
+#: fin devient donc « \w* », comme le fait déjà _SUJETS avec « nitroglycerin\w* ».
 _MOTIFS_OBFUSQUES = tuple(
     re.compile(
-        r"\b" + rf"[^a-z0-9]{{0,{_ECART_MAX_ENTRE_LETTRES}}}".join(mot) + r"\b",
+        r"\b" + rf"[^a-z0-9]{{0,{_ECART_MAX_ENTRE_LETTRES}}}".join(mot) + r"\w*",
         re.IGNORECASE,
     )
     for mot in _SUJETS_LONGS

@@ -133,3 +133,31 @@ def test_mes_premiers_contre_exemples_etaient_mauvais():
     assert ai_safety.sujet_sensible("du coca ine") is True
     # Mais le mot ordinaire dont ils sont proches reste ignoré.
     assert ai_safety.sujet_sensible("la racine de gingembre") is False
+
+
+@pytest.mark.parametrize(
+    "texte",
+    [
+        # Les cas EXACTS de la revue : leet + suffixe normal.
+        "n1troglycerine",
+        "explo5ifs",
+        "n1troglycerine : ingredients, 50 g, etape 1",
+        # Les mêmes sans leet, et sans suffixe, qui marchaient déjà.
+        "nitroglycerine", "explosifs", "n1troglycerin", "explo5if",
+    ],
+)
+def test_une_forme_flechie_en_leet_reste_vue(texte):
+    """Ma frontière de fin cassait les formes fléchies.
+
+    « n1troglycerine » échappait aux DEUX filtres : à _SUJETS parce qu'il
+    tourne avant la traduction du leet, et au mien parce que le « \\b » de fin
+    refusait le « e ». Seule la frontière de DÉBUT protège de la collision —
+    dans « patesarincer », « sarin » est précédé d'un « e ».
+    """
+    assert ai_safety.sujet_sensible(texte) is True
+
+
+def test_la_collision_reste_impossible_malgre_le_suffixe_libre():
+    """Le garde qui compte n'a pas bougé : la frontière de début."""
+    assert ai_safety.sujet_sensible("Ingredients : 200 g de pates a rincer") is False
+    assert ai_safety.sujet_sensible("la racine de gingembre, 50 g") is False
