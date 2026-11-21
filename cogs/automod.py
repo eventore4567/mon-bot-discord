@@ -51,6 +51,7 @@ from discord.ext import commands
 import config
 from database.db import PRIMARY_CREATOR_ID
 from utils import audit_entries
+from utils import config_journal
 from utils import embeds, checks, helpers, log_service, text_normalization, ai_service
 from utils import lookalike_domains
 from utils.sliding_window import FenetreGlissante
@@ -1018,6 +1019,18 @@ TOGGLE_FIELDS = [
 #: messages : seulement ce qui protège le serveur sans toucher aux conversations.
 SECURITE_DE_BASE = ("antinuke", "antiraid", "escalation")
 
+#: Protections que « +tout-securiser » n'allume PAS. Le blocage des liens coupe
+#: aussi les liens légitimes (YouTube, GitHub, un lien d'aide) : c'est un choix
+#: éditorial, pas une protection, il reste donc à activer à la main.
+#:
+#: Les DEUX noms y figurent, et ce n'est pas une ceinture de sécurité :
+#: ``Database.set_automod`` écrit ``antilink`` et ``antilink_strict`` ensemble
+#: dès qu'on touche à l'un des deux (depuis V2026.09, « anti-liens » est strict
+#: par définition). N'exclure que ``antilink_strict`` laissait donc l'appel sur
+#: ``antilink`` rallumer le blocage total — exactement ce que la commande
+#: promet de ne pas faire.
+TOUT_SECURISER_EXCLUES = frozenset({"antilink", "antilink_strict"})
+
 
 # Protections qui inspectent un message et permettent le bypass par rôle
 # OU par membre individuel. Un salon strict reprend toujours la priorité
@@ -1653,6 +1666,15 @@ class AutoMod(commands.Cog, name="Automod"):
         return int(bot_id) in await self._bot_allowlist_cached(guild_id)
 
     async def cog_load(self) -> None:
+        # 21/11/2026 : un mode raid armé à la main doit survivre au déploiement.
+        # Onze déploiements hier : sans cette restauration, chacun rouvrait
+        # silencieusement la porte des serveurs qui s'étaient fermés.
+        try:
+            from cogs import raid_mode
+
+            await raid_mode.restaurer_manuels(self.bot)
+        except Exception:  # noqa: BLE001 — ne doit jamais empêcher le démarrage
+            logger.warning("Restauration des modes raid manuels impossible.", exc_info=True)
         await self._raid_recovery.ensure_schema()
         self._raid_recovery_task = asyncio.create_task(
             self._run_raid_recovery(),
@@ -3039,6 +3061,60 @@ class AutoMod(commands.Cog, name="Automod"):
     async def risk_engine(self, ctx: commands.Context, etat: str):
         await self.toggle(ctx, "risk_engine", etat)
 
+    @staticmethod
+    def peut_changer_mode_strict(user_id: int, guild) -> bool:
+        """Qui peut activer « Sanctionner aussi les admins ».
+
+        Le propriétaire du serveur, et les propriétaires de SentriX.
+
+        21/11/2026 : « fait que je puisse activer sanctionner les admins même
+        si je suis pas owner, car je suis le owner du bot. » La commande
+        ``+automod-strict`` acceptait déjà les deux ; le bouton de /setup →
+        Sécurité ne comparait qu'à ``guild.owner_id`` et refusait donc le
+        propriétaire du bot. Les deux chemins lisent maintenant cette seule
+        règle, pour qu'ils ne puissent plus divergir.
+        """
+        try:
+            identifiant = int(user_id)
+        except (TypeError, ValueError):
+            return False
+        if identifiant == int(getattr(guild, "owner_id", 0) or 0):
+            return True
+        return identifiant in {int(x) for x in (getattr(config, "OWNER_IDS", None) or [])}
+
+    @commands.hybrid_command(
+        name="tout-securiser", aliases=["securite-totale", "secure-all"],
+        description="Activer d'un coup toutes les protections de sécurité.",
+        with_app_command=False,
+    )
+    @checks.is_owner_or_admin_for("securite")
+    async def tout_securiser(self, ctx: commands.Context):
+        """« Une commande qui active tout au cas où » (21/11/2026).
+
+        Avant, tout allumer demandait dix-neuf commandes ou autant de clics dans
+        /setup → Sécurité. Quand un raid se prépare, personne n'a le temps. La
+        commande n'éteint jamais rien : elle n'allume que ce qui était coupé.
+        """
+        champs = [cle for cle in TOGGLE_FIELDS if cle not in TOUT_SECURISER_EXCLUES]
+        await self.bot.db.execute(
+            "INSERT INTO automod_settings(guild_id) VALUES(?) ON CONFLICT(guild_id) DO NOTHING",
+            (ctx.guild.id,),
+        )
+        conf = await self.get_automod_cached(ctx.guild.id) or {}
+        allumees = [cle for cle in champs if not conf.get(cle)]
+        for cle in allumees:
+            await self.bot.db.set_automod(ctx.guild.id, cle, 1)
+            await config_journal.record(self.bot.db, ctx.guild.id, "automod." + cle, 0, 1)
+        self.automod_cache.pop(ctx.guild.id, None)
+        if allumees:
+            texte = (f"**{len(allumees)} protection(s) activée(s)** sur {len(champs)} :\n"
+                     + ", ".join(AUTOMOD_TOGGLE_LABELS.get(cle, cle) for cle in allumees) + ".")
+        else:
+            texte = f"**Les {len(champs)} protections étaient déjà actives.** Rien à changer."
+        texte += ("\n-# Le blocage total des liens reste à part : il coupe aussi les liens "
+                  "légitimes. Le mode raid s'arme dans /setup → Sécurité.")
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(texte)))
+
     # Le paramètre s'appelle `membre` et non `bot`, comme la commande voisine
     # +antinuke-whitelist-add. Ce n'est pas cosmétique : les gates V18
     # (tools/command_integrity_v18_gate, tools/audit_registre) refusent tout
@@ -3540,7 +3616,7 @@ class AutoMod(commands.Cog, name="Automod"):
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.info(
                 texte + f"\nLe propriétaire du serveur l'active avec `{ctx.clean_prefix}automod-strict on`."
             )))
-        if ctx.author.id != ctx.guild.owner_id and ctx.author.id not in config.OWNER_IDS:
+        if not self.peut_changer_mode_strict(ctx.author.id, ctx.guild):
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(
                 "Seul le propriétaire du serveur peut changer le mode strict."
             )))
@@ -5564,9 +5640,17 @@ class AutoMod(commands.Cog, name="Automod"):
 
         # 07/11/2026 : mode raid. Pendant un raid confirmé, chaque arrivant suspect
         # (bot non autorisé, compte récent, avatar par défaut) est expulsé aussitôt.
-        if conf.get("antiraid"):
-            from cogs import raid_mode
+        #
+        # 21/11/2026 : le mode armé À LA MAIN passe même si l'option anti-raid est
+        # coupée — et elle l'est par défaut (``antiraid INTEGER DEFAULT 0``). Le
+        # bouton annonçait « Mode raid ARMÉ » sur un serveur où plus rien
+        # n'arrivait jusqu'à ``sur_arrivee`` : la porte restait grande ouverte.
+        # Quelqu'un qui ferme la porte exprès a décidé ; ça ne se négocie pas
+        # avec un interrupteur qu'il n'a pas touché.
+        from cogs import raid_mode
 
+        manuel = raid_mode.est_manuel(member.guild.id)
+        if conf.get("antiraid") or manuel:
             raid_mode.noter_arrivee(member)
             if raid_mode.actif(member.guild.id):
                 try:
@@ -6169,6 +6253,84 @@ class AutoMod(commands.Cog, name="Automod"):
                    else "Retrait refusé par Discord : vérifiez le rôle à la main",
             echec=action != "Permissions retirées",
             extra={"Rôle": f"{role.mention} · `{role.id}`"},
+        )
+
+    @commands.Cog.listener()
+    async def on_member_update(self, before: discord.Member, after: discord.Member):
+        """Garde des permissions, volet « rôle dangereux donné à un membre ».
+
+        21/11/2026 : la garde des permissions surveillait la création et la
+        modification des rôles, et les permissions de salon, mais pas le geste
+        le plus simple pour préparer un nuke : donner un rôle Administrateur
+        déjà existant à un complice. Aucun écouteur ``on_member_update``
+        n'existait dans ce cog, le rôle restait donc en place indéfiniment.
+
+        Réponse volontairement minimale : on retire **le rôle qui vient d'être
+        donné**, rien d'autre. L'auteur est signalé au moteur de risque mais
+        n'est jamais sanctionné par cette garde seule (``punish=False``) — un
+        admin qui se trompe de rôle ne mérite pas un bannissement, et les vrais
+        nukes restent couverts par les compteurs des autres écouteurs.
+        """
+        # Cet écouteur part à chaque pseudo changé, chaque exclusion, chaque
+        # boost : la comparaison doit coûter le strict minimum, d'où les ID en
+        # ensemble plutôt qu'un « not in before.roles » quadratique.
+        avant = {role.id for role in before.roles}
+        gagnes = [role for role in after.roles if role.id not in avant]
+        if not gagnes:
+            return
+        dangereux = [role for role in gagnes if _dangerous_perm_names(role.permissions)]
+        if not dangereux:
+            return
+        guild = after.guild
+        # Le propriétaire du serveur a de toute façon tous les droits : lui
+        # retirer un rôle ne protège rien et casserait son propre serveur.
+        if after.id == guild.owner_id:
+            return
+        conf = await self.get_automod_cached(guild.id)
+        if not conf or not conf.get("security_permissions"):
+            return
+        actor = await self.get_audit_actor(
+            guild, discord.AuditLogAction.member_role_update, after.id
+        )
+        suspect = await self._handle_security_actor(
+            guild,
+            actor=actor,
+            reason="Attribution d'un rôle à permissions dangereuses",
+            signal="dangerous_role_grant",
+            points=55,
+            punish=False,
+        )
+        if not suspect:
+            return
+        retires: list[discord.Role] = []
+        echoues: list[discord.Role] = []
+        for role in dangereux:
+            try:
+                await after.remove_roles(
+                    role,
+                    reason="SentriX permission guard : rôle à permissions dangereuses retiré",
+                )
+                retires.append(role)
+            except (discord.Forbidden, discord.HTTPException):
+                echoues.append(role)
+        if not retires and not echoues:
+            return
+        details = ", ".join(
+            f"{role.name} ({', '.join(_dangerous_perm_names(role.permissions))})"
+            for role in dangereux
+        )
+        await self._journal_securite(
+            guild, titre="Rôle dangereux retiré", auteur=actor,
+            protection="Garde des permissions",
+            regle="Attribution d'un rôle portant des permissions dangereuses",
+            motif=details,
+            action="Rôle retiré du membre (aucune sanction contre l'auteur)" if not echoues
+                   else "Retrait refusé par Discord : retirez le rôle à la main",
+            echec=bool(echoues),
+            extra={
+                "Membre": f"{after.mention} · `{after.id}`",
+                "Rôles": ", ".join(role.mention for role in dangereux),
+            },
         )
 
     @commands.Cog.listener()

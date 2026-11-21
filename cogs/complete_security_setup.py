@@ -254,7 +254,12 @@ class SecurityCenterView(CompleteView):
                 strict = bool(await cog.admins_soumis(self.guild.id))
 
                 async def admins(i, actuel=strict):
-                    if i.user.id != self.guild.owner_id:
+                    # Même règle que la commande +automod-strict, lue au même
+                    # endroit : propriétaire du serveur OU propriétaire du bot.
+                    autorise = getattr(cog, "peut_changer_mode_strict", None)
+                    permis = (autorise(i.user.id, self.guild) if autorise is not None
+                              else i.user.id == self.guild.owner_id)
+                    if not permis:
                         return await i.response.send_message(
                             "Seul le propriétaire du serveur peut modifier cette option.",
                             ephemeral=True,
@@ -674,7 +679,12 @@ class SecurityCenterView(CompleteView):
             strict = bool(await cog.admins_soumis(self.guild.id))
 
             async def admins(i):
-                if i.user.id != self.guild.owner_id:
+                # Même règle que +automod-strict et que l'autre bouton
+                # « Admins sanctionnés » : propriétaire du serveur OU du bot.
+                autorise = getattr(cog, "peut_changer_mode_strict", None)
+                permis = (autorise(i.user.id, self.guild) if autorise is not None
+                          else i.user.id == self.guild.owner_id)
+                if not permis:
                     return await i.response.send_message(
                         "Seul le propriétaire du serveur peut modifier cette option.",
                         ephemeral=True,

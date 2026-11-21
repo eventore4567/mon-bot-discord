@@ -25,6 +25,7 @@ import discord
 from discord.ext import commands
 
 from utils import audit_entries
+from utils import empreinte_serveur
 from utils import embeds
 
 logger = logging.getLogger("bot.security.antinuke-v55")
@@ -47,6 +48,15 @@ AUDIT_RETRY_DELAYS = (0.0, 0.18, 0.45, 0.85, 1.35)
 # Après le ban, plusieurs passes récupèrent les listeners/audits encore en vol.
 RESTORE_DRAIN_DELAYS = (0.45, 0.90, 1.60, 2.40)
 PUNISH_COOLDOWN_SECONDS = 20.0
+
+#: Fréquence du tour de veille de la copie préventive. Le tour lui-même ne
+#: coûte presque rien : il saute les serveurs dont l'empreinte est récente
+#: sans toucher à la base (marqueur en mémoire).
+BOUCLE_EMPREINTE_S = 120.0
+#: Laissé au cache de discord.py pour se remplir après le démarrage. Capturer
+#: un serveur dont les salons ne sont pas encore connus donnerait une
+#: empreinte amputée, et c'est exactement ce qu'on ne veut pas écrire.
+DELAI_AVANT_PREMIERE_EMPREINTE_S = 20.0
 CREATE_RETRIES = 3
 
 
@@ -224,6 +234,16 @@ def _patch_audit_actor(bot: commands.Bot) -> None:
         discord.AuditLogAction.ban,
     }
 
+    # 21/11/2026 : actions qu'on ne met JAMAIS en cache, même sous la clé exacte
+    # (serveur, action, cible). Un salon n'est supprimé qu'une fois ; en
+    # revanche les rôles d'un même membre changent légitimement plusieurs fois
+    # de suite — un autorôle, puis une attribution à la main. Avec un cache de
+    # 18 s, la deuxième modification héritait de l'auteur de la première : une
+    # attribution malveillante juste après un autorôle passait pour l'œuvre du
+    # bot, donc exemptée, et à l'inverse un rôle donné par le bot pouvait se
+    # faire retirer au nom d'un auteur non exempté.
+    actions_sans_cache = {discord.AuditLogAction.member_role_update}
+
     async def robust_get_audit_actor(
         _self,
         guild: discord.Guild,
@@ -235,7 +255,8 @@ def _patch_audit_actor(bot: commands.Bot) -> None:
         lookup_key = (guild.id, action_key, normalized_target)
         now = time.monotonic()
 
-        cached = cache.get(lookup_key)
+        jamais_en_cache = action in actions_sans_cache
+        cached = None if jamais_en_cache else cache.get(lookup_key)
         if cached and cached[0] > now:
             return cached[1]
         if cached:
@@ -244,7 +265,7 @@ def _patch_audit_actor(bot: commands.Bot) -> None:
         lock = locks[(guild.id, action_key)]
         async with lock:
             now = time.monotonic()
-            cached = cache.get(lookup_key)
+            cached = None if jamais_en_cache else cache.get(lookup_key)
             if cached and cached[0] > now:
                 return cached[1]
 
@@ -269,13 +290,26 @@ def _patch_audit_actor(bot: commands.Bot) -> None:
                                 entry_actor,
                             )
 
-                        if target_id is None and chosen is None:
+                        # 21/11/2026 : « chosen is None » manquait sur la
+                        # deuxième branche. Discord rend les audits du plus
+                        # RÉCENT au plus ancien, et la boucle réaffectait
+                        # ``chosen`` à chaque correspondance : elle renvoyait
+                        # donc l'auteur de la modification la PLUS ANCIENNE des
+                        # 90 dernières secondes. Un autorôle du bot suivi d'une
+                        # attribution Administrateur par un attaquant restait
+                        # attribuée au bot, donc exemptée. La première branche
+                        # avait bien la garde, ce qui dit l'intention : la
+                        # première correspondance gagne.
+                        if chosen is not None:
+                            continue
+                        if target_id is None:
                             chosen = entry_actor
-                        elif target_id is not None and entry_target_id == int(target_id):
+                        elif entry_target_id == int(target_id):
                             chosen = entry_actor
 
                     if chosen is not None:
-                        cache[lookup_key] = (time.monotonic() + AUDIT_CACHE_TTL, chosen)
+                        if not jamais_en_cache:
+                            cache[lookup_key] = (time.monotonic() + AUDIT_CACHE_TTL, chosen)
                         return chosen
                 except discord.HTTPException as exc:
                     logger.warning(
@@ -305,10 +339,175 @@ class AntiNukeEmergencyV55(commands.Cog, name=_COG_NAME):
         self._restore_locks: dict[tuple[int, int], asyncio.Lock] = defaultdict(asyncio.Lock)
         self._late_tasks: set[asyncio.Task] = set()
         self._last_summary: dict[tuple[int, int], float] = {}
+        #: Dernière capture réussie par serveur (time.monotonic), pour que le
+        #: tour de veille coûte zéro lecture de base quand rien n'est dû.
+        self._derniere_empreinte: dict[int, float] = {}
+        self._tache_empreinte: asyncio.Task | None = None
+
+    async def cog_load(self) -> None:
+        if self._tache_empreinte is None:
+            self._tache_empreinte = asyncio.create_task(
+                self._boucle_empreinte(), name="sentrix-v55-empreinte"
+            )
 
     async def cog_unload(self) -> None:
         for task in list(self._late_tasks):
             task.cancel()
+        if self._tache_empreinte is not None:
+            self._tache_empreinte.cancel()
+            self._tache_empreinte = None
+
+    # ------------------------------------------------------------------ COPIE PRÉVENTIVE
+    async def _capturer_empreinte(self, guild: discord.Guild, *, forcer: bool = False):
+        """Prend (ou rafraîchit) la copie préventive d'un serveur."""
+        try:
+            contenu = await empreinte_serveur.capturer(
+                self.bot.db,
+                guild,
+                instantane_role=_role_snapshot,
+                instantane_salon=_channel_snapshot,
+                forcer=forcer,
+            )
+        except Exception:
+            logger.exception("Empreinte : capture impossible sur %s.", guild.id)
+            return None
+        # Marqueur posé même quand la capture a été refusée (trop récente, ou
+        # serveur vu vide) : sinon le tour suivant repasserait tout de suite.
+        self._derniere_empreinte[guild.id] = time.monotonic()
+        if contenu is not None:
+            logger.info(
+                "Empreinte prise sur %s : %s rôles, %s salons.",
+                guild.id, len(contenu.get("roles") or []), len(contenu.get("salons") or []),
+            )
+        return contenu
+
+    async def _tour_empreinte(self) -> None:
+        automod = self.bot.get_cog("Automod")
+        if automod is None:
+            return
+        maintenant = time.monotonic()
+        for guild in list(self.bot.guilds):
+            precedent = self._derniere_empreinte.get(guild.id)
+            if precedent is not None and maintenant - precedent < empreinte_serveur.DELAI_ENTRE_CAPTURES_S:
+                continue
+            try:
+                conf = await automod.get_automod_cached(guild.id)
+            except Exception:
+                continue
+            if not conf or not conf.get("antinuke"):
+                continue
+            await self._capturer_empreinte(guild)
+            # Étalement : cent serveurs ne doivent pas écrire en même temps.
+            await asyncio.sleep(0.25)
+
+    async def _boucle_empreinte(self) -> None:
+        try:
+            await self.bot.wait_until_ready()
+        except Exception:
+            pass
+        await asyncio.sleep(DELAI_AVANT_PREMIERE_EMPREINTE_S)
+        while True:
+            try:
+                await self._tour_empreinte()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Empreinte : tour de veille ignoré.")
+            await asyncio.sleep(BOUCLE_EMPREINTE_S)
+
+    async def _restaurer_depuis_empreinte(
+        self,
+        guild: discord.Guild,
+        channel_map: dict[int, discord.abc.GuildChannel],
+        role_map: dict[int, discord.Role],
+        channel_snapshots: dict[int, dict[str, Any]],
+    ) -> dict[str, int]:
+        """Filet de sécurité : recrée ce que l'empreinte connaît et que le serveur n'a plus.
+
+        Les passes précédentes rejouent les dégâts **vus passer**. Celle-ci
+        compare l'état réel à la copie préventive : c'est la seule qui sache
+        encore quoi faire quand le bot a redémarré pendant le nuke, était hors
+        ligne, ou n'a jamais reçu l'événement de suppression.
+
+        Trois pièges trouvés en revue, tous dus au fait que l'empreinte parle en
+        ANCIENS IDs alors que les passes événementielles ont déjà pu recréer les
+        objets sous de nouveaux :
+
+        * un objet déjà recréé est absent de Discord sous son ancien ID, donc
+          ``disparus()`` le croit manquant. ``_restore_role`` ne consulte pas
+          ``role_map`` avant de créer : il en faisait un deuxième, et écrasait la
+          correspondance — les salons restaurés avant visaient le premier rôle,
+          ceux d'après le second. D'où le filtre sur les correspondances déjà
+          connues, ici et pas dans le helper, dont le contrat ne change pas ;
+        * la réconciliation des salons tournait AVANT le filet : un salon recréé
+          sans sa catégorie ou sans son rôle restait à la racine, voire sans ses
+          restrictions d'accès. On la refait donc après, maintenant que les
+          correspondances sont complètes ;
+        * deux auteurs sanctionnés pendant le même nuke, deux restaurations : la
+          seconde relisait les mêmes anciens IDs. Ce que le filet recrée est
+          retiré de l'empreinte (``oublier``).
+        """
+        bilan = {"roles_restored": 0, "channels_restored": 0, "failed": 0}
+        try:
+            empreinte = await empreinte_serveur.lire(self.bot.db, guild.id)
+        except Exception:
+            logger.exception("Empreinte : lecture impossible sur %s.", guild.id)
+            return bilan
+        if empreinte is None:
+            return bilan
+        absents = empreinte_serveur.disparus(empreinte, guild)
+        # Déjà recréé par une passe événementielle : la correspondance existe,
+        # recréer une deuxième fois ferait un doublon avec des permissions
+        # divergentes.
+        roles = [s for s in absents["roles"] if int(s.get("id") or 0) not in role_map]
+        salons = [
+            s
+            for cle in ("categories", "salons")
+            for s in absents[cle]
+            if int(s.get("id") or 0) not in channel_map
+        ]
+        if not roles and not salons:
+            return bilan
+        logger.warning(
+            "Anti-nuke V55 : filet empreinte sur %s, %s rôle(s) et %s salon(s) manquants.",
+            guild.id, len(roles), len(salons),
+        )
+        roles_faits: list[int] = []
+        salons_faits: list[int] = []
+        for instantane in roles:
+            if await self._restore_role(guild, instantane, role_map) is not None:
+                bilan["roles_restored"] += 1
+                roles_faits.append(int(instantane.get("id") or 0))
+            else:
+                bilan["failed"] += 1
+        for instantane in salons:
+            ancien = int(instantane.get("id") or 0)
+            if await self._restore_deleted_channel(
+                guild, instantane, channel_map, role_map
+            ) is not None:
+                bilan["channels_restored"] += 1
+                salons_faits.append(ancien)
+                # Pour que la réconciliation ci-dessous sache quoi réappliquer.
+                channel_snapshots.setdefault(ancien, instantane)
+            else:
+                bilan["failed"] += 1
+        if bilan["channels_restored"] or bilan["roles_restored"]:
+            # Parent et permissions réappliqués une fois les correspondances
+            # complètes : c'est la seule passe qui peut encore corriger un salon
+            # recréé plus tôt sans sa catégorie ou sans son rôle.
+            await self._reconcile_restored_channels(
+                guild, channel_map, role_map, channel_snapshots
+            )
+        try:
+            await empreinte_serveur.oublier(
+                self.bot.db, guild.id, roles=roles_faits, salons=salons_faits
+            )
+        except Exception:
+            logger.warning(
+                "Empreinte : IDs recréés non retirés sur %s, une seconde "
+                "restauration pourrait dupliquer.", guild.id, exc_info=True,
+            )
+        return bilan
 
     async def _context(
         self,
@@ -969,6 +1168,12 @@ class AntiNukeEmergencyV55(commands.Cog, name=_COG_NAME):
 
             await self._reconcile_restored_channels(guild, channel_map, role_map, channel_snapshots)
 
+            filet = await self._restaurer_depuis_empreinte(
+                guild, channel_map, role_map, channel_snapshots
+            )
+            for champ, valeur in filet.items():
+                total[champ] = total.get(champ, 0) + valeur
+
             cutoff = int(time.time()) - DAMAGE_WINDOW_SECONDS
             try:
                 row = await self.bot.db.fetchone(
@@ -1054,6 +1259,10 @@ async def install(bot: commands.Bot) -> None:
         return
 
     await _ensure_table(bot)
+    try:
+        await empreinte_serveur.installer(bot.db)
+    except Exception:
+        logger.exception("Empreinte : table indisponible, le filet préventif sera inactif.")
     _patch_audit_actor(bot)
     if bot.get_cog(_COG_NAME) is None:
         await bot.add_cog(AntiNukeEmergencyV55(bot))
