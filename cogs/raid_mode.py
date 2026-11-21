@@ -291,7 +291,13 @@ async def declencher(automod, guild, *, mesures: list[str] | None = None) -> Eta
     """Raid rapide confirmé : active le mode et vide la vague en quelques secondes."""
     maintenant = time.monotonic()
     etat = _etats.get(guild.id)
-    nouveau = etat is None or maintenant >= etat.jusqua
+    # 21/11/2026, vu en résolvant un conflit : depuis que le mode manuel ne
+    # dépend plus de ``jusqua``, un état armé à la main avait son échéance
+    # dépassée en permanence — ``nouveau`` passait donc à vrai et l'état entier
+    # était REMPLACÉ par un neuf, dont ``manuel`` vaut False. Un vrai raid
+    # détecté pendant un armement manuel désarmait donc le mode manuel, en
+    # silence. Un état armé à la main n'est jamais « nouveau ».
+    nouveau = etat is None or (not etat.manuel and maintenant >= etat.jusqua)
     if nouveau:
         etat = _etats[guild.id] = EtatRaid(debut=maintenant, jusqua=maintenant + RAID_MODE_DUREE,
                                            derniere_arrivee=maintenant)

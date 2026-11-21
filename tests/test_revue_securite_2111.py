@@ -286,3 +286,28 @@ async def test_oublier_sans_rien_a_oublier_n_ecrit_pas():
     assert await emp.oublier(db, 1) == 0
     assert await emp.oublier(db, 1, roles=[999]) == 0
     assert db.ecritures == 0
+
+
+@pytest.mark.asyncio
+async def test_un_vrai_raid_ne_desarme_pas_le_mode_manuel():
+    """Défaut vu en résolvant un conflit, créé par la correction n°2.
+
+    Depuis que ``manuel`` ne dépend plus de ``jusqua``, un état armé à la main a
+    son échéance dépassée en permanence. ``declencher()`` calculait
+    ``nouveau = etat is None or maintenant >= etat.jusqua`` : il passait donc à
+    vrai et REMPLAÇAIT l'état entier par un neuf, dont ``manuel`` vaut False.
+
+    Autrement dit : un vrai raid détecté pendant un armement manuel désarmait le
+    mode manuel, en silence, au pire moment possible.
+    """
+    await raid_mode.armer_manuel(_DbRaid(), SimpleNamespace(id=1), auteur_id=7)
+    etat_arme = raid_mode._etats[1]
+    etat_arme.jusqua = time.monotonic() - 1  # l'échéance automatique est passée
+
+    automod = SimpleNamespace(bot=SimpleNamespace(user=SimpleNamespace(id=2)))
+    guild = SimpleNamespace(id=1, name="S")
+    rendu = await raid_mode.declencher(automod, guild, mesures=["vague détectée"])
+
+    assert rendu is etat_arme, "l'état armé à la main a été remplacé"
+    assert raid_mode.est_manuel(1) is True
+    assert raid_mode._etats[1].manuel is True
