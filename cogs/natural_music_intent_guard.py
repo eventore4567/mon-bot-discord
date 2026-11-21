@@ -54,6 +54,31 @@ MUSIC_GROUP_ROOT = "music"
 SUMMARY_PATTERN = re.compile(
     r"\b(resume|resumes|resumer|resumee|resumee?s|synthese|synthetise|synthetiser)\b"
 )
+#: 21/11/2026 : « donne le lien spotify de Loka Loka » partait dans le lecteur
+#: et répondait « Rejoignez un salon vocal », puis « donne la music X sur
+#: spotif » finissait en import de playlist avec « URL non reconnue ». Dans les
+#: deux cas la personne demandait un LIEN, pas une lecture.
+#:
+#: Nommer une plateforme sans donner d'URL, c'est demander de CHERCHER là-bas.
+#: Le lecteur ne sait de toute façon rien faire d'un « sur Spotify » sans
+#: adresse. En revanche une vraie URL reste une demande de lecture légitime.
+_PLATEFORME_NOMMEE = re.compile(
+    r"\b(?:spotify|spotif|deezer|soundcloud|apple\s*music|shazam|bandcamp|youtube|yt)\b",
+    re.IGNORECASE,
+)
+_CONTIENT_UNE_URL = re.compile(r"https?://", re.IGNORECASE)
+
+
+def _veut_un_lien_pas_une_lecture(question: str) -> bool:
+    """Vrai quand la phrase cherche une adresse, pas une mise en lecture."""
+    texte = str(question or "")
+    if _looks_like_link_request(texte):
+        return True
+    return bool(
+        _PLATEFORME_NOMMEE.search(texte) and not _CONTIENT_UNE_URL.search(texte)
+    )
+
+
 MUSIC_CONTEXT_PATTERN = re.compile(
     r"\b(musique|musiques|chanson|chansons|audio|son|sons|lecture|playlist|playlist[s]?|"
     r"vocal|voice|track|titre|file d['’ ]?attente|volume)\b"
@@ -380,6 +405,14 @@ def install(bot: commands.Bot) -> None:
             )
             if not explicit_playback_resume:
                 return None
+
+        # Une demande de lien n'est jamais une demande de lecture : on laisse
+        # l'IA répondre, elle a l'outil de recherche web pour ça.
+        if _veut_un_lien_pas_une_lecture(question):
+            logger.info(
+                "Demande de lien laissée à l'IA plutôt qu'au lecteur : %r", question[:160],
+            )
+            return None
 
         command_line = original(
             self,
