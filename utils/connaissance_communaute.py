@@ -18,9 +18,12 @@ _INVITATIONS = re.compile(
     r"\b(?:invitation|invitations|invit|invits|invite[rs]?|parrain\w*|classement\s+invit\w*)\b",
     re.IGNORECASE,
 )
-_PROGRESSION = re.compile(
-    r"\b(?:niveau|niveaux|level|xp|exp[eé]rience|classement|leaderboard|"
-    r"argent|solde|balance|coins?|pi[eè]ces|[eé]conomie|riche)\b",
+_NIVEAU = re.compile(
+    r"\b(?:niveau|niveaux|level|xp|exp[eé]rience|classement|leaderboard)\b",
+    re.IGNORECASE,
+)
+_ECONOMIE = re.compile(
+    r"\b(?:argent|solde|balance|coins?|pi[eè]ces|[eé]conomie|riche|banque)\b",
     re.IGNORECASE,
 )
 _MENTION = re.compile(r"<@!?(\d{15,25})>")
@@ -31,8 +34,12 @@ def concerne_invitations(texte: str) -> bool:
     return bool(_INVITATIONS.search(str(texte or "")))
 
 
-def concerne_progression(texte: str) -> bool:
-    return bool(_PROGRESSION.search(str(texte or "")))
+def concerne_niveau(texte: str) -> bool:
+    return bool(_NIVEAU.search(str(texte or "")))
+
+
+def concerne_economie(texte: str) -> bool:
+    return bool(_ECONOMIE.search(str(texte or "")))
 
 
 def _cible(texte: str, guild, auteur):
@@ -52,12 +59,18 @@ async def lire_invitations(bot, guild, auteur, texte: str) -> str:
         logger.debug("Classement invitations illisible.", exc_info=True)
         classement = []
     if classement:
+        # 21/11/2026 : get_invite_leaderboard_credited renvoie des TUPLES
+        # (inviter_id, breakdown), pas des dictionnaires. Appeler .get dessus
+        # levait AttributeError, le registre avalait l'erreur, et TOUTE la
+        # source invitations disparaissait. Ma fixture de test renvoyait des
+        # dictionnaires : j'avais inventé la forme au lieu de la lire.
         lignes = []
         for rang, entree in enumerate(classement[:_TOP], start=1):
-            identifiant = int(entree.get("user_id") or entree.get("inviter_id") or 0)
-            membre = guild.get_member(identifiant)
+            identifiant, detail = entree
+            membre = guild.get_member(int(identifiant or 0))
             nom = getattr(membre, "display_name", None) or f"membre {identifiant}"
-            lignes.append(f"{rang}. {nom} — {entree.get('credited', entree.get('total', 0))} invitation(s)")
+            credite = detail.get("credited", detail.get("total", 0)) if detail else 0
+            lignes.append(f"{rang}. {nom} — {credite} invitation(s)")
         morceaux.append("Classement des invitations (créditées) :\n" + "\n".join(lignes))
 
     membre = _cible(texte, guild, auteur)
@@ -75,33 +88,43 @@ async def lire_invitations(bot, guild, auteur, texte: str) -> str:
     return "\n\n".join(morceaux)
 
 
-async def lire_progression(bot, guild, auteur, texte: str) -> str:
+async def lire_niveau(bot, guild, auteur, texte: str) -> str:
+    """Le niveau seulement. L'économie a sa propre source, voir plus bas."""
     membre = _cible(texte, guild, auteur)
     if membre is None:
         return ""
     nom = getattr(membre, "display_name", None) or str(membre)
-    morceaux = []
-
-    # Lecture directe : get_level et get_balance créent la ligne si elle manque,
-    # ce qui écrirait en base à chaque question posée.
+    # Lecture directe : get_level crée la ligne si elle manque, ce qui écrirait
+    # en base à chaque question posée.
     niveau = await bot.db.fetchone(
         "SELECT level, xp FROM levels WHERE guild_id = ? AND user_id = ?",
         (guild.id, membre.id),
     )
-    if niveau:
-        morceaux.append(f"{nom} est niveau {niveau['level']} avec {niveau['xp']} XP.")
-    else:
-        morceaux.append(f"{nom} n'a encore aucun niveau enregistré.")
+    if not niveau:
+        return f"{nom} n'a encore aucun niveau enregistré."
+    return f"{nom} est niveau {niveau['level']} avec {niveau['xp']} XP."
 
+
+async def lire_economie(bot, guild, auteur, texte: str) -> str:
+    """L'économie seulement.
+
+    21/11/2026, revue Codex : lire les deux sous l'autorisation de `level`
+    exposait le solde d'un serveur qui a désactivé l'économie, et inversement
+    bloquait l'économie d'un serveur sans niveaux. access_matrix range `balance`
+    dans le module economy et `level` dans levels : leurs décisions ne sont pas
+    interchangeables, donc chaque domaine a sa propre source.
+    """
+    membre = _cible(texte, guild, auteur)
+    if membre is None:
+        return ""
+    nom = getattr(membre, "display_name", None) or str(membre)
     argent = await bot.db.fetchone(
         "SELECT cash, bank FROM economy WHERE guild_id = ? AND user_id = ?",
         (guild.id, membre.id),
     )
-    if argent:
-        morceaux.append(
-            f"Économie de {nom} : {argent['cash']} en poche, {argent['bank']} en banque."
-        )
-    return "\n".join(morceaux)
+    if not argent:
+        return ""
+    return f"Économie de {nom} : {argent['cash']} en poche, {argent['bank']} en banque."
 
 
 def installer() -> None:
@@ -115,15 +138,23 @@ def installer() -> None:
     )
     connaissance_serveur.enregistrer(
         connaissance_serveur.Source(
-            nom="progression",
-            concerne=concerne_progression,
-            lire=lire_progression,
-            commande_equivalente="level",     # public, comme +level
+            nom="niveau",
+            concerne=concerne_niveau,
+            lire=lire_niveau,
+            commande_equivalente="level",     # module levels
+        )
+    )
+    connaissance_serveur.enregistrer(
+        connaissance_serveur.Source(
+            nom="economie",
+            concerne=concerne_economie,
+            lire=lire_economie,
+            commande_equivalente="balance",   # module economy, décision distincte
         )
     )
 
 
 __all__ = [
-    "concerne_invitations", "concerne_progression", "installer",
-    "lire_invitations", "lire_progression",
+    "concerne_economie", "concerne_invitations", "concerne_niveau", "installer",
+    "lire_economie", "lire_invitations", "lire_niveau",
 ]

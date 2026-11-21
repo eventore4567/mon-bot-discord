@@ -104,12 +104,37 @@ async def bloc(bot, guild, auteur, texte: str) -> str:
 
     if not morceaux:
         return ""
-    assemble = "\n\n".join(morceaux)[:LONGUEUR_MAX]
+
+    # 21/11/2026, revue Codex : trancher à LONGUEUR_MAX coupait un bloc en plein
+    # milieu tout en gardant son en-tête « Toutes les sanctions » et sa consigne
+    # « dis qu'elle n'est pas enregistrée ». Un dossier supprimé par la
+    # troncature recevait donc un démenti FAUX — exactement le défaut corrigé la
+    # veille sur la limite de huit dossiers, réintroduit un étage plus haut.
+    #
+    # On ne coupe plus à l'intérieur d'un bloc : un bloc entre entier ou pas du
+    # tout, et s'il en manque un, on le DIT au lieu de laisser croire à une
+    # liste complète.
+    gardes, longueur, tronque = [], 0, False
+    for morceau in morceaux:
+        if longueur + len(morceau) + 2 > LONGUEUR_MAX and gardes:
+            tronque = True
+            continue
+        gardes.append(morceau)
+        longueur += len(morceau) + 2
+    if not gardes:  # un seul bloc, plus long que la limite à lui seul
+        gardes, tronque = [morceaux[0][:LONGUEUR_MAX]], True
+
+    avertissement = (
+        " ATTENTION : une partie des données n'a pas pu être incluse ici. Ne dis "
+        "donc JAMAIS qu'une information n'existe pas — dis que tu ne la vois pas "
+        "et renvoie vers la commande du module concerné."
+        if tronque else
+        " Ce qui n'y est pas, dis que tu ne l'as pas sous les yeux."
+    )
     return (
         "[Données réelles du serveur, lues dans la base SentriX. C'est la SOURCE DE "
         "VÉRITÉ : réponds à partir de ces lignes et n'invente jamais un chiffre, une "
-        "date ou un nom qui n'y figure pas. Ce qui n'y est pas, dis que tu ne l'as "
-        "pas sous les yeux.]\n" + assemble
+        f"date ou un nom qui n'y figure pas.{avertissement}]\n" + "\n\n".join(gardes)
     )
 
 

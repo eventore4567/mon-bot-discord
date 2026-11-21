@@ -72,7 +72,10 @@ class _Bot:
         return None
 
     async def get_invite_leaderboard_credited(self, guild_id, limit=10):
-        return [{"user_id": 99, "credited": 7}]
+        # La VRAIE forme de production : une liste de tuples (inviter_id,
+        # breakdown). La fixture renvoyait des dictionnaires et masquait un
+        # AttributeError qui faisait disparaître toute la source.
+        return [(99, {"credited": 7, "total": 9})]
 
     async def get_invite_stats(self, guild_id, inviter_id):
         return {"total": 7, "active": 5, "left": 2}
@@ -166,7 +169,8 @@ def test_chaque_source_declare_sa_commande_equivalente():
         "sanctions": "modhistory",
         "tickets": "sentrixpro ticket-summary",
         "invitations": "invites",
-        "progression": "level",
+        "niveau": "level",
+        "economie": "balance",
     }
     obtenu = {s.nom: s.commande_equivalente for s in connaissance_serveur.sources()}
     assert obtenu == attendu
@@ -191,3 +195,84 @@ def test_les_sources_sont_declarees_la_ou_le_registre_est_lu():
     assert "connaissance_tickets" in source
     assert "connaissance_communaute" in source
     assert "memoire_sanctions" in source
+
+
+# ------------------------------------------- revue Codex du 21/11/2026
+@pytest.mark.asyncio
+async def test_le_classement_lit_la_vraie_forme_de_production():
+    """get_invite_leaderboard_credited renvoie des TUPLES, pas des dicts.
+
+    Appeler .get dessus levait AttributeError, le registre avalait l'erreur,
+    et TOUTE la source invitations disparaissait — y compris les statistiques
+    individuelles. Ma fixture renvoyait des dictionnaires : j'avais inventé la
+    forme au lieu de la lire dans database/db.py.
+    """
+    natix = _membre(99, "Natix")
+    bloc = await connaissance_serveur.bloc(
+        _Bot(), _guild([natix]), natix, "qui a le plus d'invitations ?"
+    )
+    assert "1. Natix — 7 invitation(s)" in bloc
+    assert "7 au total" in bloc, "les statistiques individuelles doivent suivre"
+
+
+@pytest.mark.asyncio
+async def test_l_economie_et_le_niveau_ont_des_portes_distinctes():
+    """access_matrix range balance dans economy et level dans levels.
+
+    Les lire tous les deux sous l'autorisation de `level` exposait le solde
+    d'un serveur ayant désactivé l'économie, et inversement.
+    """
+    noms = {s.nom: s.commande_equivalente for s in connaissance_serveur.sources()}
+    assert noms["niveau"] == "level"
+    assert noms["economie"] == "balance"
+
+    from utils import connaissance_communaute as communaute
+
+    assert communaute.concerne_niveau("je suis niveau combien") is True
+    assert communaute.concerne_niveau("j'ai combien d'argent") is False
+    assert communaute.concerne_economie("j'ai combien d'argent") is True
+    assert communaute.concerne_economie("je suis niveau combien") is False
+
+
+@pytest.mark.asyncio
+async def test_une_troncature_interdit_tout_dementi():
+    """Couper un bloc en gardant « liste complète » produisait un démenti faux.
+
+    C'est le défaut corrigé la veille sur la limite de huit dossiers,
+    réintroduit un étage plus haut par la limite de longueur du registre.
+    """
+    long = "x" * (connaissance_serveur.LONGUEUR_MAX // 2 + 100)
+
+    def _source(nom):
+        return connaissance_serveur.Source(
+            nom=nom, concerne=lambda t: True,
+            lire=lambda b, g, a, t, _n=nom: _retour(f"{_n} : {long}"),
+        )
+
+    async def _retour(valeur):
+        return valeur
+
+    for nom in ("bavard_un", "bavard_deux"):
+        connaissance_serveur.enregistrer(_source(nom))
+    try:
+        simple = _membre(50, "Membre")
+        bloc = await connaissance_serveur.bloc(_Bot(), _guild([simple]), simple, "peu importe")
+        assert "ATTENTION" in bloc
+        assert "JAMAIS qu'une information n'existe pas" in bloc
+        assert "dis que tu ne l'as pas sous les yeux" not in bloc
+        # Un bloc entre entier ou pas du tout : jamais coupé au milieu.
+        assert bloc.count("bavard_") == 1
+    finally:
+        connaissance_serveur._SOURCES[:] = [
+            s for s in connaissance_serveur.sources() if not s.nom.startswith("bavard_")
+        ]
+
+
+@pytest.mark.asyncio
+async def test_sans_troncature_le_dementi_reste_permis():
+    natix = _membre(99, "Natix")
+    bloc = await connaissance_serveur.bloc(
+        _Bot(), _guild([natix]), natix, "qui a le plus d'invitations ?"
+    )
+    assert "dis que tu ne l'as pas sous les yeux" in bloc
+    assert "ATTENTION" not in bloc

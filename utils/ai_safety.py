@@ -62,17 +62,20 @@ def est_mode_emploi_dangereux(texte: str) -> bool:
     return sum(1 for motif in _RECETTE if motif.search(plat)) >= 2
 
 
-#: 21/11/2026, audit demandé par l'utilisateur sur son propre bot. _SUJETS est
-#: une liste de mots, donc « t h e r m i t e » et « therm1te » passaient à
-#: travers alors que « thermite » était bien vu. On compare donc aussi une
-#: version DÉBRUITÉE du texte : chiffres-lettres remis, séparateurs retirés.
+#: 21/11/2026. Première version : on collait TOUT le texte et on y cherchait
+#: des sous-chaînes. Catastrophe — « pâtes à rincer » devient « patesarincer »,
+#: qui contient « sarin », donc une recette de cuisine se faisait refuser. La
+#: revue l'a trouvé, mes propres tests ne l'avaient pas vu : j'avais vérifié
+#: sept phrases innocentes de mon choix, et la bonne n'en faisait pas partie.
 #:
-#: Cette comparaison ne s'applique qu'aux sujets d'au moins cinq lettres. Sur
-#: « meth », « rdx » ou « tnt », coller les lettres ferait apparaître le mot
-#: dans des phrases innocentes (« la meth ode »), et un faux refus sur une
-#: question ordinaire est aussi un défaut.
+#: On ne colle plus rien. Chaque sujet devient un motif où les lettres peuvent
+#: être séparées par QUELQUES caractères non alphanumériques, encadré par des
+#: frontières de mot. « t h e r m i t e » et « t-h-e-r-m-i-t-e » passent ;
+#: « sarin » au milieu de « patesarincer » ne passe pas, parce qu'il n'y a pas
+#: de frontière devant.
 _LONGUEUR_SUJET_DEBRUITABLE = 5
-_SEPARATEURS = re.compile(r"[^a-z0-9]+")
+#: Au-delà, « t » et « hermite » séparés par une phrase entière se recolleraient.
+_ECART_MAX_ENTRE_LETTRES = 3
 _CHIFFRES_LETTRES = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t"})
 
 _SUJETS_LONGS = tuple(
@@ -85,15 +88,27 @@ _SUJETS_LONGS = tuple(
     ) if len(mot) >= _LONGUEUR_SUJET_DEBRUITABLE
 )
 
+_MOTIFS_OBFUSQUES = tuple(
+    re.compile(
+        r"\b" + rf"[^a-z0-9]{{0,{_ECART_MAX_ENTRE_LETTRES}}}".join(mot) + r"\b",
+        re.IGNORECASE,
+    )
+    for mot in _SUJETS_LONGS
+)
+
 
 def _debruite(texte: str) -> str:
-    """Le texte sans séparateurs ni chiffres-lettres : « t-h-3-r-m-1-t-e » -> « thermite »."""
-    return _SEPARATEURS.sub("", _plat(texte).translate(_CHIFFRES_LETTRES))
+    """Les chiffres-lettres remis, les séparateurs CONSERVÉS.
+
+    Conserver les séparateurs est tout l'intérêt : ce sont eux qui portent les
+    frontières de mot, et donc la différence entre « sarin » et « patesarincer ».
+    """
+    return _plat(texte).translate(_CHIFFRES_LETTRES)
 
 
 def _sujet_obfusque(texte: str) -> bool:
-    debruite = _debruite(texte)
-    return any(mot in debruite for mot in _SUJETS_LONGS)
+    allege = _debruite(texte)
+    return any(motif.search(allege) for motif in _MOTIFS_OBFUSQUES)
 
 
 def sujet_sensible(texte: str) -> bool:
