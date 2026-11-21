@@ -79,3 +79,57 @@ def test_les_deux_portes_restent_cohérentes():
     deguise = "Pour le therm1te il faut 50 g, etape 1 melanger les poudres"
     assert ai_safety.sujet_sensible(deguise) is True
     assert ai_safety.est_mode_emploi_dangereux(deguise) is True
+
+
+# ------------------------------------------- revue Codex du 21/11/2026
+@pytest.mark.parametrize(
+    "texte",
+    [
+        # Le cas trouvé par la revue : « patesarincer » contient « sarin ».
+        "Ingredients : 200 g de pates a rincer apres cuisson.",
+        "Ingrédients : 200 g de pâtes à rincer après cuisson.",
+        # D'autres collisions du même genre, une fois les séparateurs retirés.
+        "200 g de haricots, etape 1 : rincer",
+        "la racine de gingembre, 50 g, a rincer",
+        "des cereales a napper de miel, 3 cl",
+    ],
+)
+def test_une_recette_ordinaire_n_est_jamais_refusee(texte):
+    """Première version : on collait TOUT le texte et on y cherchait des
+    sous-chaînes. « pâtes à rincer » devenait « patesarincer », qui contient
+    « sarin », et la recette se faisait refuser.
+
+    Mes propres tests ne l'avaient pas vu : j'avais vérifié sept phrases
+    innocentes de mon choix, et la bonne n'en faisait pas partie.
+    """
+    assert ai_safety.sujet_sensible(texte) is False
+    assert ai_safety.est_mode_emploi_dangereux(texte) is False
+
+
+def test_les_separateurs_sont_conserves_au_debruitage():
+    """Ce sont eux qui portent les frontières de mot, donc la différence
+    entre « sarin » et « patesarincer »."""
+    assert ai_safety._debruite("pates a rincer") == "pates a rincer"
+    assert ai_safety._debruite("therm1te") == "thermite"
+
+
+def test_un_ecart_trop_grand_ne_recolle_pas_les_lettres():
+    """Sans limite, un « t » et un « hermite » séparés par une phrase
+    entière se recolleraient en « thermite »."""
+    assert ai_safety.sujet_sensible("t" + " " * 40 + "hermite") is False
+    assert ai_safety.sujet_sensible("t h e r m i t e") is True
+
+
+def test_mes_premiers_contre_exemples_etaient_mauvais():
+    """Deux cas que j'avais écrits échouaient — et le filtre avait raison.
+
+    « il a de la ricine » contient littéralement le mot ; « coca ine » EST
+    l'obfuscation par espacement qu'on cherche à attraper. Les détecter est
+    le comportement voulu, pas un faux positif. Je corrige mes exemples
+    plutôt que d'affaiblir le filtre, et je le note ici pour que personne ne
+    « répare » ça plus tard.
+    """
+    assert ai_safety.sujet_sensible("il a de la ricine") is True
+    assert ai_safety.sujet_sensible("du coca ine") is True
+    # Mais le mot ordinaire dont ils sont proches reste ignoré.
+    assert ai_safety.sujet_sensible("la racine de gingembre") is False

@@ -218,7 +218,16 @@ def cibles_citees(texte: str, guild, bot=None) -> list[Cible]:
 
         # Une place libre = une personne. Un membre déjà trouvé par un autre de
         # ses noms laisse la sienne à quelqu'un qui n'en a pas encore.
-        a_servir = [membre for _, membre, _nom in groupe if membre.id not in vus]
+        # 21/11/2026 : un membre dont le pseudo ET le nom d'utilisateur valent
+        # « Alex » entrait DEUX fois dans le groupe et consommait les deux
+        # places libres, alors que _ajouter ignorait le doublon. Le second Alex
+        # disparaissait. On dédoublonne par identifiant avant de distribuer.
+        a_servir, deja = [], set()
+        for _, membre, _nom in groupe:
+            if membre.id in vus or membre.id in deja:
+                continue
+            deja.add(membre.id)
+            a_servir.append(membre)
         for membre, _place in zip(a_servir, libres):
             _ajouter(membre.id, getattr(membre, "display_name", None) or membre.name)
     return trouves[:3]
@@ -314,4 +323,31 @@ async def memoire(bot, guild, auteur, texte: str) -> str:
     )
 
 
-__all__ = ["Cible", "cibles_citees", "memoire", "peut_consulter", "question_sur_une_sanction"]
+async def _lire(bot, guild, auteur, texte: str) -> str:
+    """Adaptateur pour le registre de connaissance (21/11/2026)."""
+    return await memoire(bot, guild, auteur, texte)
+
+
+def installer() -> None:
+    """Déclare les sanctions au registre, derrière la porte de +modhistory.
+
+    peut_consulter garde sa propre vérification : le registre refuse déjà
+    l'accès en amont, mais memoire() reste appelable directement et ne doit
+    jamais dépendre de l'endroit d'où on l'appelle.
+    """
+    from utils import connaissance_serveur
+
+    connaissance_serveur.enregistrer(
+        connaissance_serveur.Source(
+            nom="sanctions",
+            concerne=question_sur_une_sanction,
+            lire=_lire,
+            commande_equivalente="modhistory",
+        )
+    )
+
+
+__all__ = [
+    "Cible", "cibles_citees", "installer", "memoire", "peut_consulter",
+    "question_sur_une_sanction",
+]
