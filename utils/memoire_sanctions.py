@@ -314,4 +314,31 @@ async def memoire(bot, guild, auteur, texte: str) -> str:
     )
 
 
-__all__ = ["Cible", "cibles_citees", "memoire", "peut_consulter", "question_sur_une_sanction"]
+async def _lire(bot, guild, auteur, texte: str) -> str:
+    """Adaptateur pour le registre de connaissance (21/11/2026)."""
+    return await memoire(bot, guild, auteur, texte)
+
+
+def installer() -> None:
+    """Déclare les sanctions au registre, derrière la porte de +modhistory.
+
+    peut_consulter garde sa propre vérification : le registre refuse déjà
+    l'accès en amont, mais memoire() reste appelable directement et ne doit
+    jamais dépendre de l'endroit d'où on l'appelle.
+    """
+    from utils import connaissance_serveur
+
+    connaissance_serveur.enregistrer(
+        connaissance_serveur.Source(
+            nom="sanctions",
+            concerne=question_sur_une_sanction,
+            lire=_lire,
+            commande_equivalente="modhistory",
+        )
+    )
+
+
+__all__ = [
+    "Cible", "cibles_citees", "installer", "memoire", "peut_consulter",
+    "question_sur_une_sanction",
+]

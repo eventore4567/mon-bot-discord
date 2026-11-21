@@ -251,6 +251,24 @@ def install(bot: commands.Bot) -> None:
     global _PATCHED
     if _PATCHED:
         return
+
+    # 21/11/2026 : les sources sont déclarées ICI, au point même où le registre
+    # est consulté. Les enregistrer ailleurs laisserait un registre vide si ce
+    # module se chargeait seul — c'est exactement ainsi que le streaming est
+    # resté du code mort pendant trois jours.
+    for module in ("memoire_sanctions", "connaissance_tickets", "connaissance_communaute"):
+        try:
+            __import__(f"utils.{module}", fromlist=["installer"]).installer()
+        except Exception:  # noqa: BLE001 — une source absente n'empêche pas les autres
+            logger.warning("Source de connaissance %s non déclarée.", module, exc_info=True)
+
+    from utils import connaissance_serveur
+    logger.info(
+        "Connaissance du serveur : %s source(s) déclarée(s) — %s.",
+        len(connaissance_serveur.sources()),
+        ", ".join(s.nom for s in connaissance_serveur.sources()) or "aucune",
+    )
+
     from utils import ai_service
     current = ai_service.generate
     if getattr(current, "_sentrix_ai_context_v9", False):
@@ -306,13 +324,13 @@ def install(bot: commands.Bot) -> None:
         # base. Voir utils/memoire_sanctions : lue uniquement quand on la
         # demande, et uniquement pour un modérateur.
         try:
-            from utils import memoire_sanctions
+            from utils import connaissance_serveur
 
             guild = bot.get_guild(int(kwargs.get("guild_id") or 0))
             auteur = guild.get_member(int(kwargs.get("user_id") or 0)) if guild else None
-            historique = await memoire_sanctions.memoire(bot, guild, auteur, question_brute)
+            historique = await connaissance_serveur.bloc(bot, guild, auteur, question_brute)
         except Exception:  # noqa: BLE001 — jamais bloquant pour la réponse
-            logger.debug("Mémoire des sanctions indisponible.", exc_info=True)
+            logger.debug("Connaissance du serveur indisponible.", exc_info=True)
             historique = ""
         if historique:
             kwargs["instructions"] = (
