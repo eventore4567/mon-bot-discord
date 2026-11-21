@@ -23,8 +23,12 @@ def test_l_option_sanctionner_les_admins_est_sur_l_ecran():
 
 
 def test_seul_le_proprietaire_peut_changer_cette_option():
-    bloc = SOURCE.split("async def admins(i, actuel=strict):", 1)[1][:600]
-    assert "i.user.id != self.guild.owner_id" in bloc
+    bloc = SOURCE.split("async def admins(i, actuel=strict):", 1)[1][:900]
+    # 21/11/2026 : le bouton comparait à ``guild.owner_id`` seul et refusait le
+    # propriétaire de SentriX, alors que +automod-strict l'acceptait. Les deux
+    # lisent la même règle maintenant, pour qu'ils ne redivergent pas.
+    assert "peut_changer_mode_strict" in bloc
+    assert "i.user.id != self.guild.owner_id" not in bloc
     assert "Seul le propriétaire du serveur" in bloc
     # L'état lu à la construction est figé dans le défaut : deux clics rapides ne
     # peuvent pas réappliquer la même valeur.

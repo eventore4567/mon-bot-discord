@@ -25,6 +25,7 @@ import discord
 from discord.ext import commands
 
 from utils import audit_entries
+from utils import empreinte_serveur
 from utils import embeds
 
 logger = logging.getLogger("bot.security.antinuke-v55")
@@ -47,6 +48,15 @@ AUDIT_RETRY_DELAYS = (0.0, 0.18, 0.45, 0.85, 1.35)
 # Après le ban, plusieurs passes récupèrent les listeners/audits encore en vol.
 RESTORE_DRAIN_DELAYS = (0.45, 0.90, 1.60, 2.40)
 PUNISH_COOLDOWN_SECONDS = 20.0
+
+#: Fréquence du tour de veille de la copie préventive. Le tour lui-même ne
+#: coûte presque rien : il saute les serveurs dont l'empreinte est récente
+#: sans toucher à la base (marqueur en mémoire).
+BOUCLE_EMPREINTE_S = 120.0
+#: Laissé au cache de discord.py pour se remplir après le démarrage. Capturer
+#: un serveur dont les salons ne sont pas encore connus donnerait une
+#: empreinte amputée, et c'est exactement ce qu'on ne veut pas écrire.
+DELAI_AVANT_PREMIERE_EMPREINTE_S = 20.0
 CREATE_RETRIES = 3
 
 
@@ -305,10 +315,125 @@ class AntiNukeEmergencyV55(commands.Cog, name=_COG_NAME):
         self._restore_locks: dict[tuple[int, int], asyncio.Lock] = defaultdict(asyncio.Lock)
         self._late_tasks: set[asyncio.Task] = set()
         self._last_summary: dict[tuple[int, int], float] = {}
+        #: Dernière capture réussie par serveur (time.monotonic), pour que le
+        #: tour de veille coûte zéro lecture de base quand rien n'est dû.
+        self._derniere_empreinte: dict[int, float] = {}
+        self._tache_empreinte: asyncio.Task | None = None
+
+    async def cog_load(self) -> None:
+        if self._tache_empreinte is None:
+            self._tache_empreinte = asyncio.create_task(
+                self._boucle_empreinte(), name="sentrix-v55-empreinte"
+            )
 
     async def cog_unload(self) -> None:
         for task in list(self._late_tasks):
             task.cancel()
+        if self._tache_empreinte is not None:
+            self._tache_empreinte.cancel()
+            self._tache_empreinte = None
+
+    # ------------------------------------------------------------------ COPIE PRÉVENTIVE
+    async def _capturer_empreinte(self, guild: discord.Guild, *, forcer: bool = False):
+        """Prend (ou rafraîchit) la copie préventive d'un serveur."""
+        try:
+            contenu = await empreinte_serveur.capturer(
+                self.bot.db,
+                guild,
+                instantane_role=_role_snapshot,
+                instantane_salon=_channel_snapshot,
+                forcer=forcer,
+            )
+        except Exception:
+            logger.exception("Empreinte : capture impossible sur %s.", guild.id)
+            return None
+        # Marqueur posé même quand la capture a été refusée (trop récente, ou
+        # serveur vu vide) : sinon le tour suivant repasserait tout de suite.
+        self._derniere_empreinte[guild.id] = time.monotonic()
+        if contenu is not None:
+            logger.info(
+                "Empreinte prise sur %s : %s rôles, %s salons.",
+                guild.id, len(contenu.get("roles") or []), len(contenu.get("salons") or []),
+            )
+        return contenu
+
+    async def _tour_empreinte(self) -> None:
+        automod = self.bot.get_cog("Automod")
+        if automod is None:
+            return
+        maintenant = time.monotonic()
+        for guild in list(self.bot.guilds):
+            precedent = self._derniere_empreinte.get(guild.id)
+            if precedent is not None and maintenant - precedent < empreinte_serveur.DELAI_ENTRE_CAPTURES_S:
+                continue
+            try:
+                conf = await automod.get_automod_cached(guild.id)
+            except Exception:
+                continue
+            if not conf or not conf.get("antinuke"):
+                continue
+            await self._capturer_empreinte(guild)
+            # Étalement : cent serveurs ne doivent pas écrire en même temps.
+            await asyncio.sleep(0.25)
+
+    async def _boucle_empreinte(self) -> None:
+        try:
+            await self.bot.wait_until_ready()
+        except Exception:
+            pass
+        await asyncio.sleep(DELAI_AVANT_PREMIERE_EMPREINTE_S)
+        while True:
+            try:
+                await self._tour_empreinte()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Empreinte : tour de veille ignoré.")
+            await asyncio.sleep(BOUCLE_EMPREINTE_S)
+
+    async def _restaurer_depuis_empreinte(
+        self,
+        guild: discord.Guild,
+        channel_map: dict[int, discord.abc.GuildChannel],
+        role_map: dict[int, discord.Role],
+    ) -> dict[str, int]:
+        """Filet de sécurité : recrée ce que l'empreinte connaît et que le serveur n'a plus.
+
+        Les passes précédentes rejouent les dégâts **vus passer**. Celle-ci
+        compare l'état réel à la copie préventive : c'est la seule qui sache
+        encore quoi faire quand le bot a redémarré pendant le nuke, était hors
+        ligne, ou n'a jamais reçu l'événement de suppression.
+        """
+        bilan = {"roles_restored": 0, "channels_restored": 0, "failed": 0}
+        try:
+            empreinte = await empreinte_serveur.lire(self.bot.db, guild.id)
+        except Exception:
+            logger.exception("Empreinte : lecture impossible sur %s.", guild.id)
+            return bilan
+        if empreinte is None:
+            return bilan
+        absents = empreinte_serveur.disparus(empreinte, guild)
+        manquants = empreinte_serveur.total(absents)
+        if not manquants:
+            return bilan
+        logger.warning(
+            "Anti-nuke V55 : filet empreinte sur %s, %s objets encore manquants.",
+            guild.id, manquants,
+        )
+        for instantane in absents["roles"]:
+            if await self._restore_role(guild, instantane, role_map) is not None:
+                bilan["roles_restored"] += 1
+            else:
+                bilan["failed"] += 1
+        for cle in ("categories", "salons"):
+            for instantane in absents[cle]:
+                if await self._restore_deleted_channel(
+                    guild, instantane, channel_map, role_map
+                ) is not None:
+                    bilan["channels_restored"] += 1
+                else:
+                    bilan["failed"] += 1
+        return bilan
 
     async def _context(
         self,
@@ -969,6 +1094,10 @@ class AntiNukeEmergencyV55(commands.Cog, name=_COG_NAME):
 
             await self._reconcile_restored_channels(guild, channel_map, role_map, channel_snapshots)
 
+            filet = await self._restaurer_depuis_empreinte(guild, channel_map, role_map)
+            for champ, valeur in filet.items():
+                total[champ] = total.get(champ, 0) + valeur
+
             cutoff = int(time.time()) - DAMAGE_WINDOW_SECONDS
             try:
                 row = await self.bot.db.fetchone(
@@ -1054,6 +1183,10 @@ async def install(bot: commands.Bot) -> None:
         return
 
     await _ensure_table(bot)
+    try:
+        await empreinte_serveur.installer(bot.db)
+    except Exception:
+        logger.exception("Empreinte : table indisponible, le filet préventif sera inactif.")
     _patch_audit_actor(bot)
     if bot.get_cog(_COG_NAME) is None:
         await bot.add_cog(AntiNukeEmergencyV55(bot))

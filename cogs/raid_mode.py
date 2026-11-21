@@ -35,6 +35,9 @@ import discord
 
 logger = logging.getLogger("bot.raid-mode")
 
+#: Un mode armé à la main ne doit pas expirer tout seul : on le prolonge
+#: largement et seul un désarmement explicite le referme.
+DUREE_MANUELLE = 86400
 RAID_MODE_DUREE = 600          # le mode reste actif 10 min après la dernière arrivée suspecte
 CALME_SECONDES = 45            # rapport quand plus personne n'arrive pendant 45 s
 FENETRE_VAGUE = 60             # les arrivées des 60 dernières secondes forment la vague
@@ -59,6 +62,11 @@ class EtatRaid:
     epargnes: int = 0
     mesures: list = field(default_factory=list)
     rapport_tache: asyncio.Task | None = None
+    #: 21/11/2026 : armé À LA MAIN par le staff, pas par un afflux détecté.
+    #: « ça peut raid à tout moment » — on ne veut pas attendre que la vague
+    #: soit là. En manuel, PERSONNE de nouveau n'entre : on n'exige plus qu'un
+    #: compte soit suspect, puisque c'est un humain qui a décidé de fermer.
+    manuel: bool = False
 
 
 _arrivees: dict[int, deque] = {}
@@ -68,6 +76,93 @@ _etats: dict[int, EtatRaid] = {}
 def actif(guild_id: int) -> bool:
     etat = _etats.get(int(guild_id))
     return etat is not None and time.monotonic() < etat.jusqua
+
+
+#: 21/11/2026 : « un raid mode dans sécurité qui kick les nouveaux ».
+#: Jusqu'ici le mode ne s'armait QUE sur un afflux détecté — donc jamais à
+#: l'avance, alors que « ça peut raid à tout moment ». Armé à la main, il tient
+#: jusqu'à ce qu'on le désarme, et il SURVIT AUX REDÉMARRAGES : l'état vivait en
+#: mémoire, et il y a eu onze déploiements dans la seule journée d'hier.
+RAID_MANUEL_SCHEMA = """
+CREATE TABLE IF NOT EXISTS sentrix_raid_manuel (
+    guild_id INTEGER PRIMARY KEY,
+    arme_par INTEGER,
+    arme_a INTEGER
+)
+"""
+
+
+def est_manuel(guild_id: int) -> bool:
+    etat = _etats.get(int(guild_id))
+    return bool(etat is not None and etat.manuel and actif(guild_id))
+
+
+async def armer_manuel(bot, guild, auteur_id: int) -> None:
+    """Ferme la porte jusqu'à nouvel ordre. Personne de nouveau n'entre."""
+    maintenant = time.monotonic()
+    etat = _etats.get(guild.id)
+    if etat is None:
+        etat = _etats[guild.id] = EtatRaid(
+            debut=maintenant, jusqua=maintenant, derniere_arrivee=maintenant,
+        )
+    etat.manuel = True
+    # Pas de minuterie : un mode armé à la main se désarme à la main. Expirer
+    # tout seul rouvrirait la porte sans que personne ne l'ait décidé.
+    etat.jusqua = maintenant + DUREE_MANUELLE
+    if "mode armé manuellement" not in etat.mesures:
+        etat.mesures.append("mode armé manuellement")
+    try:
+        await bot.db.execute(RAID_MANUEL_SCHEMA)
+        await bot.db.execute(
+            "INSERT OR REPLACE INTO sentrix_raid_manuel (guild_id, arme_par, arme_a) "
+            "VALUES (?, ?, ?)",
+            (guild.id, int(auteur_id), int(time.time())),
+        )
+    except Exception:  # noqa: BLE001 — la protection prime sur sa trace
+        logger.warning("Mode raid manuel non persisté guild=%s", guild.id, exc_info=True)
+
+
+async def desarmer_manuel(bot, guild) -> None:
+    etat = _etats.get(guild.id)
+    if etat is not None:
+        etat.manuel = False
+        etat.jusqua = time.monotonic()  # plus actif
+    try:
+        await bot.db.execute(RAID_MANUEL_SCHEMA)
+        await bot.db.execute(
+            "DELETE FROM sentrix_raid_manuel WHERE guild_id = ?", (guild.id,),
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("Désarmement non persisté guild=%s", guild.id, exc_info=True)
+
+
+async def restaurer_manuels(bot) -> int:
+    """Au démarrage : rouvrir les modes armés avant le redémarrage.
+
+    Sans cela, un déploiement désarmait silencieusement tous les serveurs qui
+    s'étaient fermés — exactement au moment où ils en avaient besoin.
+    """
+    try:
+        await bot.db.execute(RAID_MANUEL_SCHEMA)
+        lignes = await bot.db.fetchall("SELECT guild_id FROM sentrix_raid_manuel")
+    except Exception:  # noqa: BLE001
+        logger.warning("Modes raid manuels illisibles au démarrage.", exc_info=True)
+        return 0
+    maintenant = time.monotonic()
+    restaures = 0
+    for ligne in lignes or ():
+        guild_id = int(ligne["guild_id"])
+        etat = _etats.get(guild_id)
+        if etat is None:
+            etat = _etats[guild_id] = EtatRaid(
+                debut=maintenant, jusqua=maintenant, derniere_arrivee=maintenant,
+            )
+        etat.manuel = True
+        etat.jusqua = maintenant + DUREE_MANUELLE
+        restaures += 1
+    if restaures:
+        logger.info("Mode raid manuel restauré sur %s serveur(s).", restaures)
+    return restaures
 
 
 def seuil_nuke(guild_id: int, normal: int) -> int:
@@ -85,8 +180,15 @@ def noter_arrivee(member) -> None:
         _arrivees.clear()
 
 
-def motif_suspect(member) -> str | None:
-    """Pourquoi ce compte est suspect pendant un raid, ou None s'il est épargné."""
+def motif_suspect(member, *, manuel: bool = False) -> str | None:
+    """Pourquoi ce compte est suspect pendant un raid, ou None s'il est épargné.
+
+    En mode MANUEL, plus personne n'est épargné : le staff a fermé la porte, et
+    laisser entrer « les comptes anciens avec un avatar » reviendrait à laisser
+    passer précisément les comptes qu'un raideur prépare à l'avance.
+    """
+    if manuel:
+        return "mode raid armé manuellement"
     if getattr(member, "bot", False):
         return "bot ajouté pendant le raid"
     cree = getattr(member, "created_at", None)
@@ -168,7 +270,7 @@ async def _examiner_et_expulser(automod, etat: EtatRaid, member, verrou: asyncio
     if await _intouchable(automod, member):
         etat.epargnes += 1
         return
-    motif = motif_suspect(member)
+    motif = motif_suspect(member, manuel=etat.manuel)
     if motif is None:
         etat.epargnes += 1
         return
@@ -217,7 +319,7 @@ async def sur_arrivee(automod, member) -> bool:
     if await _intouchable(automod, member):
         etat.epargnes += 1
         return False
-    motif = motif_suspect(member)
+    motif = motif_suspect(member, manuel=etat.manuel)
     if motif is None:
         etat.epargnes += 1
         return False

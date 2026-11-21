@@ -70,8 +70,31 @@ def test_tous_les_filtres_de_messages_passent_par_le_mode_strict():
 
 
 def test_seul_le_proprietaire_change_le_mode_et_le_menu_le_propose():
+    """Qui peut changer le mode strict : le propriétaire du serveur ou du bot.
+
+    21/11/2026 : la règle était écrite en dur ici, et en dur deux fois de plus
+    dans l'écran Sécurité — où elle avait divergé (``guild.owner_id`` seul, donc
+    le propriétaire du bot refusé dans l'interface alors que la commande la lui
+    donnait). Les trois chemins lisent désormais ``peut_changer_mode_strict``,
+    et ce test vérifie la règle elle-même plutôt que sa transcription.
+    """
+    from types import SimpleNamespace
+
+    import config as config_module
+    from cogs.automod import AutoMod
+
     source = (ROOT / "cogs/automod.py").read_text(encoding="utf-8")
-    assert "ctx.author.id != ctx.guild.owner_id and ctx.author.id not in config.OWNER_IDS" in source
+    assert "if not self.peut_changer_mode_strict(ctx.author.id, ctx.guild):" in source
+
+    serveur = SimpleNamespace(id=1, owner_id=999)
+    anciens = getattr(config_module, "OWNER_IDS", None)
+    config_module.OWNER_IDS = [4242]
+    try:
+        assert AutoMod.peut_changer_mode_strict(999, serveur) is True   # propriétaire du serveur
+        assert AutoMod.peut_changer_mode_strict(4242, serveur) is True  # propriétaire de SentriX
+        assert AutoMod.peut_changer_mode_strict(123, serveur) is False  # un admin quelconque
+    finally:
+        config_module.OWNER_IDS = anciens
     from utils import slash_catalog
 
     assert any(e.path == "security strict" and e.source == "automod-strict" for e in slash_catalog.CATALOG)

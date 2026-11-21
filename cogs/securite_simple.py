@@ -99,6 +99,45 @@ def _bouton(label: str, callback, style=discord.ButtonStyle.secondary, *, icone=
     return item
 
 
+def _raid_arme(view) -> bool:
+    try:
+        from cogs import raid_mode
+
+        return raid_mode.est_manuel(view.guild.id)
+    except Exception:  # noqa: BLE001 — un panneau ne doit jamais planter
+        return False
+
+
+async def _basculer_mode_raid(view, interaction: discord.Interaction) -> None:
+    """Ferme ou rouvre la porte du serveur, en un clic.
+
+    Armé, le mode raid expulse CHAQUE nouvel arrivant — pas seulement les
+    comptes suspects. C'est tout l'intérêt de l'armer soi-même : un raideur
+    prépare ses comptes à l'avance, et ceux-là passent les filtres d'âge et
+    d'avatar.
+    """
+    from cogs import raid_mode
+
+    if not interaction.response.is_done():
+        await interaction.response.defer()
+    arme = raid_mode.est_manuel(view.guild.id)
+    if arme:
+        await raid_mode.desarmer_manuel(view.bot, view.guild)
+        message = "**Mode raid désarmé.** Les arrivées redeviennent normales."
+    else:
+        await raid_mode.armer_manuel(view.bot, view.guild, interaction.user.id)
+        message = (
+            "**Mode raid ARMÉ.** Chaque nouvel arrivant est expulsé, y compris les "
+            "comptes anciens. L'anti-nuke se durcit aussi.\n"
+            "-# Il reste armé tant que vous ne le désarmez pas, redémarrages compris."
+        )
+    await view.refresh(interaction)
+    try:
+        await interaction.followup.send(message, ephemeral=True)
+    except Exception:  # noqa: BLE001 — le réglage est pris, le message est un plus
+        pass
+
+
 async def _activer(view, interaction: discord.Interaction) -> None:
     if not interaction.response.is_done():
         await interaction.response.defer()
@@ -149,9 +188,21 @@ async def ecran_simple(view) -> discord.ui.Container:
 
         await mots_bloques.ouvrir(interaction, view.guild)
 
+    async def basculer_raid(interaction):
+        await _basculer_mode_raid(view, interaction)
+
     box.add_item(discord.ui.ActionRow(
         _bouton("Sécurité active" if not manquantes else "Activer la sécurité", activer,
                 discord.ButtonStyle.success, icone="security", disabled=not manquantes),
+        # 21/11/2026 : « un raid mode dans sécurité qui kick les nouveaux », sans
+        # passer par une commande. Rouge quand il est armé : on doit voir d'un
+        # coup d'œil que la porte est fermée, et pouvoir la rouvrir du même clic.
+        _bouton(
+            "Mode raid : ARMÉ" if _raid_arme(view) else "Mode raid",
+            basculer_raid,
+            discord.ButtonStyle.danger if _raid_arme(view) else discord.ButtonStyle.secondary,
+            icone="shield",
+        ),
         _bouton("Personnaliser", personnaliser, icone="settings"),
         _bouton("Mots bloqués", mots),
     ))
