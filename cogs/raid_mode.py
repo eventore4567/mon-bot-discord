@@ -39,7 +39,10 @@ RAID_MODE_DUREE = 600          # le mode reste actif 10 min après la dernière 
 CALME_SECONDES = 45            # rapport quand plus personne n'arrive pendant 45 s
 FENETRE_VAGUE = 60             # les arrivées des 60 dernières secondes forment la vague
 COMPTE_SUSPECT_JOURS = 30
-EXPULSIONS_EN_PARALLELE = 5
+#: 21/11/2026 : 5 en parallèle, c'étaient dix vagues successives pour cinquante
+#: comptes. Monté à 12 : discord.py gère lui-même les 429 avec un délai, donc
+#: viser plus haut ne gagnerait rien et ferait surtout attendre le bucket.
+EXPULSIONS_EN_PARALLELE = 12
 NUKE_SEUIL_EN_RAID = 2
 RAISON = "SentriX mode raid : compte arrivé pendant un raid"
 
@@ -160,6 +163,18 @@ def _verrou(automod) -> asyncio.Semaphore:
     return verrou
 
 
+async def _examiner_et_expulser(automod, etat: EtatRaid, member, verrou: asyncio.Semaphore) -> None:
+    """Vérifie PUIS expulse, en une seule tâche pour que tout aille en parallèle."""
+    if await _intouchable(automod, member):
+        etat.epargnes += 1
+        return
+    motif = motif_suspect(member)
+    if motif is None:
+        etat.epargnes += 1
+        return
+    await _expulser(automod, etat, member, motif, verrou)
+
+
 async def declencher(automod, guild, *, mesures: list[str] | None = None) -> EtatRaid:
     """Raid rapide confirmé : active le mode et vide la vague en quelques secondes."""
     maintenant = time.monotonic()
@@ -175,16 +190,17 @@ async def declencher(automod, guild, *, mesures: list[str] | None = None) -> Eta
     vague = [m for t, m in _arrivees.get(guild.id, ()) if maintenant - t <= FENETRE_VAGUE]
     if nouveau:
         etat.arrivees = len(vague)
-    taches = []
-    for member in vague:
-        if await _intouchable(automod, member):
-            etat.epargnes += 1
-            continue
-        motif = motif_suspect(member)
-        if motif is None:
-            etat.epargnes += 1
-            continue
-        taches.append(_expulser(automod, etat, member, motif, _verrou(automod)))
+    # 21/11/2026 : « il met du temps à mute ou ban et kick dans un raid ».
+    # Cette boucle vérifiait CHAQUE compte en série — et _intouchable fait une
+    # requête en base pour un bot — AVANT de lancer le moindre kick. Sur une
+    # vague de cinquante bots, le premier compte ne partait donc qu'après
+    # cinquante allers-retours Postgres.
+    #
+    # La vérification entre maintenant DANS la tâche : chaque compte est examiné
+    # et expulsé indépendamment, et le premier kick part dès que SA vérification
+    # est finie, sans attendre les quarante-neuf autres.
+    verrou = _verrou(automod)
+    taches = [_examiner_et_expulser(automod, etat, member, verrou) for member in vague]
     if taches:
         await asyncio.gather(*taches, return_exceptions=True)
     _planifier_rapport(automod, guild, etat)

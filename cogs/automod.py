@@ -764,6 +764,9 @@ CREATE TABLE IF NOT EXISTS sentrix_automod_strict (
 )
 """
 _STRICT_TTL_SECONDES = 30.0
+#: Mesure de production du 17/11 : 1449 à 1879 ms sur gpt-5.6-luna. Au-delà, on
+#: fait attendre une sanction pour un verdict qui n'arrivera probablement pas.
+DELAI_ARBITRE_IA = 2.5
 
 SPAM_ESCALATION_SCHEMA = """
 CREATE TABLE IF NOT EXISTS sentrix_spam_escalation (
@@ -1597,12 +1600,38 @@ class AutoMod(commands.Cog, name="Automod"):
             await self.log_action(guild, e)
         return score
 
+    def _oublier_allowlist_bots(self, guild_id: int) -> None:
+        """À appeler après CHAQUE modification de l'allowlist.
+
+        Un cache sans invalidation est un bug : autoriser un bot n'aurait eu
+        aucun effet tant que l'entrée restait en mémoire.
+        """
+        cache = getattr(self, "_bot_allowlist_cache", None)
+        if cache is not None:
+            cache.pop(guild_id, None)
+
+    async def _bot_allowlist_cached(self, guild_id: int) -> frozenset[int]:
+        """Toute l'allowlist du serveur en UNE requête, mise en cache.
+
+        21/11/2026 : « il met du temps à mute ou ban et kick dans un raid ».
+        _bot_is_allowlisted faisait un aller-retour Postgres PAR COMPTE, et
+        raid_mode les enchaînait en série avant le premier kick. Sur une vague
+        de cinquante bots, cela faisait plus d'une seconde d'attente pure avant
+        que le premier compte ne parte.
+        """
+        cache = getattr(self, "_bot_allowlist_cache", None)
+        if cache is None:
+            cache = self._bot_allowlist_cache = {}
+        if guild_id not in cache:
+            lignes = await self.bot.db.fetchall(
+                "SELECT bot_id FROM automod_bot_allowlist WHERE guild_id = ?",
+                (guild_id,),
+            )
+            cache[guild_id] = frozenset(int(l["bot_id"]) for l in (lignes or ()))
+        return cache[guild_id]
+
     async def _bot_is_allowlisted(self, guild_id: int, bot_id: int) -> bool:
-        row = await self.bot.db.fetchone(
-            "SELECT 1 FROM automod_bot_allowlist WHERE guild_id = ? AND bot_id = ?",
-            (guild_id, bot_id),
-        )
-        return row is not None
+        return int(bot_id) in await self._bot_allowlist_cached(guild_id)
 
     async def cog_load(self) -> None:
         await self._raid_recovery.ensure_schema()
@@ -2540,7 +2569,14 @@ class AutoMod(commands.Cog, name="Automod"):
             return connu[0]
         actif = False
         try:
-            await self.bot.db.execute(AUTOMOD_STRICT_SCHEMA)
+            # 21/11/2026 : ce CREATE TABLE IF NOT EXISTS tournait à CHAQUE
+            # expiration du cache, soit toutes les 30 s — donc la première
+            # sanction de chaque demi-minute payait un aller-retour DDL avant
+            # d'agir. La table ne peut apparaître qu'une fois : on ne la crée
+            # qu'une fois par démarrage.
+            if not getattr(self, "_strict_schema_pret", False):
+                await self.bot.db.execute(AUTOMOD_STRICT_SCHEMA)
+                self._strict_schema_pret = True
             row = await self.bot.db.fetchone(
                 "SELECT admins FROM sentrix_automod_strict WHERE guild_id=?", (int(guild_id),)
             )
@@ -3014,6 +3050,7 @@ class AutoMod(commands.Cog, name="Automod"):
             "INSERT OR REPLACE INTO automod_bot_allowlist (guild_id, bot_id, added_by, created_at) VALUES (?, ?, ?, ?)",
             (ctx.guild.id, membre.id, ctx.author.id, int(time.time())),
         )
+        self._oublier_allowlist_bots(ctx.guild.id)
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"{membre.mention} est autorisé par l'anti-bot SentriX.")))
 
     @commands.hybrid_command(name="antibot-deny", description="Retirer un bot de l'allowlist anti-bot.", with_app_command=False)
@@ -3024,6 +3061,7 @@ class AutoMod(commands.Cog, name="Automod"):
             "DELETE FROM automod_bot_allowlist WHERE guild_id = ? AND bot_id = ?",
             (ctx.guild.id, membre.id),
         )
+        self._oublier_allowlist_bots(ctx.guild.id)
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"{membre.mention} n'est plus dans l'allowlist anti-bot.")))
 
     @commands.hybrid_command(name="antinuke-whitelist-add", description="Exempter un membre de confiance de l'anti-nuke.", with_app_command=False)
@@ -4365,7 +4403,15 @@ class AutoMod(commands.Cog, name="Automod"):
                     channel_id=getattr(message.channel, "id", None), user_id=message.author.id,
                     command="sentrix-moderation-contexte", web_search=False,
                 ),
-                timeout=6,
+                # 21/11/2026 : « il met du temps à mute ». Six secondes d'attente
+                # avant toute sanction, alors que la mesure en production donne
+                # 1449 à 1879 ms sur ce modèle (logs du 17/11). Deux secondes et
+                # demie couvrent largement le cas normal et coupent court au
+                # reste. Un dépassement n'est pas une perte : la fonction rend
+                # None, donc le verdict LOCAL s'applique — la liste de mots garde
+                # sa détection, et une menace est sanctionnée par l'asymétrie
+                # voulue (on sanctionne sauf « anodin » explicite).
+                timeout=DELAI_ARBITRE_IA,
             )
         except Exception:  # noqa: BLE001 — l'analyse locale reste l'arbitre
             logger.debug("Contexte d'insulte indisponible guild=%s", getattr(message.guild, "id", None), exc_info=True)
