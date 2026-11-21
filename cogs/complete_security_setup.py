@@ -698,12 +698,9 @@ class SecurityCenterView(CompleteView):
                 # choix des admins à pas sanctionner ». Montré seulement quand
                 # l'option est active : hors mode strict, TOUS les admins sont
                 # déjà épargnés, et le sélecteur ne voudrait rien dire.
-                epargnes = await self.bot.db.fetchall(
-                    "SELECT user_id FROM user_immunity_settings "
-                    "WHERE guild_id = ? AND enabled = 1",
-                    (self.guild.id,),
-                ) or ()
-                deja = [int(r["user_id"]) for r in epargnes]
+                # Sa propre table, pas user_immunity_settings : celle-ci fait
+                # aussi refuser un +ban manuel (services/moderation.py).
+                deja = sorted(await cog.epargnes_du_mode_strict(self.guild.id))
                 membre_picker = discord.ui.UserSelect(
                     placeholder="Admins à ne PAS sanctionner",
                     min_values=0,
@@ -727,7 +724,7 @@ class SecurityCenterView(CompleteView):
                     for ident in set(connus) | choisis:
                         if (ident in choisis) != (ident in connus):
                             await cog.definir_admin_epargne(
-                                self.guild.id, ident, ident in choisis
+                                self.guild.id, ident, ident in choisis, i.user.id
                             )
                     await self.refresh(i)
 

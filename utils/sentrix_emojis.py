@@ -551,6 +551,28 @@ async def synchroniser(bot, *, forcer: bool = False) -> dict[str, int]:
     return bilan
 
 
+def catalogue(*, animes: bool | None = None) -> dict[str, str]:
+    """Nom → marquage, pour les icônes réellement téléversées.
+
+    21/11/2026 : « donne les emojis de SentriX ». Rien ne permettait de les
+    lister — ``noms_disponibles()`` lit le dossier d'images, donc il annonce
+    aussi celles qui n'ont pas encore été téléversées et dont le marquage
+    n'existe pas. Ici on ne rend que ce qui s'affichera vraiment.
+
+    ``animes=True`` ne garde que les animées, ``False`` que les fixes, ``None``
+    (défaut) tout. Une icône animée se reconnaît à son marquage, qui commence
+    par ``<a:`` — pas à son nom : ``sentrix_c_*`` est la convention des
+    variantes colorées, et toutes ne sont pas animées.
+    """
+    tout = {nom: marquage for nom, marquage in _RESOLUS.items() if marquage}
+    if animes is None:
+        return dict(sorted(tout.items()))
+    return dict(sorted(
+        (nom, marquage) for nom, marquage in tout.items()
+        if marquage.startswith("<a:") is bool(animes)
+    ))
+
+
 def amorcer(resolus: dict[str, str]) -> None:
     """Pose un cache déjà connu — pour les tests, sans appel réseau."""
     _RESOLUS.update({_normaliser(k): v for k, v in resolus.items()})
@@ -570,6 +592,7 @@ __all__ = [
     "PREFIXE_ANIME",
     "REPLIS",
     "appliquer_a_la_vue",
+    "catalogue",
     "amorcer",
     "emoji",
     "est_sentrix",

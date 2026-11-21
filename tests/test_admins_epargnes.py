@@ -58,12 +58,13 @@ def _membre(identifiant, *, admin=True, owner_id=999, roles=()):
     return membre
 
 
-def _cog(*, strict=True, override=None, roles_exemptes=frozenset()):
+def _cog(*, strict=True, override=None, roles_exemptes=frozenset(), epargnes=frozenset()):
     cog = AutoMod.__new__(AutoMod)
     cog.bot = SimpleNamespace(user=SimpleNamespace(id=2), db=SimpleNamespace())
     cog.admins_soumis = AsyncMock(return_value=strict)
     cog.get_immunity_override_cached = AsyncMock(return_value=override)
     cog.get_exempt_roles_cached = AsyncMock(return_value=set(roles_exemptes))
+    cog.epargnes_du_mode_strict = AsyncMock(return_value=set(epargnes))
     return cog
 
 
@@ -99,19 +100,28 @@ async def test_un_admin_quelconque_reste_sanctionne_en_mode_strict():
 @pytest.mark.asyncio
 async def test_un_admin_designe_est_epargne():
     """« un choix des admins à pas sanctionner »."""
-    cog = _cog(strict=True, override=True)
+    cog = _cog(strict=True, epargnes={123})
     assert await cog._admin_exempte(_membre(123, owner_id=999), 1) is True
 
 
 @pytest.mark.asyncio
-async def test_une_immunite_explicitement_coupee_n_epargne_pas():
-    """``+immunity off`` veut dire « sanctionne-moi ». On ne l'inverse pas.
+async def test_une_immunite_explicitement_coupee_gagne_sur_le_role_exempte():
+    """``+immunity off`` veut dire « sanctionne-moi ». Il gagne sur le rôle.
 
-    L'absence de ligne vaut None, et seul un True explicite épargne : lire la
-    valeur comme un booléen aurait transformé un refus d'immunité en immunité.
+    Trouvé en revue : la fonction retombait sur le test de rôle après un refus
+    explicite et renvoyait ``True`` quand même. ``is_automod_exempt`` et
+    ``security_filter_applies_to``, eux, laissent le refus l'emporter — donc la
+    même question recevait deux réponses selon le chemin emprunté.
     """
-    cog = _cog(strict=True, override=False)
-    assert await cog._admin_exempte(_membre(123, owner_id=999), 1) is False
+    cog = _cog(strict=True, override=False, roles_exemptes={55})
+    membre = _membre(123, owner_id=999, roles=[SimpleNamespace(id=55)])
+    assert await cog._admin_exempte(membre, 1) is False
+
+
+@pytest.mark.asyncio
+async def test_une_immunite_accordee_epargne_encore():
+    cog = _cog(strict=True, override=True)
+    assert await cog._admin_exempte(_membre(123, owner_id=999), 1) is True
 
 
 @pytest.mark.asyncio
@@ -146,30 +156,80 @@ async def test_une_base_illisible_n_epargne_personne():
     cog = _cog(strict=True)
     cog.get_immunity_override_cached = AsyncMock(side_effect=RuntimeError("pool fermé"))
     cog.get_exempt_roles_cached = AsyncMock(side_effect=RuntimeError("pool fermé"))
+    cog.epargnes_du_mode_strict = AsyncMock(side_effect=RuntimeError("pool fermé"))
     assert await cog._admin_exempte(_membre(123, owner_id=999), 1) is False
 
 
 @pytest.mark.asyncio
-async def test_la_liste_s_ecrit_dans_la_meme_table_que_immunity():
-    """Une deuxième liste finirait par contredire la première."""
+async def test_l_anti_nuke_lit_la_meme_liste():
+    """Trouvé en revue : la commande promettait, l'anti-nuke bannissait quand même.
+
+    C'est le même interrupteur « Sanctionner les admins » qui gouverne les deux
+    chemins ; un admin épargné ne doit pas se faire bannir par le second.
+    """
+    import discord
+
+    cog = _cog(strict=True, epargnes={123})
+    membre = _membre(123, owner_id=999)
+    guild = membre.guild
+    cog.admin_epargne_en_strict = AsyncMock(return_value=True)
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(automod_mod, "_as_member", lambda u, g: u)
+        mp.setattr(discord, "Member", type(membre))
+        assert await cog._admin_exempte_antinuke(guild, membre) is True
+    cog.admin_epargne_en_strict.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_la_liste_a_sa_propre_table_pas_celle_de_immunity():
+    """Trouvé en revue, et c'était le plus grave des quatre.
+
+    ``user_immunity_settings`` est lue par services/moderation.py::_hierarchy_error
+    pour REFUSER un +ban, +kick, +mute ou +warn manuel. Y écrire aurait empêché
+    le propriétaire de modérer à la main l'admin qu'il venait seulement
+    d'exempter de l'AutoMod — l'inverse de ce qu'il demandait.
+    """
     ecrits: list[tuple] = []
 
     cog = AutoMod.__new__(AutoMod)
-    cog.immunity_overrides_cache = {}
+    cog._epargnes_schema_pret = True
 
     async def execute(requete, params=()):
         ecrits.append((requete, params))
 
     cog.bot = SimpleNamespace(db=SimpleNamespace(execute=execute))
-    await cog.definir_admin_epargne(1, 123, True)
+    await cog.definir_admin_epargne(1, 123, True, 7)
+    await cog.definir_admin_epargne(1, 123, False, 7)
 
-    assert "user_immunity_settings" in ecrits[0][0]
-    assert ecrits[0][1] == (1, 123, 1)
-    assert cog.immunity_overrides_cache[(1, 123)] is True
+    assert all("user_immunity_settings" not in r for r, _ in ecrits)
+    assert "INSERT INTO sentrix_strict_epargnes" in ecrits[0][0]
+    assert "DELETE FROM sentrix_strict_epargnes" in ecrits[1][0]
 
-    await cog.definir_admin_epargne(1, 123, False)
-    assert ecrits[1][1] == (1, 123, 0)
-    assert cog.immunity_overrides_cache[(1, 123)] is False
+
+@pytest.mark.asyncio
+async def test_la_liste_est_mise_en_cache_et_purgee_a_l_ecriture():
+    """Elle est lue sur le chemin de chaque message d'administrateur.
+
+    Sans purge à l'écriture, épargner quelqu'un n'aurait aucun effet pendant
+    trente secondes — le genre de latence qui fait croire que ça ne marche pas.
+    """
+    lectures = {"n": 0}
+
+    cog = AutoMod.__new__(AutoMod)
+    cog._epargnes_schema_pret = True
+
+    async def fetchall(requete, params=()):
+        lectures["n"] += 1
+        return [{"user_id": 123}]
+
+    cog.bot = SimpleNamespace(db=SimpleNamespace(fetchall=fetchall, execute=AsyncMock()))
+    assert await cog.epargnes_du_mode_strict(1) == {123}
+    assert await cog.epargnes_du_mode_strict(1) == {123}
+    assert lectures["n"] == 1, "la deuxième lecture n'a pas pris le cache"
+
+    await cog.definir_admin_epargne(1, 456, True, 7)
+    await cog.epargnes_du_mode_strict(1)
+    assert lectures["n"] == 2, "le cache n'a pas été purgé à l'écriture"
 
 
 def test_les_quatre_chemins_de_sanction_lisent_la_meme_regle():

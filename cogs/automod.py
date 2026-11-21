@@ -764,6 +764,22 @@ CREATE TABLE IF NOT EXISTS sentrix_automod_strict (
     updated_at INTEGER
 )
 """
+#: Admins que « Sanctionner les admins » ne touche pas. Sa propre table, et
+#: pas ``user_immunity_settings`` : 21/11/2026, trouvé en revue, cette dernière
+#: veut dire « immunité SentriX » au sens large, et
+#: services/moderation.py::_hierarchy_error la lit pour REFUSER un +ban, +kick,
+#: +mute ou +warn manuel. Y écrire aurait empêché le propriétaire de modérer à
+#: la main l'admin qu'il venait seulement d'exempter de l'AutoMod — l'inverse
+#: de ce qu'il demandait. Deux décisions différentes, deux stockages.
+STRICT_EPARGNES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS sentrix_strict_epargnes (
+    guild_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    ajoute_par INTEGER,
+    ajoute_a INTEGER,
+    PRIMARY KEY (guild_id, user_id)
+)
+"""
 _STRICT_TTL_SECONDES = 30.0
 #: Mesure de production du 17/11 : 1449 à 1879 ms sur gpt-5.6-luna. Au-delà, on
 #: fait attendre une sanction pour un verdict qui n'arrivera probablement pas.
@@ -2639,12 +2655,23 @@ class AutoMod(commands.Cog, name="Automod"):
         if identifiant in {int(x) for x in (getattr(config, "OWNER_IDS", None) or [])}:
             return True
         try:
-            # ``True`` seulement : l'absence de ligne vaut None, et un
-            # +immunity off explicite vaut False — il ne doit pas épargner.
-            if await self.get_immunity_override_cached(int(guild_id), identifiant) is True:
-                return True
+            override = await self.get_immunity_override_cached(int(guild_id), identifiant)
         except Exception:  # noqa: BLE001 — base illisible : pas d'exemption
             logger.debug("Exemption admin illisible guild=%s", guild_id, exc_info=True)
+            override = None
+        # Un ``+immunity off`` est un refus EXPLICITE d'immunité : il gagne sur
+        # l'exemption par rôle, comme dans ``is_automod_exempt``. Laisser le
+        # rôle reprendre le dessus donnait deux réponses différentes à la même
+        # question selon le chemin emprunté.
+        if override is False:
+            return False
+        try:
+            if identifiant in await self.epargnes_du_mode_strict(int(guild_id)):
+                return True
+        except Exception:  # noqa: BLE001
+            logger.debug("Admins épargnés illisibles guild=%s", guild_id, exc_info=True)
+        if override is True:
+            return True
         try:
             exemptes = await self.get_exempt_roles_cached(int(guild_id))
         except Exception:  # noqa: BLE001
@@ -3134,24 +3161,52 @@ class AutoMod(commands.Cog, name="Automod"):
             return True
         return identifiant in {int(x) for x in (getattr(config, "OWNER_IDS", None) or [])}
 
-    async def definir_admin_epargne(self, guild_id: int, user_id: int, epargne: bool) -> None:
-        """Désigne (ou retire) un admin que le mode strict ne touchera pas.
+    async def _epargnes_schema(self) -> None:
+        if not getattr(self, "_epargnes_schema_pret", False):
+            await self.bot.db.execute(STRICT_EPARGNES_SCHEMA)
+            self._epargnes_schema_pret = True
 
-        Même table que ``+immunity`` : une seule place pour « cette personne
-        est hors de portée de l'AutoMod », au lieu d'une deuxième liste qui
-        finirait par la contredire.
+    async def epargnes_du_mode_strict(self, guild_id: int) -> set[int]:
+        """Admins que le mode strict ne touche pas, sur ce serveur.
+
+        Mis en cache comme ``admins_soumis`` : la liste est lue sur le chemin
+        de chaque message d'administrateur.
         """
-        await self.bot.db.execute(
-            """
-            INSERT INTO user_immunity_settings (guild_id, user_id, enabled, updated_at)
-            VALUES (?, ?, ?, CAST(strftime('%s','now') AS INTEGER))
-            ON CONFLICT(guild_id, user_id) DO UPDATE SET
-                enabled=excluded.enabled,
-                updated_at=excluded.updated_at
-            """,
-            (int(guild_id), int(user_id), 1 if epargne else 0),
-        )
-        self.immunity_overrides_cache[(int(guild_id), int(user_id))] = bool(epargne)
+        cache = self.__dict__.setdefault("_epargnes_cache", {})
+        maintenant = time.monotonic()
+        connu = cache.get(int(guild_id))
+        if connu is not None and maintenant - connu[1] < _STRICT_TTL_SECONDES:
+            return connu[0]
+        epargnes: set[int] = set()
+        try:
+            await self._epargnes_schema()
+            lignes = await self.bot.db.fetchall(
+                "SELECT user_id FROM sentrix_strict_epargnes WHERE guild_id = ?",
+                (int(guild_id),),
+            )
+            epargnes = {int(ligne["user_id"]) for ligne in lignes or ()}
+        except Exception:  # noqa: BLE001 — base illisible : personne n'est épargné
+            logger.debug("Admins épargnés illisibles guild=%s", guild_id, exc_info=True)
+        cache[int(guild_id)] = (epargnes, maintenant)
+        return epargnes
+
+    async def definir_admin_epargne(self, guild_id: int, user_id: int, epargne: bool,
+                                    auteur_id: int = 0) -> None:
+        """Désigne (ou retire) un admin que le mode strict ne touchera pas."""
+        await self._epargnes_schema()
+        if epargne:
+            await self.bot.db.execute(
+                "INSERT INTO sentrix_strict_epargnes (guild_id, user_id, ajoute_par, ajoute_a) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT(guild_id, user_id) DO UPDATE SET "
+                "ajoute_par=excluded.ajoute_par, ajoute_a=excluded.ajoute_a",
+                (int(guild_id), int(user_id), int(auteur_id), int(time.time())),
+            )
+        else:
+            await self.bot.db.execute(
+                "DELETE FROM sentrix_strict_epargnes WHERE guild_id = ? AND user_id = ?",
+                (int(guild_id), int(user_id)),
+            )
+        self.__dict__.setdefault("_epargnes_cache", {}).pop(int(guild_id), None)
 
     @commands.hybrid_command(
         name="admin-epargne", aliases=["admin-epargner", "spare-admin"],
@@ -3182,10 +3237,12 @@ class AutoMod(commands.Cog, name="Automod"):
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(
                 f"Utilisez `{ctx.clean_prefix}admin-epargne @membre on` ou `off`."
             )))
-        await self.definir_admin_epargne(ctx.guild.id, membre.id, epargne)
+        await self.definir_admin_epargne(ctx.guild.id, membre.id, epargne, ctx.author.id)
         if epargne:
-            texte = (f"**{membre.mention} est épargné.** L'AutoMod ne le sanctionnera pas, "
-                     "même avec « Sanctionner les admins » activé.")
+            texte = (f"**{membre.mention} est épargné.** Ni l'AutoMod ni l'anti-nuke ne "
+                     "le sanctionneront, même avec « Sanctionner les admins » activé.\n"
+                     "-# La modération à la main (`+ban`, `+kick`, `+mute`) reste possible : "
+                     "cette liste ne protège que des sanctions automatiques.")
         else:
             texte = (f"**{membre.mention} n'est plus épargné.** Il repasse par l'AutoMod "
                      "comme les autres administrateurs.")
@@ -6152,15 +6209,15 @@ class AutoMod(commands.Cog, name="Automod"):
             # 05/11/2026 : « les bypass doivent marcher aussi pour les admins » —
             # même avec « Sanctionner aussi les admins », un admin qui porte un
             # rôle exempté (/setup → Sécurité → Seuils et exceptions) reste protégé.
+            #
+            # 21/11/2026 : et un admin explicitement épargné aussi. Sans ça, la
+            # commande promettait « l'AutoMod ne le sanctionnera pas » et
+            # l'anti-nuke le bannissait quand même — c'est bien le même
+            # interrupteur « Sanctionner les admins » qui gouverne les deux.
             try:
-                exemptes = await self.get_exempt_roles_cached(guild.id)
+                return await self.admin_epargne_en_strict(member, guild.id)
             except Exception:  # noqa: BLE001 — lecture impossible : pas d'exemption
-                exemptes = set()
-            if not exemptes:
-                return False
-            try:
-                return any(int(role.id) in exemptes for role in list(member.roles))
-            except (TypeError, AttributeError, ValueError):
+                logger.debug("Exemption anti-nuke illisible guild=%s", guild.id, exc_info=True)
                 return False
         return True
 
