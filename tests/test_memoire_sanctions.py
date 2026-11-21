@@ -293,3 +293,37 @@ async def test_sans_role_ni_permission_rien_ne_sort():
     bot = _BotAvecRoleStaff()
     access_matrix.backend_for(bot)
     assert await memoire.peut_consulter(bot, guild, simple) is False
+
+
+# ------------------------------------------- revue Codex du 21/11/2026
+@pytest.mark.asyncio
+async def test_un_nom_court_cite_separement_est_conserve():
+    """Régression introduite par ma propre correction de la veille.
+
+    Écarter le nom court globalement était trop brutal : « Pourquoi Jean ET
+    Jean-Paul Dupont ont été bannis ? » ne retenait plus que Jean-Paul Dupont,
+    alors que Jean est cité séparément, à un autre endroit de la phrase. On
+    raisonne donc sur les positions, pas sur les noms.
+    """
+    jean = _membre(11, "Jean")
+    vise = _membre(14, "Jean-Paul Dupont")
+    guild = _guild([jean, vise])
+
+    cibles = memoire.cibles_citees(
+        "Pourquoi Jean et Jean-Paul Dupont ont ete bannis ?", guild
+    )
+    assert sorted(c.identifiant for c in cibles) == [11, 14]
+
+
+@pytest.mark.asyncio
+async def test_un_nom_court_uniquement_contenu_reste_ecarte():
+    """Le cas inverse doit continuer de fonctionner : « Jean » seul dans
+    « Jean-Paul Dupont » n'est pas une seconde personne citée."""
+    jean = _membre(11, "Jean")
+    paul = _membre(12, "Paul")
+    dupont = _membre(13, "Dupont")
+    vise = _membre(14, "Jean-Paul Dupont")
+    guild = _guild([jean, paul, dupont, vise])
+
+    cibles = memoire.cibles_citees("pourquoi tu as banni Jean-Paul Dupont ?", guild)
+    assert [c.identifiant for c in cibles] == [14]

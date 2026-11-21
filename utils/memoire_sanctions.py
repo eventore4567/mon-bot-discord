@@ -160,14 +160,32 @@ def cibles_citees(texte: str, guild, bot=None) -> list[Cible]:
                 correspondances.append((nom.casefold(), membre, nom))
                 break
 
+    # 21/11/2026 : écarter le nom court GLOBALEMENT était trop brutal — c'était
+    # ma propre correction de la veille, et la revue l'a reprise à juste titre.
+    # « Pourquoi Jean ET Jean-Paul Dupont ont été bannis ? » ne retenait plus
+    # que Jean-Paul Dupont : Jean est pourtant cité séparément, à un autre
+    # endroit de la phrase. On raisonne donc sur les POSITIONS et non sur les
+    # noms : un nom n'est écarté que si toutes ses occurrences tombent à
+    # l'intérieur d'un nom plus long déjà retenu.
     correspondances.sort(key=lambda item: len(item[0]), reverse=True)
-    retenus: list[str] = []
+    occupes: list[tuple[int, int]] = []
+
+    def _occurrence_libre(plat: str) -> tuple[int, int] | None:
+        depart = 0
+        while True:
+            debut = minuscule.find(plat, depart)
+            if debut < 0:
+                return None
+            fin = debut + len(plat)
+            if not any(d <= debut and fin <= f for d, f in occupes):
+                return debut, fin
+            depart = debut + 1
+
     for plat, membre, nom in correspondances:
-        # « Jean » est un morceau de « Jean-Paul Dupont » : ce n'est pas une
-        # seconde personne citée, c'est la même sous-chaîne.
-        if any(plat in deja for deja in retenus):
-            continue
-        retenus.append(plat)
+        place = _occurrence_libre(plat)
+        if place is None:
+            continue  # ce nom n'apparaît que dans un nom plus long déjà retenu
+        occupes.append(place)
         _ajouter(membre.id, getattr(membre, "display_name", None) or nom)
     return trouves[:3]
 
