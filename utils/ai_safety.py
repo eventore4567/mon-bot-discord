@@ -62,6 +62,23 @@ def est_mode_emploi_dangereux(texte: str) -> bool:
     return sum(1 for motif in _RECETTE if motif.search(plat)) >= 2
 
 
+def sujet_sensible(texte: str) -> bool:
+    """Le texte MENTIONNE-t-il un sujet dangereux, sans juger de la recette ?
+
+    20/11/2026, revue Codex : vérifier chaque préfixe d'un flux ne suffit pas.
+    est_mode_emploi_dangereux exige un sujet ET deux marqueurs de recette, donc
+    « Pour le thermite il faut 50 g de poudre » PASSE, part sur Discord, et le
+    marqueur suivant fait refuser l'ensemble — trop tard, le préfixe a été lu.
+    Reproduit tel quel avant correction.
+
+    Pour un aperçu progressif, on s'arrête donc au sujet seul : c'est la moitié
+    bon marché du contrôle, et elle suffit à ne jamais rien publier d'une
+    recette en cours d'écriture. Une conversation ordinaire ne cite pas de
+    thermite, l'aperçu reste donc intact pour tout le monde.
+    """
+    return bool(isinstance(texte, str) and texte and _SUJETS.search(_plat(texte)))
+
+
 def filtrer(texte: str) -> str:
     """La réponse telle quelle, ou un refus si elle contient un mode d'emploi dangereux."""
     if isinstance(texte, str) and texte and est_mode_emploi_dangereux(texte):
@@ -69,4 +86,5 @@ def filtrer(texte: str) -> str:
     return texte
 
 
-__all__ = ["CONSIGNE_SECURITE", "REFUS", "est_mode_emploi_dangereux", "filtrer"]
+__all__ = ["CONSIGNE_SECURITE", "REFUS", "est_mode_emploi_dangereux", "filtrer",
+           "sujet_sensible"]

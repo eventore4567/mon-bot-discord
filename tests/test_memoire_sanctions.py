@@ -226,3 +226,70 @@ async def test_un_historique_complet_autorise_le_dementi():
     assert "Toutes les sanctions" in bloc
     assert "dis qu'elle n'est pas enregistrée" in bloc
     assert "LES PLUS RÉCENTES" not in bloc
+
+
+# ------------------------------------------- revue Codex du 20/11/2026
+@pytest.mark.asyncio
+async def test_le_nom_le_plus_precis_gagne_sur_ses_morceaux():
+    """« Jean-Paul Dupont » ne doit pas être évincé par Jean, Paul et Dupont.
+
+    Le balayage suivait l'ordre du serveur : les trois noms courts remplissaient
+    la limite de trois cibles, et la personne réellement demandée n'était jamais
+    interrogée. La mémoire répondait donc depuis le dossier de quelqu'un d'autre.
+    """
+    jean = _membre(11, "Jean")
+    paul = _membre(12, "Paul")
+    dupont = _membre(13, "Dupont")
+    vise = _membre(14, "Jean-Paul Dupont")
+    guild = _guild([jean, paul, dupont, vise])  # l'ordre du serveur est défavorable
+
+    cibles = memoire.cibles_citees("pourquoi tu as banni Jean-Paul Dupont ?", guild)
+    assert [c.identifiant for c in cibles] == [14]
+
+
+@pytest.mark.asyncio
+async def test_deux_personnes_vraiment_citees_restent_deux_cibles():
+    """Le correctif ne doit pas fusionner des noms qui n'ont rien à voir."""
+    jean = _membre(11, "Jean")
+    natix = _membre(12, "Natix")
+    cibles = memoire.cibles_citees("pourquoi Jean et Natix sont ban ?", _guild([jean, natix]))
+    assert {c.identifiant for c in cibles} == {11, 12}
+
+
+@pytest.mark.asyncio
+async def test_le_role_staff_configure_ouvre_la_memoire():
+    """Beaucoup de serveurs ne donnent aucune permission Discord à leur staff.
+
+    +modhistory accepte déjà le rôle configuré via access_matrix : refuser ici
+    donnerait deux réponses différentes à la même personne.
+    """
+    from utils import access_matrix
+
+    staff = _membre(20, "Modo")           # aucune permission Discord
+    staff.roles = [SimpleNamespace(id=777)]
+    guild = _guild([staff])
+
+    class _BotAvecRoleStaff(_Bot):
+        async def get_guild_config(self, guild_id):
+            return {"mod_role": 777}
+
+    bot = _BotAvecRoleStaff()
+    access_matrix.backend_for(bot)
+    assert await memoire.peut_consulter(bot, guild, staff) is True
+
+
+@pytest.mark.asyncio
+async def test_sans_role_ni_permission_rien_ne_sort():
+    from utils import access_matrix
+
+    simple = _membre(21, "Membre")
+    simple.roles = [SimpleNamespace(id=1)]
+    guild = _guild([simple])
+
+    class _BotAvecRoleStaff(_Bot):
+        async def get_guild_config(self, guild_id):
+            return {"mod_role": 777}
+
+    bot = _BotAvecRoleStaff()
+    access_matrix.backend_for(bot)
+    assert await memoire.peut_consulter(bot, guild, simple) is False

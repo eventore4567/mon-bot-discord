@@ -761,7 +761,9 @@ class AffichageProgressif:
         try:
             return bool(
                 ai_service.contains_sensitive_content(texte)
-                or ai_safety.est_mode_emploi_dangereux(texte)
+                # Le SUJET seul suffit à faire taire l'aperçu : attendre les deux
+                # marqueurs de recette publierait le début de la recette.
+                or ai_safety.sujet_sensible(texte)
             )
         except Exception:  # noqa: BLE001 — en cas de doute, on ne publie pas
             logger.debug("Filtres d'aperçu indisponibles : aperçu abandonné.", exc_info=True)
