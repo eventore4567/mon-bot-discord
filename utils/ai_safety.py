@@ -57,9 +57,43 @@ _RECETTE = (
 def est_mode_emploi_dangereux(texte: str) -> bool:
     """Sujet dangereux + au moins deux marqueurs de recette distincts."""
     plat = _plat(texte)
-    if not _SUJETS.search(plat):
+    if not (_SUJETS.search(plat) or _sujet_obfusque(texte)):
         return False
     return sum(1 for motif in _RECETTE if motif.search(plat)) >= 2
+
+
+#: 21/11/2026, audit demandé par l'utilisateur sur son propre bot. _SUJETS est
+#: une liste de mots, donc « t h e r m i t e » et « therm1te » passaient à
+#: travers alors que « thermite » était bien vu. On compare donc aussi une
+#: version DÉBRUITÉE du texte : chiffres-lettres remis, séparateurs retirés.
+#:
+#: Cette comparaison ne s'applique qu'aux sujets d'au moins cinq lettres. Sur
+#: « meth », « rdx » ou « tnt », coller les lettres ferait apparaître le mot
+#: dans des phrases innocentes (« la meth ode »), et un faux refus sur une
+#: question ordinaire est aussi un défaut.
+_LONGUEUR_SUJET_DEBRUITABLE = 5
+_SEPARATEURS = re.compile(r"[^a-z0-9]+")
+_CHIFFRES_LETTRES = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t"})
+
+_SUJETS_LONGS = tuple(
+    mot for mot in (
+        "nitrocellulose", "nitroglycerin", "thermite", "napalm", "molotov", "semtex",
+        "explosif", "explosive", "detonateur", "detonator", "ricine", "sarin",
+        "cyanure", "cyanide", "methamphetamine", "fentanyl", "heroine", "heroin",
+        "cocaine", "poudrenoire", "blackpowder", "pipebomb", "ghostgun",
+        "peroxydedacetone", "acetoneperoxide",
+    ) if len(mot) >= _LONGUEUR_SUJET_DEBRUITABLE
+)
+
+
+def _debruite(texte: str) -> str:
+    """Le texte sans séparateurs ni chiffres-lettres : « t-h-3-r-m-1-t-e » -> « thermite »."""
+    return _SEPARATEURS.sub("", _plat(texte).translate(_CHIFFRES_LETTRES))
+
+
+def _sujet_obfusque(texte: str) -> bool:
+    debruite = _debruite(texte)
+    return any(mot in debruite for mot in _SUJETS_LONGS)
 
 
 def sujet_sensible(texte: str) -> bool:
@@ -76,7 +110,9 @@ def sujet_sensible(texte: str) -> bool:
     recette en cours d'écriture. Une conversation ordinaire ne cite pas de
     thermite, l'aperçu reste donc intact pour tout le monde.
     """
-    return bool(isinstance(texte, str) and texte and _SUJETS.search(_plat(texte)))
+    if not (isinstance(texte, str) and texte):
+        return False
+    return bool(_SUJETS.search(_plat(texte)) or _sujet_obfusque(texte))
 
 
 def filtrer(texte: str) -> str:
