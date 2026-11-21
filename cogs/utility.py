@@ -2,7 +2,7 @@
 Cog UTILITAIRES.
 /help /ping /avatar /info serveur /userinfo /info role /channelinfo
 (+serverinfo et +roleinfo restent acceptés comme raccourcis texte vers +info serveur / +info role)
-/membercount /addemoji /deleteemoji /emoji-list /poll /remind /reminder-list /reminder-cancel
+/membercount /addemoji /deleteemoji /emoji-list /emogi /poll /remind /reminder-list /reminder-cancel
 /say /embed-create /translate /weather /suggest /report-bug
 /afk /roll /choose
 """
@@ -30,6 +30,131 @@ CUSTOM_EMOJI_RE = re.compile(r"<(a?):([A-Za-z0-9_]{2,32}):([0-9]+)>")
 MAX_EMOJI_BYTES = 256 * 1024
 MAX_EMOJI_SOURCE_BYTES = 8 * 1024 * 1024
 EMOJI_DIMENSION = 128
+EMOJI_EXPORT_CHUNK_SIZE = 1_850
+
+
+def _emoji_markup(emoji: discord.Emoji) -> str:
+    """Retourne le format Discord copiable, avec l'identifiant réel de l'emoji."""
+    prefix = "a" if emoji.animated else ""
+    return f"<{prefix}:{emoji.name}:{emoji.id}>"
+
+
+def emoji_export_chunks(emojis: list[discord.Emoji], *, animated: bool) -> list[str]:
+    """Découpe les emojis en blocs de code qui restent copiables en MP.
+
+    Discord limite un message à 2 000 caractères. Chaque ligne est volontairement
+    le markup complet (``<:nom:id>`` ou ``<a:nom:id>``) afin que le destinataire
+    puisse tout sélectionner et coller sans devoir activer le mode développeur.
+    """
+    lines = [_emoji_markup(emoji) for emoji in emojis if emoji.animated is animated]
+    if not lines:
+        return []
+
+    chunks: list[str] = []
+    current: list[str] = []
+    current_size = 0
+    for line in lines:
+        extra = len(line) + (1 if current else 0)
+        if current and current_size + extra > EMOJI_EXPORT_CHUNK_SIZE:
+            chunks.append("\n".join(current))
+            current = []
+            current_size = 0
+        current.append(line)
+        current_size += len(line) + (1 if len(current) > 1 else 0)
+    if current:
+        chunks.append("\n".join(current))
+    return chunks
+
+
+class EmojiExportView(discord.ui.View):
+    """Panneau privé permettant à un administrateur de choisir un destinataire."""
+
+    def __init__(self, author: discord.abc.User, guild: discord.Guild) -> None:
+        super().__init__(timeout=120)
+        self.author_id = author.id
+        self.guild = guild
+        self.member: discord.Member | None = None
+        self.member_select = discord.ui.UserSelect(
+            placeholder="Choisir le membre qui recevra la liste…",
+            min_values=1,
+            max_values=1,
+        )
+        self.member_select.callback = self._select_member
+        self.add_item(self.member_select)
+        self.send_export.disabled = True
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.author_id:
+            return True
+        await interaction.response.send_message(
+            "Seule la personne ayant ouvert ce panneau peut l'utiliser.", ephemeral=True
+        )
+        return False
+
+    async def _select_member(self, interaction: discord.Interaction) -> None:
+        selected = self.member_select.values[0]
+        if not isinstance(selected, discord.Member):
+            return await interaction.response.send_message(
+                "Ce membre n'est plus disponible sur ce serveur.", ephemeral=True
+            )
+        if selected.bot:
+            return await interaction.response.send_message(
+                "Un bot ne peut pas recevoir cette liste.", ephemeral=True
+            )
+        self.member = selected
+        self.send_export.disabled = False
+        await interaction.response.edit_message(
+            content=f"Destinataire sélectionné : {selected.mention}. Cliquez sur **Envoyer la liste**.",
+            view=self,
+        )
+
+    @discord.ui.button(label="Envoyer la liste", style=discord.ButtonStyle.primary, emoji="📨")
+    async def send_export(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
+        member = self.member
+        if member is None:
+            return await interaction.response.send_message(
+                "Choisissez d'abord un membre.", ephemeral=True
+            )
+
+        emojis = sorted(self.guild.emojis, key=lambda emoji: (not emoji.animated, emoji.name.casefold()))
+        animated_chunks = emoji_export_chunks(emojis, animated=True)
+        static_chunks = emoji_export_chunks(emojis, animated=False)
+        if not animated_chunks and not static_chunks:
+            return await interaction.response.send_message(
+                "Ce serveur n'a aucun emoji personnalisé à envoyer.", ephemeral=True
+            )
+
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await member.send(
+                f"Voici les **{len(emojis)} emojis personnalisés** de **{self.guild.name}**. "
+                "Chaque bloc est prêt à être copié : les emojis animés utilisent `<a:nom:id>` "
+                "et les statiques `<:nom:id>`."
+            )
+            for index, chunk in enumerate(animated_chunks, start=1):
+                suffix = f" ({index}/{len(animated_chunks)})" if len(animated_chunks) > 1 else ""
+                await member.send(f"**Emojis animés{suffix}**\n```\n{chunk}\n```")
+            for index, chunk in enumerate(static_chunks, start=1):
+                suffix = f" ({index}/{len(static_chunks)})" if len(static_chunks) > 1 else ""
+                await member.send(f"**Emojis statiques{suffix}**\n```\n{chunk}\n```")
+        except discord.Forbidden:
+            return await interaction.followup.send(
+                f"Impossible d'envoyer un message privé à {member.mention} : ses MP sont fermés.",
+                ephemeral=True,
+            )
+        except discord.HTTPException:
+            logger.exception("Échec de l'export des emojis vers %s", member.id)
+            return await interaction.followup.send(
+                "Discord a refusé l'envoi de la liste. Réessayez dans quelques instants.",
+                ephemeral=True,
+            )
+
+        self.send_export.disabled = True
+        self.member_select.disabled = True
+        await interaction.message.edit(view=self)
+        await interaction.followup.send(
+            f"Liste envoyée en message privé à {member.mention}.", ephemeral=True
+        )
 
 
 def _contains_unicode_emoji(value: str) -> bool:
@@ -1866,6 +1991,34 @@ class Utility(commands.Cog, name="Utility"):
             ),
         )
 
+    @commands.command(name="emogi", aliases=["emoji-dm", "emojis-dm"])
+    @commands.guild_only()
+    @checks.is_owner_or_admin()
+    async def emogi(self, ctx: commands.Context):
+        """Ouvre un panneau pour envoyer en MP les markups des emojis du serveur.
+
+        La commande reste volontairement en préfixe : elle sert surtout à exporter
+        une longue liste copiable, et n'occupe donc pas une commande slash.
+        """
+        emojis = list(ctx.guild.emojis)
+        if not emojis:
+            return await panels.texte_court(
+                ctx,
+                "Ce serveur n'a aucun emoji personnalisé à exporter.",
+            )
+
+        animated_count = sum(emoji.animated for emoji in emojis)
+        embed = await self._embed(
+            ctx.guild.id,
+            title="Envoyer les emojis en message privé",
+            description=(
+                f"Ce serveur contient **{len(emojis)} emojis**, dont **{animated_count} animés**.\n\n"
+                "Choisissez un membre dans le menu, puis cliquez sur **Envoyer la liste**. "
+                "Il recevra des blocs prêts à copier avec les noms et identifiants Discord."
+            ),
+            kind="primary",
+        )
+        await ctx.send(embed=embed, view=EmojiExportView(ctx.author, ctx.guild))
     @commands.hybrid_command(name="remind", description="Définir un rappel personnel.")
     @app_commands.describe(duree="Durée (ex: 10m, 2h, 1j)", texte="Le texte du rappel")
     async def remind(self, ctx: commands.Context, duree: str, *, texte: str):

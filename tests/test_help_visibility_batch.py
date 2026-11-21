@@ -35,7 +35,7 @@ class HelpVisibilityBatchTests(unittest.TestCase):
             "give-money", "reset-economy", "shoppanel", "shoprole", "shop", "weekly",
             "set-bio", "rep", "reputation", "repleaderboard", "rephistory",
             "voice-time",
-            "addemoji", "deleteemoji", "emoji-list",
+            "addemoji", "deleteemoji", "emoji-list", "emogi",
             # Second lot, 2026-09-26 : 37 commandes publiques selon
             # main.PUBLIC_COMMANDS, chargées et fonctionnelles, mais masquées et
             # classées nulle part. +poll, +remind, +translate, +invites et
