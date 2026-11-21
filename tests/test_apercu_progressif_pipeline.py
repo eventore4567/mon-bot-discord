@@ -133,3 +133,46 @@ def test_la_carte_recupere_la_reference_de_reponse():
     carte = source.split("doit_etre_en_carte(content)")[1][:600]
     assert "await apercu.abandonner()" in carte
     assert "replied_once = False" in carte, "la première carte doit citer la question"
+
+
+# ------------------------------------------- revue Codex du 20/11/2026
+def test_un_prefixe_encore_anodin_mais_dangereux_est_deja_bloque():
+    """Vérifier chaque préfixe ne suffisait pas.
+
+    est_mode_emploi_dangereux exige un sujet dangereux ET deux marqueurs de
+    recette. Un préfixe portant le sujet et une quantité PASSAIT donc, partait
+    sur Discord, et le marqueur suivant faisait refuser l'ensemble — trop tard.
+    Supprimer l'aperçu n'annule pas ce qui a été lu.
+    """
+    from cogs.ai import AffichageProgressif
+    from utils import ai_safety
+
+    prefixe = "Pour le thermite il faut 50 g de poudre"
+    complet = prefixe + ", puis les etapes sont les suivantes : melanger"
+
+    # Le piège, tel qu'il existait : le préfixe passe, le texte complet non.
+    assert ai_safety.est_mode_emploi_dangereux(prefixe) is False
+    assert ai_safety.est_mode_emploi_dangereux(complet) is True
+
+    # L'aperçu, lui, doit refuser dès le préfixe.
+    assert AffichageProgressif._refuse_par_les_filtres(prefixe) is True
+    assert AffichageProgressif._refuse_par_les_filtres(complet) is True
+
+
+@pytest.mark.parametrize(
+    "texte",
+    [
+        "La Révolution française commence en 1789 avec 3 ordres",
+        "Il te faut 200 g de farine et 3 oeufs, puis mélange",
+        "Salut, ça va ? 😄",
+    ],
+)
+def test_une_conversation_ordinaire_garde_son_apercu(texte):
+    """Le garde ne doit pas éteindre le streaming pour tout le monde.
+
+    Une recette de cuisine porte des quantités et des étapes, mais aucun sujet
+    dangereux : elle doit continuer à s'afficher au fil de l'eau.
+    """
+    from cogs.ai import AffichageProgressif
+
+    assert AffichageProgressif._refuse_par_les_filtres(texte) is False

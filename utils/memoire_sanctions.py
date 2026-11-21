@@ -71,8 +71,7 @@ def question_sur_une_sanction(texte: str) -> bool:
     return bool(_ACTIONS_RE.search(phrase) and _INTERROGATIFS_RE.search(phrase))
 
 
-def peut_consulter(membre) -> bool:
-    """Un motif de sanction n'est pas une information de salon public."""
+def _a_les_permissions_discord(membre) -> bool:
     permissions = getattr(membre, "guild_permissions", None)
     if permissions is None:
         return False
@@ -83,6 +82,30 @@ def peut_consulter(membre) -> bool:
         or getattr(permissions, "moderate_members", False)
         or getattr(permissions, "manage_guild", False)
     )
+
+
+async def peut_consulter(bot, guild, membre) -> bool:
+    """Un motif de sanction n'est pas une information de salon public.
+
+    20/11/2026, revue Codex : beaucoup de serveurs ne donnent AUCUNE permission
+    Discord à leur staff et passent par le rôle configuré (`mod_role`).
+    +modhistory l'accepte déjà, via access_matrix. Ne regarder que les bits
+    natifs refusait donc la mémoire à des modérateurs qui consultent pourtant
+    l'historique par commande — deux réponses différentes pour la même
+    personne. On interroge la même politique qu'eux.
+    """
+    if _a_les_permissions_discord(membre):
+        return True
+    if bot is None or guild is None or membre is None:
+        return False
+    try:
+        from utils import access_matrix
+
+        return await access_matrix.backend_for(bot).has_staff_role(guild.id, membre)
+    except Exception:  # noqa: BLE001 — en cas de doute, on ne divulgue rien
+        logger.debug("Rôle staff indisponible pour %s", getattr(membre, "id", None),
+                     exc_info=True)
+        return False
 
 
 class Cible(NamedTuple):
@@ -121,14 +144,31 @@ def cibles_citees(texte: str, guild, bot=None) -> list[Cible]:
         nom = getattr(membre, "display_name", None) or getattr(membre, "name", None)
         _ajouter(identifiant, nom or f"l'utilisateur {identifiant}")
 
+    # 20/11/2026, revue Codex : le balayage prenait les membres dans l'ordre du
+    # serveur. Avec « Jean », « Paul », « Dupont » et « Jean-Paul Dupont »,
+    # demander le dossier de Jean-Paul Dupont ramenait les trois premiers et
+    # jamais le bon — la limite de trois cibles écartait la personne visée.
+    # On classe donc par nom le PLUS LONG d'abord (le plus spécifique), et on
+    # écarte ensuite un nom déjà contenu dans une correspondance retenue.
     minuscule = phrase.casefold()
+    correspondances = []
     for membre in (getattr(guild, "members", None) or []):
         if membre.id in vus or getattr(membre, "bot", False):
             continue
         for nom in filter(None, (getattr(membre, "display_name", ""), getattr(membre, "name", ""))):
             if len(nom) >= _LONGUEUR_NOM_MINIMALE and nom.casefold() in minuscule:
-                _ajouter(membre.id, getattr(membre, "display_name", None) or nom)
+                correspondances.append((nom.casefold(), membre, nom))
                 break
+
+    correspondances.sort(key=lambda item: len(item[0]), reverse=True)
+    retenus: list[str] = []
+    for plat, membre, nom in correspondances:
+        # « Jean » est un morceau de « Jean-Paul Dupont » : ce n'est pas une
+        # seconde personne citée, c'est la même sous-chaîne.
+        if any(plat in deja for deja in retenus):
+            continue
+        retenus.append(plat)
+        _ajouter(membre.id, getattr(membre, "display_name", None) or nom)
     return trouves[:3]
 
 
@@ -162,7 +202,7 @@ async def memoire(bot, guild, auteur, texte: str) -> str:
     """Le bloc à donner à l'IA, ou une chaîne vide s'il n'y a rien à dire."""
     if guild is None or not question_sur_une_sanction(texte):
         return ""
-    if not peut_consulter(auteur):
+    if not await peut_consulter(bot, guild, auteur):
         logger.debug("Historique refusé : %s n'est pas modérateur.", getattr(auteur, "id", None))
         return ""
     cibles = cibles_citees(texte, guild, bot)
