@@ -59,6 +59,12 @@ class EtatRaid:
     epargnes: int = 0
     mesures: list = field(default_factory=list)
     rapport_tache: asyncio.Task | None = None
+    #: Expulsions en vol. Rien à voir avec ``expulses``, qui est l'historique du
+    #: rapport : 21/11/2026, ce dernier servait aussi de garde anti-doublon, et
+    #: comme un état armé à la main ne s'éteint plus jamais, un premier kick
+    #: devenait une dispense à vie. Un compte expulsé puis revenu passé le
+    #: déduplicateur restait donc sur le serveur, porte « fermée » ou pas.
+    en_cours: set = field(default_factory=set)
     #: 21/11/2026 : armé À LA MAIN par le staff, pas par un afflux détecté.
     #: « ça peut raid à tout moment » — on ne veut pas attendre que la vague
     #: soit là. En manuel, PERSONNE de nouveau n'entre : on n'exige plus qu'un
@@ -232,8 +238,20 @@ async def _intouchable(automod, member) -> bool:
 
 
 async def _expulser(automod, etat: EtatRaid, member, motif: str, verrou: asyncio.Semaphore) -> None:
-    if any(i == member.id for i, _, _ in etat.expulses):
+    # Garde de CONCURRENCE seulement : deux tâches de la même vague ne doivent
+    # pas traiter le même compte en même temps. Un compte qui revient plus tard
+    # est une nouvelle arrivée, et il repart. Les événements JOIN dupliqués sont
+    # écartés en amont par utils/raid_join_deduplicator (20 s).
+    if member.id in etat.en_cours:
         return
+    etat.en_cours.add(member.id)
+    try:
+        await _expulser_vraiment(automod, etat, member, motif, verrou)
+    finally:
+        etat.en_cours.discard(member.id)
+
+
+async def _expulser_vraiment(automod, etat: EtatRaid, member, motif: str, verrou: asyncio.Semaphore) -> None:
     async with verrou:
         try:
             from utils import log_service

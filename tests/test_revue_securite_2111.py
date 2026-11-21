@@ -311,3 +311,93 @@ async def test_un_vrai_raid_ne_desarme_pas_le_mode_manuel():
     assert rendu is etat_arme, "l'état armé à la main a été remplacé"
     assert raid_mode.est_manuel(1) is True
     assert raid_mode._etats[1].manuel is True
+
+
+# ------------------------------------------------------------- 2e tour de revue
+
+@pytest.mark.asyncio
+async def test_un_compte_expulse_qui_revient_repart():
+    """Le défaut : un kick valait dispense à vie.
+
+    ``_expulser`` sortait tout de suite si l'ID figurait déjà dans
+    ``etat.expulses`` — l'historique du RAPPORT, utilisé comme garde
+    anti-doublon. Tant que l'état durait dix minutes, ça passait. Depuis qu'un
+    état armé à la main ne s'éteint plus jamais, le premier kick devenait un
+    laissez-passer définitif : le compte revenait après les 20 s du
+    déduplicateur et restait sur le serveur, porte « fermée » ou pas.
+    """
+    etat = raid_mode.EtatRaid(debut=0.0, jusqua=0.0, derniere_arrivee=0.0, manuel=True)
+    etat.expulses.append((42, "revenant#0001", "mode raid armé à la main"))
+
+    kicks: list[int] = []
+
+    class _Membre:
+        id = 42
+        guild = SimpleNamespace(id=1)
+
+        def __str__(self):
+            return "revenant#0001"
+
+        async def kick(self, reason=None):
+            kicks.append(self.id)
+
+    import asyncio
+
+    await raid_mode._expulser(
+        SimpleNamespace(), etat, _Membre(), "mode raid armé à la main",
+        asyncio.Semaphore(4),
+    )
+    assert kicks == [42], "le revenant n'a pas été expulsé une seconde fois"
+    assert etat.en_cours == set(), "la garde de concurrence n'a pas été relâchée"
+
+
+@pytest.mark.asyncio
+async def test_deux_taches_de_la_meme_vague_ne_doublonnent_pas():
+    """La garde de concurrence, elle, doit rester : c'était son vrai rôle."""
+    import asyncio
+
+    etat = raid_mode.EtatRaid(debut=0.0, jusqua=0.0, derniere_arrivee=0.0)
+    depart = asyncio.Event()
+    kicks: list[int] = []
+
+    class _Membre:
+        id = 7
+        guild = SimpleNamespace(id=1)
+
+        def __str__(self):
+            return "m#1"
+
+        async def kick(self, reason=None):
+            await depart.wait()
+            kicks.append(self.id)
+
+    membre = _Membre()
+    verrou = asyncio.Semaphore(4)
+    premiere = asyncio.ensure_future(
+        raid_mode._expulser(SimpleNamespace(), etat, membre, "motif", verrou)
+    )
+    await asyncio.sleep(0)
+    # La seconde tâche voit l'expulsion en vol et renonce, sans attendre.
+    await raid_mode._expulser(SimpleNamespace(), etat, membre, "motif", verrou)
+    depart.set()
+    await premiere
+    assert kicks == [7]
+
+
+def test_l_auteur_retenu_est_le_plus_recent_des_audits():
+    """Le défaut : la boucle rendait l'auteur le PLUS ANCIEN.
+
+    Discord rend les audits du plus récent au plus ancien, et la branche
+    ``target_id is not None`` réaffectait ``chosen`` à chaque correspondance,
+    sans la garde ``chosen is None`` que porte la branche voisine. Sur 90 s de
+    fenêtre, un autorôle légitime du bot suivi d'une attribution Administrateur
+    par un attaquant restait donc attribuée au bot — donc exemptée, donc le rôle
+    n'était pas retiré.
+    """
+    import io
+
+    source = io.open("cogs/antinuke_emergency_v55.py", encoding="utf-8").read()
+    boucle = source.split("async for entry in guild.audit_logs(", 1)[1][:2500]
+    assert "if chosen is not None:\n                            continue" in boucle
+    # Et plus aucune réaffectation sans garde.
+    assert "elif target_id is not None and entry_target_id == int(target_id):" not in source

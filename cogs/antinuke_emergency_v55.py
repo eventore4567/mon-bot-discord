@@ -290,9 +290,21 @@ def _patch_audit_actor(bot: commands.Bot) -> None:
                                 entry_actor,
                             )
 
-                        if target_id is None and chosen is None:
+                        # 21/11/2026 : « chosen is None » manquait sur la
+                        # deuxième branche. Discord rend les audits du plus
+                        # RÉCENT au plus ancien, et la boucle réaffectait
+                        # ``chosen`` à chaque correspondance : elle renvoyait
+                        # donc l'auteur de la modification la PLUS ANCIENNE des
+                        # 90 dernières secondes. Un autorôle du bot suivi d'une
+                        # attribution Administrateur par un attaquant restait
+                        # attribuée au bot, donc exemptée. La première branche
+                        # avait bien la garde, ce qui dit l'intention : la
+                        # première correspondance gagne.
+                        if chosen is not None:
+                            continue
+                        if target_id is None:
                             chosen = entry_actor
-                        elif target_id is not None and entry_target_id == int(target_id):
+                        elif entry_target_id == int(target_id):
                             chosen = entry_actor
 
                     if chosen is not None:
