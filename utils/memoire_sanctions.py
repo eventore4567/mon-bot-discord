@@ -186,6 +186,13 @@ def cibles_citees(texte: str, guild, bot=None) -> list[Cible]:
             depart = debut + 1
 
     for plat, membre, nom in correspondances:
+        # 21/11/2026 : un membre déjà retenu ne doit plus rien réserver. Avec
+        # « QueenAlice » (nom d'utilisateur « bob ») et « Bob », la question
+        # « Pourquoi QueenAlice et Bob ont été bannis ? » faisait consommer le
+        # « Bob » autonome par l'alias de QueenAlice : _ajouter ignorait le
+        # doublon, mais la place était prise et le vrai Bob disparaissait.
+        if membre.id in vus:
+            continue
         places = _toutes_les_places(plat)
         # 21/11/2026 : on ne marquait que la PREMIÈRE occurrence du nom retenu.
         # « Pourquoi Jean-Paul Dupont a été banni puis Jean-Paul Dupont a été

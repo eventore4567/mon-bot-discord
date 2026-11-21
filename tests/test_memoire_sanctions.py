@@ -393,6 +393,7 @@ def test_les_cinq_cas_de_noms_cohabitent():
 
     attendus = {
         "pourquoi tu as banni Jean-Paul Dupont ?": [14],
+        "Jean-Paul Dupont et Paul ont ete bannis ?": [12, 14],
         "Pourquoi Jean et Jean-Paul Dupont ont ete bannis ?": [11, 14],
         "pourquoi Jean et Paul sont ban ?": [11, 12],
         "Pourquoi Jean-Paul Dupont a ete banni puis Jean-Paul Dupont a ete debanni ?": [14],
@@ -400,3 +401,19 @@ def test_les_cinq_cas_de_noms_cohabitent():
     for question, attendu in attendus.items():
         obtenu = sorted(c.identifiant for c in memoire.cibles_citees(question, guild))
         assert obtenu == attendu, f"« {question} » -> {obtenu}, attendu {attendu}"
+
+
+def test_un_membre_deja_retenu_ne_reserve_plus_de_place():
+    """L'alias d'un membre déjà retenu volait la place d'un autre.
+
+    « QueenAlice » a pour nom d'utilisateur « bob ». Dans « Pourquoi
+    QueenAlice et Bob ont été bannis ? », cet alias consommait le « Bob »
+    autonome — qui désignait quelqu'un d'autre. _ajouter ignorait bien le
+    doublon, mais la place était prise et le vrai Bob disparaissait.
+    """
+    queenalice = _membre_double(11, "bob", "QueenAlice")
+    bob = _membre_double(12, "bob_user", "Bob")
+    guild = _guild([queenalice, bob])
+
+    cibles = memoire.cibles_citees("Pourquoi QueenAlice et Bob ont ete bannis ?", guild)
+    assert sorted(c.identifiant for c in cibles) == [11, 12]
