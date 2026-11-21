@@ -155,10 +155,16 @@ def cibles_citees(texte: str, guild, bot=None) -> list[Cible]:
     for membre in (getattr(guild, "members", None) or []):
         if membre.id in vus or getattr(membre, "bot", False):
             continue
+        # 21/11/2026 : ce `for` s'arrêtait au PREMIER nom correspondant. Deux
+        # membres peuvent partager un pseudo affiché — c'est courant sur
+        # Discord, un pseudo n'est pas unique. Avec « Alex » (alice) et
+        # « Alex » (bob), « Pourquoi Alex (bob) a été banni ? » retenait le
+        # premier Alex et n'examinait JAMAIS « bob », donc la mémoire lisait
+        # le dossier de la mauvaise personne. On retient donc TOUTES les
+        # correspondances ; _ajouter dédoublonne déjà par identifiant.
         for nom in filter(None, (getattr(membre, "display_name", ""), getattr(membre, "name", ""))):
             if len(nom) >= _LONGUEUR_NOM_MINIMALE and nom.casefold() in minuscule:
                 correspondances.append((nom.casefold(), membre, nom))
-                break
 
     # 21/11/2026 : écarter le nom court GLOBALEMENT était trop brutal — c'était
     # ma propre correction de la veille, et la revue l'a reprise à juste titre.

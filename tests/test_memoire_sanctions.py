@@ -327,3 +327,39 @@ async def test_un_nom_court_uniquement_contenu_reste_ecarte():
 
     cibles = memoire.cibles_citees("pourquoi tu as banni Jean-Paul Dupont ?", guild)
     assert [c.identifiant for c in cibles] == [14]
+
+
+# ------------------------------------------- revue Codex du 21/11/2026 (bis)
+def _membre_double(identifiant, utilisateur, affiche):
+    return SimpleNamespace(
+        id=identifiant, name=utilisateur, display_name=affiche, bot=False,
+        guild_permissions=SimpleNamespace(
+            administrator=False, ban_members=False, kick_members=False,
+            moderate_members=False, manage_guild=False,
+        ),
+    )
+
+
+def test_deux_membres_au_meme_pseudo_affiche_restent_distincts():
+    """Un pseudo affiché n'est pas unique sur Discord.
+
+    Le balayage s'arrêtait au PREMIER nom correspondant. Avec « Alex »
+    (alice) et « Alex » (bob), la question « Pourquoi Alex (bob) a été
+    banni ? » retenait le premier Alex et n'examinait jamais « bob » : la
+    mémoire lisait le dossier de la mauvaise personne.
+    """
+    alice = _membre_double(11, "alice", "Alex")
+    bob = _membre_double(12, "bob", "Alex")
+    guild = _guild([alice, bob])
+
+    cibles = memoire.cibles_citees("Pourquoi Alex (bob) a ete banni ?", guild)
+    assert sorted(c.identifiant for c in cibles) == [11, 12]
+
+
+def test_un_seul_pseudo_cite_ne_ramene_pas_les_homonymes():
+    """Sans le nom d'utilisateur, une seule mention ne vaut qu'une cible."""
+    alice = _membre_double(11, "alice", "Alex")
+    bob = _membre_double(12, "bob", "Alex")
+
+    cibles = memoire.cibles_citees("pourquoi Alex a ete banni ?", _guild([alice, bob]))
+    assert [c.identifiant for c in cibles] == [11]
