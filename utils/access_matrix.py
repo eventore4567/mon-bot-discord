@@ -438,6 +438,7 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
         # cogs/automod.py. On classe donc au niveau que l'auteur a choisi.
         "antibot-allow", "antibot-deny", "join-gate", "permission-guard",
         "prune-guard", "risk-engine", "vanity-guard", "tout-securiser",
+        "admin-epargne",
     }),
     "economie": frozenset({
         "shopsetup", "shoppanel", "shoprole", "give-money", "reset-economy",

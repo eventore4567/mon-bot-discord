@@ -241,6 +241,7 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("protection guard vanity", "vanity-guard", "Protect the server's custom invite link."),
     _e("protection guard risk", "risk-engine", "Score members by behaviour to spot risky accounts."),
     _e("protection guard all enable everything", "tout-securiser", "Turn on every security protection at once."),
+    _e("protection guard spare admin", "admin-epargne", "Spare one administrator from the strict AutoMod mode."),
     _e("protection guard level", "security-level", "Set the security level and anti-spam reactivity."),
     _e("protection guard escalate", "automod-escalation", "Turn automatic sanction escalation on or off."),
     _e("protection guard native", "automod-native-sync", "Sync protections with Discord AutoMod."),

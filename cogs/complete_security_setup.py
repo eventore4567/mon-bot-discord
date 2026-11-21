@@ -693,6 +693,50 @@ class SecurityCenterView(CompleteView):
                 await cog.definir_admins_soumis(self.guild.id, not strict, i.user.id)
                 await self.refresh(i)
 
+            if strict:
+                # 21/11/2026 : « quand on met sanctionner les admins, on a un
+                # choix des admins à pas sanctionner ». Montré seulement quand
+                # l'option est active : hors mode strict, TOUS les admins sont
+                # déjà épargnés, et le sélecteur ne voudrait rien dire.
+                epargnes = await self.bot.db.fetchall(
+                    "SELECT user_id FROM user_immunity_settings "
+                    "WHERE guild_id = ? AND enabled = 1",
+                    (self.guild.id,),
+                ) or ()
+                deja = [int(r["user_id"]) for r in epargnes]
+                membre_picker = discord.ui.UserSelect(
+                    placeholder="Admins à ne PAS sanctionner",
+                    min_values=0,
+                    max_values=25,
+                    default_values=[discord.Object(id=v) for v in deja[:25]],
+                )
+
+                async def save_epargnes(i, connus=tuple(deja[:25])):
+                    autorise = getattr(cog, "peut_changer_mode_strict", None)
+                    permis = (autorise(i.user.id, self.guild) if autorise is not None
+                              else i.user.id == self.guild.owner_id)
+                    if not permis:
+                        return await i.response.send_message(
+                            "Seul le propriétaire du serveur peut modifier cette liste.",
+                            ephemeral=True,
+                        )
+                    await i.response.defer()
+                    choisis = {v.id for v in membre_picker.values}
+                    # Les retraits comptent autant que les ajouts : sans eux,
+                    # décocher quelqu'un ne le remettrait jamais sous l'AutoMod.
+                    for ident in set(connus) | choisis:
+                        if (ident in choisis) != (ident in connus):
+                            await cog.definir_admin_epargne(
+                                self.guild.id, ident, ident in choisis
+                            )
+                    await self.refresh(i)
+
+                membre_picker.callback = save_epargnes
+                box.add_item(discord.ui.ActionRow(membre_picker))
+                box.add_item(discord.ui.TextDisplay(
+                    "-# Le propriétaire du serveur et les propriétaires de SentriX sont "
+                    "épargnés d'office : inutile de les ajouter."
+                ))
             box.add_item(
                 discord.ui.ActionRow(
                     button(
