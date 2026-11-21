@@ -340,6 +340,10 @@ DISCORD_PERMISSION_COMMANDS: dict[str, str] = {
     "audit": "manage_guild",
     "addemoji": "manage_emojis_and_stickers",
     "deleteemoji": "manage_emojis_and_stickers",
+    # +emogi exporte l'intégralité du pack privé de l'application SentriX vers
+    # un membre choisi. Il garde donc exactement la même barrière que son
+    # panneau local : administrateur, ou propriétaire global.
+    "emogi": "administrator",
     "presentation": "manage_guild",
     "server-health": "manage_guild",
     "systemstatus": "manage_guild",
