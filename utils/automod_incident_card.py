@@ -51,6 +51,7 @@ ACTIONS = {
     "derank": "Rôles à risque retirés",
     "warning_ping": "Rappel anti-spam",
     "mute_failed": "Exclusion temporaire prévue, non appliquée",
+    "avertissement": "Avertissement (exclusion temporaire à la prochaine infraction)",
 }
 SANCTIONS = frozenset({"mute", "warn", "kick", "ban", "derank"})
 

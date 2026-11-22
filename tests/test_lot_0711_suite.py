@@ -46,7 +46,16 @@ def _automod_factice():
     return cog, bot
 
 
-def test_une_insulte_confirmee_avertit_puis_mute_a_la_recidive():
+def test_une_insulte_confirmee_suit_l_escalade_unique():
+    """07/11/2026 : une insulte confirmée devait avertir, puis muter à la récidive.
+
+    22/11/2026 : c'est toujours le cas, mais par l'escalade unique des filtres de
+    contenu (AutoMod._maybe_escalate, appelée par _delete_and_warn) et non plus
+    par un compteur à part, en mémoire, qui appelait directement le timeout. Ce
+    test vérifie donc que chaque insulte passe par _delete_and_warn sous le nom
+    du filtre, sans jamais court-circuiter l'escalade ; l'échelle avertissement
+    puis mute est testée dans tests/test_escalade_contenu.py.
+    """
     from cogs import content_filter_policy as politique
 
     cog, bot = _automod_factice()
@@ -54,13 +63,11 @@ def test_une_insulte_confirmee_avertit_puis_mute_a_la_recidive():
     politique._patch_automod(bot)
     message = SimpleNamespace(guild=SimpleNamespace(id=1, owner_id=999), author=SimpleNamespace(id=7))
 
-    asyncio.run(cog._delete_and_timeout(message, "insulte", detection_kind="phrase"))
+    for _ in range(2):
+        asyncio.run(cog._delete_and_timeout(message, "insulte", detection_kind="phrase"))
     assert original_mute.await_count == 0
-    kwargs = original_avertir.await_args
-    assert kwargs.args[2] == "multilingual_toxicity" and "prochaine fois" in kwargs.args[1]
-
-    asyncio.run(cog._delete_and_timeout(message, "insulte", detection_kind="phrase"))
-    original_mute.assert_awaited_once()          # 2e insulte dans l'heure : mute
+    assert original_avertir.await_count == 2
+    assert all(appel.args[2] == "multilingual_toxicity" for appel in original_avertir.await_args_list)
 
 
 def test_les_options_des_avertissements_sont_transmises():

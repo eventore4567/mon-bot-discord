@@ -184,7 +184,7 @@ SECURITY_CENTER_PROTECTIONS: tuple[tuple[str, str, str, str], ...] = (
     ("security_vanity", "Protection Vanity URL", "Serveur", "Surveille le lien personnalisé du serveur."),
     ("security_prune", "Protection contre l’exclusion massive", "Serveur", "Alerte si de nombreux membres sont expulsés d’un coup."),
     ("security_permissions", "Permissions dangereuses", "Serveur", "Bloque les élévations critiques de permissions."),
-    ("escalation", "Escalade AutoMod", "Réponse", "Compte les récidives (Infractions 1 h). Les filtres de contenu suppriment sans jamais exclure, expulser ni bannir seuls."),
+    ("escalation", "Escalade AutoMod", "Réponse", "1re infraction : avertissement. Récidive sans une heure de calme : mute (5 min, puis 10 min, 30 min, 1 h, 2 h max). Jamais d'expulsion ni de ban."),
     ("honeypot", "Honeypot anti-bot", "Avancé", "Piège les comptes suspects dans le salon prévu."),
     ("verification", "Vérification anti-alt", "Avancé", "Score de confiance et validation humaine."),
 )

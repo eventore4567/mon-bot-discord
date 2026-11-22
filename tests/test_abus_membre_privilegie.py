@@ -62,8 +62,7 @@ def _monde(roles_membre, position_bot=50, *, manage_roles=True):
 
 def _cog(guild):
     cog = MagicMock(spec=automod.AutoMod)
-    cog.infraction_tracker = MagicMock()
-    cog.infraction_tracker.reinitialiser = MagicMock()
+    cog._oublier_infractions_contenu = AsyncMock()
     cog.log_action = AsyncMock()
     cog._repondre_abus_privilegie = automod.AutoMod._repondre_abus_privilegie.__get__(cog)
     return cog
@@ -105,7 +104,7 @@ async def test_un_abus_avere_retire_les_roles_a_risque_accessibles():
     membre.remove_roles.assert_awaited_once()
     assert list(membre.remove_roles.await_args.args) == [staff]
     cog.log_action.assert_awaited_once()
-    cog.infraction_tracker.reinitialiser.assert_called_once()
+    cog._oublier_infractions_contenu.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -155,10 +154,12 @@ async def test_un_refus_de_discord_est_rapporte_et_non_avale():
     cog.log_action.assert_awaited_once()
 
 
-def test_le_seuil_d_abus_suit_les_regles_d_escalade():
-    """Il ne doit pas diverger si quelqu'un modifie ESCALATION_RULES."""
-    assert automod.ABUS_PRIVILEGIE_SEUIL == max(s for s, _ in automod.ESCALATION_RULES)
-    assert automod.ABUS_PRIVILEGIE_SEUIL > min(s for s, _ in automod.ESCALATION_RULES)
+def test_le_seuil_d_abus_reste_au_dela_du_premier_mute():
+    """22/11/2026 : il valait max(ESCALATION_RULES) ; ces règles ont disparu avec
+    l'escalade « 1 avertissement puis mute ». Il doit rester un ABUS : bien au-delà
+    de l'avertissement et du premier mute qu'un membre ordinaire recevrait."""
+    assert automod.ABUS_PRIVILEGIE_SEUIL == 6
+    assert automod.ABUS_PRIVILEGIE_SEUIL > automod.ESCALADE_AVERTISSEMENTS + 1
 
 
 def test_le_resultat_derank_a_une_etiquette_lisible():
@@ -180,39 +181,28 @@ def test_la_doc_du_module_n_affirme_plus_que_les_admins_sont_exemptes():
 # cogs/content_filter_policy ne tournait pas en production, au motif qu'il
 # n'est pas dans les 48 entrées d'EXTENSIONS de main.py. Les journaux Railway
 # du 2026-10-14 20:00:58 disent le contraire — « Politique contenu activée ».
-# Il remplace _maybe_escalate sur l'instance du cog, donc TOUS les appelants
-# passent par lui et jamais par l'original : sans branchement explicite,
-# _repondre_abus_privilegie était du code mort.
+# Il remplaçait _maybe_escalate sur l'instance du cog, donc TOUS les appelants
+# passaient par lui et jamais par l'original.
 #
 # L'absence d'EXTENSIONS ne prouve pas qu'un module est mort. Seuls les
 # journaux de production le prouvent.
+#
+# 22/11/2026 : ce remplacement (et deux autres) a été retiré. L'escalade n'a
+# plus qu'une implémentation, AutoMod._maybe_escalate ; le comportement est
+# testé dans tests/test_escalade_contenu.py. Ce garde-fou empêche qu'un module
+# la remplace de nouveau en silence.
 # --------------------------------------------------------------------------
 
 
-def test_la_politique_de_contenu_atteint_la_reponse_a_l_abus():
-    """Garde de source : le branchement doit exister dans la politique vivante."""
-    import inspect
+def test_personne_ne_remplace_plus_l_escalade():
+    """Un remplacement de _maybe_escalate rendrait la vraie méthode morte."""
+    import re
+    from pathlib import Path
 
-    from cogs import content_filter_policy
-
-    source = inspect.getsource(content_filter_policy)
-    assert "_repondre_abus_privilegie" in source, (
-        "delete_only_escalation n'appelle pas la réponse : elle serait du code mort"
-    )
-    assert "_automod_module.ABUS_PRIVILEGIE_SEUIL" in source, (
-        "le seuil doit venir du module, pas de l'instance du cog"
-    )
-
-
-@pytest.mark.asyncio
-async def test_la_politique_de_contenu_ne_sanctionne_toujours_pas_un_membre_normal():
-    """La règle « suppression seule » reste entière pour qui est à portée."""
-    import inspect
-
-    from cogs import content_filter_policy
-
-    source = inspect.getsource(content_filter_policy)
-    # La condition doit exiger que le membre DÉPASSE le bot ; sinon la politique
-    # se mettrait à agir sur des membres ordinaires, ce qu'elle interdit.
-    assert "member.top_role >= moi.top_role" in source
-    assert "member.id != guild.owner_id" in source
+    racine = Path(__file__).resolve().parents[1]
+    coupables = []
+    for fichier in (racine / "cogs").rglob("*.py"):
+        source = fichier.read_text(encoding="utf-8")
+        if re.search(r"\._maybe_escalate\s*=(?!=)", source):
+            coupables.append(fichier.name)
+    assert coupables == []

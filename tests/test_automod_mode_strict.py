@@ -66,7 +66,10 @@ def test_tous_les_filtres_de_messages_passent_par_le_mode_strict():
     assert source.count("await self._admin_exempte(") >= 4
     assert "and not await self.admins_soumis(" in source
     # Discord refuse tout timeout sur un administrateur : réponse « abus privilégié ».
-    assert "or member.guild_permissions.administrator:" in source
+    # 22/11/2026 : la condition est maintenant écrite sur plusieurs lignes dans
+    # _maybe_escalate ; le comportement est vérifié pour de vrai dans
+    # tests/test_escalade_contenu.py (test_un_administrateur_...).
+    assert "or member.guild_permissions.administrator" in source
 
 
 def test_seul_le_proprietaire_change_le_mode_et_le_menu_le_propose():

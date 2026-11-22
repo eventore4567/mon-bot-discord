@@ -516,22 +516,40 @@ NATIVE_ANTILINK_REGEX_PATTERNS = (
 )
 
 # ---------------------------------------------------------------- ESCALADE DES SANCTIONS
-# Au-delà d'un simple "suppression + avertissement", AutoMod suit désormais le nombre
-# d'infractions d'un même membre sur une fenêtre glissante et escalade automatiquement
-# la sanction si ça continue — sans qu'un modérateur ait besoin d'intervenir à la main.
-# Le compteur est remis à zéro dès qu'une sanction est appliquée (on ne cumule pas
-# plusieurs sanctions pour la même série d'infractions).
-ESCALATION_WINDOW = 3600  # fenêtre glissante d'une heure
-# 05/11/2026 : « ban que pour le nuke » — l'AutoMod n'expulse et ne bannit plus
-# personne : les récidives finissent en mute. Le ban reste à l'anti-nuke.
-ESCALATION_RULES = [  # (seuil d'infractions atteint, action) — évalué du plus haut au plus bas
-    (6, "mute"),
-    (3, "mute"),
-]
-MUTE_ESCALATION_SECONDS = 600  # 10 minutes
+# 22/11/2026 : « 1 avertissement puis mute », décidé par le propriétaire.
+#
+# Avant ce jour, l'escalade des filtres de contenu (liens, invitations, mots
+# interdits, majuscules…) ne mutait en réalité personne : cogs/content_filter_policy
+# la remplaçait sur l'instance du cog par une politique « suppression seule », et
+# la version de ce fichier — seuils (6, "mute") et (3, "mute") en double, compteur
+# en mémoire perdu à chaque redémarrage et remis à zéro après chaque sanction —
+# n'était plus que du code mort, remplacé deux autres fois par des monkey-patches.
+#
+# Règle unique, écrite ici et nulle part ailleurs :
+#   1re infraction            → message supprimé + avertissement « prochaine fois : mute »
+#   2e infraction et suivantes → mute, de plus en plus long (ESCALADE_MUTE_DURATIONS_SECONDS)
+#   une heure sans infraction  → tout est oublié
+# Le compteur vit en base (sentrix_contenu_escalade) : un redémarrage ne remet
+# personne à zéro, et un mute ne remet pas le compteur à zéro — le membre qui
+# recommence juste après son mute repart au palier suivant, pas à l'avertissement.
+ESCALATION_WINDOW = 3600  # une heure sans infraction remet le compteur à zéro
+#: Nombre d'infractions qui ne donnent qu'un avertissement avant le premier mute.
+ESCALADE_AVERTISSEMENTS = 1
+ESCALATION_LABELS = {"mute": "🔇 Mute", "kick": "👢 Expulsion", "ban": "🔨 Bannissement",
+                     "derank": "🛡️ Rôles à risque retirés",
+                     "avertissement": "⚠️ Avertissement (mute à la prochaine infraction)"}
 DATASET_TIMEOUT_SECONDS = 600  # sanction directe du filtre multilingue
-ESCALATION_LABELS = {"mute": "🔇 Mute 10 minutes", "kick": "👢 Expulsion", "ban": "🔨 Bannissement",
-                     "derank": "🛡️ Rôles à risque retirés"}
+
+ESCALADE_CONTENU_SCHEMA = """
+CREATE TABLE IF NOT EXISTS sentrix_contenu_escalade (
+    guild_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    infractions INTEGER NOT NULL DEFAULT 0,
+    mutes INTEGER NOT NULL DEFAULT 0,
+    derniere_at INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (guild_id, user_id)
+)
+"""
 
 # Un membre dont le rôle le plus haut est au-dessus de celui de SentriX est hors
 # de portée des sanctions Discord : ni timeout, ni kick, ni ban ne passeront.
@@ -539,11 +557,17 @@ ESCALATION_LABELS = {"mute": "🔇 Mute 10 minutes", "kick": "👢 Expulsion", "
 # alerte, aucune trace. Un staff qui abusait ne produisait donc aucun signal.
 #
 # La réponse est volontairement graduée : une bêtise isolée ne déclenche rien,
-# seul le seuil le plus haut d'ESCALATION_RULES compte comme abus avéré. À ce
-# moment SentriX fait ce que Discord l'autorise à faire — retirer les rôles à
-# risque qui sont sous le sien — et prévient le propriétaire dans tous les cas,
-# y compris quand il n'a rien pu retirer, en disant exactement pourquoi.
-ABUS_PRIVILEGIE_SEUIL = max(seuil for seuil, _ in ESCALATION_RULES)
+# seul ce seuil compte comme abus avéré. À ce moment SentriX fait ce que Discord
+# l'autorise à faire — retirer les rôles à risque qui sont sous le sien — et
+# prévient le propriétaire dans tous les cas, y compris quand il n'a rien pu
+# retirer, en disant exactement pourquoi.
+#
+# 22/11/2026 : il valait max(ESCALATION_RULES) = 6. Ces règles ont disparu avec
+# l'escalade « 1 avertissement puis mute » ; le seuil garde sa valeur, il ne
+# change pas de sens : six infractions sans une heure de calme.
+ABUS_PRIVILEGIE_SEUIL = 6
+#: Une fois l'une de ces issues atteinte, un incident n'escalade plus message par message.
+SANCTIONS_D_INCIDENT = frozenset({"mute", "mute_failed", "derank"})
 
 # Une rafale de spam est traitée comme UN incident par membre : la première détection
 # supprime, sanctionne, prévient et journalise ; les détections suivantes dans la
@@ -620,6 +644,9 @@ ADMIN_EVERYONE_FENETRE = 600
 # 10 min, 30 min, 1 h, puis 2 h au maximum.
 SPAM_MUTE_DURATIONS_SECONDS = (300, 600, 1800, 3600, 7200)
 SPAM_TIMEOUT_SECONDS = SPAM_MUTE_DURATIONS_SECONDS[0]
+#: 22/11/2026 : mêmes paliers que le spam pour l'escalade des filtres de contenu
+#: (5 min, 10 min, 30 min, 1 h, puis 2 h au maximum).
+ESCALADE_MUTE_DURATIONS_SECONDS = SPAM_MUTE_DURATIONS_SECONDS
 #: Palier de la première rafale : 1 = rappel, 2 = avertissement, 3 = mute 5 min.
 #: 05/11/2026 : avertissement d'abord, mute seulement à la récidive.
 # 07/11/2026 : « je veux 2 avertissements puis le mute » — rappel, avertissement, mute.
@@ -832,6 +859,10 @@ class _Incident:
     raw_content: str = ""
     deleted_ok: bool | None = None
     duration_s: int | None = None
+    #: Sérialise la décision d'escalade dans un incident (revue Codex, PR #710) :
+    #: des messages simultanés passaient tous la garde « déjà sanctionné ? »
+    #: avant que le premier mute n'aboutisse, et empilaient les paliers.
+    verrou_escalade: asyncio.Lock = _champ(default_factory=asyncio.Lock, repr=False, compare=False)
 
 
 def _normalize_blocked_link_rule(value: str) -> str:
@@ -1539,7 +1570,6 @@ class AutoMod(commands.Cog, name="Automod"):
         self._raid_recovery = RaidVerificationRecovery(bot)
         self._raid_recovery_task: asyncio.Task | None = None
         self.nuke_tracker = FenetreGlissante(fenetre=NUKE_ACTION_WINDOW, purge_toutes=100)
-        self.infraction_tracker = FenetreGlissante(fenetre=ESCALATION_WINDOW)
         self.repeat_tracker = FenetreGlissante(fenetre=REPEAT_WINDOW)
         self.coordinated_tracker = FenetreGlissante(fenetre=COORDINATED_WINDOW, purge_toutes=200)
         self.risk_scores: dict[tuple[int, int], tuple[float, float]] = {}
@@ -2838,46 +2868,118 @@ class AutoMod(commands.Cog, name="Automod"):
             f"🔇 spam répété : mute de {helpers.format_duration(duration)}.",
         )
 
+    async def _compter_infraction_contenu(self, guild_id: int, user_id: int) -> tuple[int, int]:
+        """Ajoute une infraction et retourne (infractions, mutes déjà appliqués).
+
+        Une heure sans infraction remet les deux compteurs à zéro. Un mute, lui,
+        ne remet rien à zéro : c'est ce qui fait monter le palier suivant.
+        """
+        await self.bot.db.execute(ESCALADE_CONTENU_SCHEMA)
+        maintenant = int(time.time())
+        row = await self.bot.db.fetchone(
+            "SELECT infractions,mutes,derniere_at FROM sentrix_contenu_escalade WHERE guild_id=? AND user_id=?",
+            (int(guild_id), int(user_id)),
+        )
+        infractions = int(row["infractions"] or 0) if row else 0
+        mutes = int(row["mutes"] or 0) if row else 0
+        derniere = int(row["derniere_at"] or 0) if row else 0
+        if not derniere or maintenant - derniere > ESCALATION_WINDOW:
+            infractions, mutes = 0, 0
+        infractions += 1
+        await self.bot.db.execute(
+            "INSERT INTO sentrix_contenu_escalade (guild_id,user_id,infractions,mutes,derniere_at) VALUES (?,?,?,?,?) "
+            "ON CONFLICT(guild_id,user_id) DO UPDATE SET infractions=excluded.infractions,"
+            "mutes=excluded.mutes,derniere_at=excluded.derniere_at",
+            (int(guild_id), int(user_id), infractions, mutes, maintenant),
+        )
+        return infractions, mutes
+
+    async def _noter_mute_contenu(self, guild_id: int, user_id: int) -> None:
+        await self.bot.db.execute(
+            "UPDATE sentrix_contenu_escalade SET mutes=mutes+1 WHERE guild_id=? AND user_id=?",
+            (int(guild_id), int(user_id)),
+        )
+
+    async def _oublier_infractions_contenu(self, guild_id: int, user_id: int) -> None:
+        await self.bot.db.execute(ESCALADE_CONTENU_SCHEMA)
+        await self.bot.db.execute(
+            "DELETE FROM sentrix_contenu_escalade WHERE guild_id=? AND user_id=?",
+            (int(guild_id), int(user_id)),
+        )
+
+    def duree_mute_escalade(self, guild_id: int, user_id: int) -> int:
+        """Durée du dernier mute d'escalade appliqué à ce membre (pour la carte et le salon)."""
+        durees = self.__dict__.get("_durees_escalade") or {}
+        return int(durees.get((int(guild_id), int(user_id)), ESCALADE_MUTE_DURATIONS_SECONDS[0]))
+
     async def _maybe_escalate(self, guild: discord.Guild, member: discord.Member, reason: str) -> tuple[str | None, int]:
-        """Enregistre une infraction pour ce membre et, si le nombre d'infractions récentes
-        dépasse un des seuils d'ESCALATION_RULES, applique automatiquement une sanction plus
-        sévère (mute → kick → ban). Retourne (action_prise_ou_None, nombre_d_infractions)."""
-        key = (guild.id, member.id)
-        count = self.infraction_tracker.ajouter(key)
+        """Escalade des filtres de contenu : un avertissement, puis le mute.
 
-        conf = await self.get_automod_cached(guild.id)
-        if not conf.get("escalation", 0):
-            return None, count
+        Retourne ``(action, infractions)`` où ``action`` vaut :
+          * ``"avertissement"`` — première infraction, le salon annonce le mute à venir ;
+          * ``"mute"`` / ``"mute_failed"`` — à partir de la deuxième infraction ;
+          * ``"derank"`` — membre hors de portée de Discord qui abuse (voir
+            ``_repondre_abus_privilegie``) ;
+          * ``None`` — rien à faire (propriétaire, escalade désactivée…).
 
-        action_to_take = None
-        for threshold, action in ESCALATION_RULES:
-            if count >= threshold:
-                action_to_take = action
-                break  # ESCALATION_RULES est trié du seuil le plus haut au plus bas
+        C'est l'unique implémentation : les remplacements qui vivaient dans
+        content_filter_policy, owner_sanction_immunity et bot_excellence_runtime
+        ont été retirés le 22/11/2026, avec leurs exemptions reprises ici.
+        """
+        from utils.owner_access import is_bot_owner_id
 
-        if action_to_take is None:
-            return None, count
+        if is_bot_owner_id(member.id):
+            return None, 0
         if member.id == guild.owner_id:
-            return None, count  # le propriétaire du serveur n'est jamais sanctionné
-        # Discord refuse aussi tout timeout sur un administrateur (mode strict).
-        if member.top_role >= guild.me.top_role or member.guild_permissions.administrator:
-            # Hors de portée des sanctions Discord, mais plus hors de vue.
-            return await self._repondre_abus_privilegie(guild, member, reason, count), count
+            # Le propriétaire du serveur n'est sanctionné que s'il a lui-même
+            # coupé son immunité (même règle que pour la suppression du message).
+            try:
+                override = await self.get_immunity_override_cached(guild.id, member.id)
+            except Exception:  # noqa: BLE001 — lecture impossible : on protège
+                override = None
+            if override is not False:
+                return None, 0
 
-        try:
-            # La carte d'incident AutoMod est le seul log : pas de doublon « Timeout appliqué ».
-            log_service.mark_sanction(guild.id, member.id, {"mute": "timeout", "kick": "kick", "ban": "ban"}[action_to_take])
-            if action_to_take == "mute":
-                until = discord.utils.utcnow() + timedelta(seconds=MUTE_ESCALATION_SECONDS)
-                await member.timeout(until, reason=f"AutoMod : escalade ({count} infractions/1h) — {reason}")
-            elif action_to_take == "kick":
-                await member.kick(reason=f"AutoMod : escalade ({count} infractions/1h) — {reason}")
-            elif action_to_take == "ban":
-                await member.ban(reason=f"AutoMod : escalade ({count} infractions/1h) — {reason}", delete_message_seconds=0)
-            self.infraction_tracker.reinitialiser(key)  # repart à zéro après une sanction
-            return action_to_take, count
-        except discord.Forbidden:
-            return None, count
+        cle = (int(guild.id), int(member.id))
+        verrous = self.__dict__.setdefault("_verrous_escalade", {})
+        if len(verrous) > 4096:
+            verrous = {k: v for k, v in verrous.items() if v.locked()}
+            self._verrous_escalade = verrous
+        verrou = verrous.setdefault(cle, asyncio.Lock())
+        async with verrou:
+            infractions, mutes = await self._compter_infraction_contenu(guild.id, member.id)
+
+            moi = getattr(guild, "me", None)
+            hors_de_portee = moi is not None and (
+                member.top_role >= moi.top_role or member.guild_permissions.administrator
+            )
+            if hors_de_portee and member.id != guild.owner_id:
+                # Discord refuse tout timeout ici. Seul un abus avéré déclenche
+                # une réponse — indépendamment du réglage « escalade » : il ne
+                # s'agit pas de punir un message, mais de désarmer un staff qui
+                # abuse et de prévenir le propriétaire.
+                return await self._repondre_abus_privilegie(guild, member, reason, infractions), infractions
+
+            conf = await self.get_automod_cached(guild.id)
+            if not conf.get("escalation", 0) or hors_de_portee:
+                return None, infractions
+            if infractions <= ESCALADE_AVERTISSEMENTS:
+                return "avertissement", infractions
+
+            duree = ESCALADE_MUTE_DURATIONS_SECONDS[min(mutes, len(ESCALADE_MUTE_DURATIONS_SECONDS) - 1)]
+            # _muter, comme le spam : il garde un timeout plus long déjà en place
+            # (posé par un modérateur ou une autre protection), et si Discord refuse
+            # le timeout il bascule sur le mute SentriX (suppression de chaque
+            # message) et prévient le propriétaire, au lieu d'abandonner en silence.
+            resultat = await self._muter(
+                guild, member, duree,
+                f"récidive ({infractions} infractions sans une heure de calme) — {reason}",
+            )
+            if resultat == "mute_failed":
+                return "mute_failed", infractions
+            await self._noter_mute_contenu(guild.id, member.id)
+            self.__dict__.setdefault("_durees_escalade", {})[cle] = duree
+            return "mute", infractions
 
     async def _repondre_abus_privilegie(
         self, guild: discord.Guild, member: discord.Member, reason: str, count: int
@@ -2975,7 +3077,7 @@ class AutoMod(commands.Cog, name="Automod"):
                 pass
 
         if retires:
-            self.infraction_tracker.reinitialiser((guild.id, member.id))
+            await self._oublier_infractions_contenu(guild.id, member.id)
             return "derank"
         return None
 
@@ -2989,15 +3091,12 @@ class AutoMod(commands.Cog, name="Automod"):
             label = "Le filtre **Anti-liens (blocage total + Discord AutoMod)**"
         message = f'{label} est maintenant {state_text}.'
         if field == "escalation":
-            # Politique de cogs/content_filter_policy : les filtres de contenu ne
-            # sanctionnent jamais seuls. Le réglage ne doit pas promettre l'inverse.
-            # Vérifié dans les journaux de production le 2026-10-14 :
-            # cogs/content_filter_policy est bien chargé (« Politique contenu
-            # activée ») et remplace _maybe_escalate. Les filtres de contenu ne
-            # sanctionnent donc réellement pas. Seule exception, ci-dessous.
-            message += ("\nLes récidives sont comptées sur une heure glissante ; les filtres de "
-                        "contenu suppriment le message sans exclure, expulser ni bannir. "
-                        f"Une seule exception : au-delà de {ABUS_PRIVILEGIE_SEUIL} infractions en 1 h, "
+            # 22/11/2026 : le texte décrit l'escalade réellement appliquée par
+            # _maybe_escalate (implémentation unique), pas une intention.
+            message += ("\nPremière infraction : le message est supprimé et le membre est averti. "
+                        "Récidive sans une heure de calme : mute de 5 minutes, puis 10 minutes, "
+                        "30 minutes, 1 heure et 2 heures au maximum. Jamais d'expulsion ni de ban. "
+                        f"Exception : au-delà de {ABUS_PRIVILEGIE_SEUIL} infractions sans une heure de calme, "
                         "un membre dont le rôle dépasse celui de SentriX — donc intouchable par les "
                         "sanctions Discord — se voit retirer ses rôles à risque situés sous celui de "
                         "SentriX, et le propriétaire du serveur est prévenu dans tous les cas.")
@@ -5026,7 +5125,7 @@ class AutoMod(commands.Cog, name="Automod"):
         return labels.get(filter_name, f"votre message a été supprimé : {reason}")
 
     @staticmethod
-    def _content_notice_view(member_mention: str, filter_name: str) -> discord.ui.LayoutView:
+    def _content_notice_view(member_mention: str, filter_name: str, suite: str = "") -> discord.ui.LayoutView:
         """Avertissement AutoMod compact, sans bannière blanche ni embed générique.
 
         Components V2 est dessiné dans un seul conteneur, sans liseré coloré.
@@ -5047,11 +5146,58 @@ class AutoMod(commands.Cog, name="Automod"):
             discord.ui.TextDisplay(
                 f"### {title}\n"
                 f"{member_mention} · {explanation}\n"
-                "-# **SentriX · Sécurité** · Avertissement temporaire (8 s)"
+                + (f"**{suite}**\n" if suite else "")
+                + "-# **SentriX · Sécurité** · Avertissement temporaire (8 s)"
             )
         )
         view.add_item(box)
         return view
+
+    async def _escalader_dans_incident(
+        self, message: discord.Message, incident: _Incident, filter_name: str, reason: str,
+    ) -> None:
+        """Compte une nouvelle infraction de contenu regroupée dans un incident en cours.
+
+        Une rafale reste UN incident (une carte, un avertissement), mais chaque
+        message fautif est une infraction : sans ce comptage, une deuxième
+        insulte ou un deuxième lien envoyé dans les 30 s n'atteignait jamais
+        l'escalade, et « 1 avertissement puis mute » ne mutait pas.
+        """
+        async with incident.verrou_escalade:
+            # La garde est relue SOUS le verrou : le premier message de l'incident
+            # (chemin principal) et les suivants prennent tous ce même verrou.
+            if incident.action in SANCTIONS_D_INCIDENT:
+                return  # déjà sanctionné dans cet incident : pas de palier par message
+            try:
+                action, infractions = await self._maybe_escalate(message.guild, message.author, reason)
+            except Exception:
+                logger.exception(
+                    "Escalade AutoMod indisponible guild=%s user=%s filtre=%s.",
+                    message.guild.id, message.author.id, filter_name,
+                )
+                return
+            incident.infractions = max(incident.infractions, infractions)
+            if action in (None, "avertissement"):
+                return
+            incident.action = action
+            if action == "mute":
+                incident.duration_s = self.duree_mute_escalade(message.guild.id, message.author.id)
+        try:
+            await self.bot.db.log_automod_action(
+                message.guild.id, message.author.id, filter_name, action, reason,
+            )
+        except Exception:
+            logger.exception("Historique de sanction AutoMod indisponible guild=%s.", message.guild.id)
+        if action == "mute":
+            try:
+                await panels.texte_court(
+                    message.channel,
+                    f"{message.author.mention}, récidive : mute de "
+                    f"{helpers.format_duration(incident.duration_s)}.",
+                    supprimer_apres=6,
+                )
+            except discord.HTTPException:
+                pass
 
     async def _delete_and_warn(
         self,
@@ -5147,6 +5293,8 @@ class AutoMod(commands.Cog, name="Automod"):
                 and not (filter_name == "antimention" and incident.filter_name != "antimention")):
             incident.deleted += 1
             await finish_deletion()
+            if allow_escalation and filter_name not in SPAM_FILTERS and filter_name != "antiscam":
+                await self._escalader_dans_incident(message, incident, filter_name, reason)
             return
         incident = _Incident(
             started=now_ts,
@@ -5291,11 +5439,14 @@ class AutoMod(commands.Cog, name="Automod"):
                 elif action == "mute_failed":
                     incident.action_label = f"⚠️ Mute prévu {helpers.format_duration(spam_duration or SPAM_TIMEOUT_SECONDS)} — non appliqué"
             elif allow_escalation:
-                action, infraction_count = await self._maybe_escalate(
-                    message.guild,
-                    message.author,
-                    reason,
-                )
+                async with incident.verrou_escalade:
+                    action, infraction_count = await self._maybe_escalate(
+                        message.guild,
+                        message.author,
+                        reason,
+                    )
+                    if incident.action not in SANCTIONS_D_INCIDENT:
+                        incident.action = action
         except Exception:
             # L'escalade est secondaire par rapport à la suppression déjà faite :
             # on garde l'avertissement public et le log d'incident au lieu de perdre
@@ -5307,10 +5458,19 @@ class AutoMod(commands.Cog, name="Automod"):
                 filter_name,
             )
 
-        incident.action = action
-        incident.infractions = infraction_count
+        # Un message regroupé de la même rafale a pu sanctionner pendant que ce
+        # premier message terminait : on ne rétrograde jamais une sanction.
+        if incident.action not in SANCTIONS_D_INCIDENT:
+            incident.action = action
+        incident.infractions = max(incident.infractions, infraction_count)
+        # Suite annoncée dans le salon pour l'escalade des filtres de contenu
+        # (le spam a ses propres textes, déjà complets).
+        suite_escalade = ""
         if action == "mute" and incident.duration_s is None:
-            incident.duration_s = MUTE_ESCALATION_SECONDS
+            incident.duration_s = self.duree_mute_escalade(message.guild.id, message.author.id)
+            suite_escalade = f" Récidive : mute de {helpers.format_duration(incident.duration_s)}."
+        elif action == "avertissement":
+            suite_escalade = " Prochaine infraction dans l'heure : mute."
         if action and action != "warning_ping":
             try:
                 await self.bot.db.log_automod_action(
@@ -5339,7 +5499,7 @@ class AutoMod(commands.Cog, name="Automod"):
                 # blanche, webhook ou repost du lien interdit. La mention est
                 # uniquement visuelle : aucun ping n'est envoyé.
                 await message.channel.send(
-                    f"🚫 {message.author.mention} Les liens sont interdits dans ce salon.",
+                    f"🚫 {message.author.mention} Les liens sont interdits dans ce salon.{suite_escalade}",
                     allowed_mentions=discord.AllowedMentions.none(),
                     delete_after=8,
                 )
@@ -5347,7 +5507,9 @@ class AutoMod(commands.Cog, name="Automod"):
                 # Les autres infractions conservent leur interface existante.
                 try:
                     await message.channel.send(
-                        view=self._content_notice_view(message.author.mention, filter_name),
+                        view=self._content_notice_view(
+                            message.author.mention, filter_name, suite=suite_escalade.strip()
+                        ),
                         allowed_mentions=discord.AllowedMentions.none(),
                         delete_after=8,
                     )
@@ -5356,7 +5518,7 @@ class AutoMod(commands.Cog, name="Automod"):
                     # suppression du message reste acquise, repli discret.
                     await panels.texte_court(
                         message.channel,
-                        f"{message.author.mention}, {public_text}",
+                        f"{message.author.mention}, {public_text}{suite_escalade}",
                         supprimer_apres=6,
                     )
             elif filter_name in SPAM_FILTERS and self._group_spam_notice(
@@ -5372,7 +5534,7 @@ class AutoMod(commands.Cog, name="Automod"):
             else:
                 await panels.texte_court(
                     message.channel,
-                    f"{message.author.mention}, {public_text}",
+                    f"{message.author.mention}, {public_text}{suite_escalade}",
                     supprimer_apres=6,
                 )
         except discord.HTTPException:

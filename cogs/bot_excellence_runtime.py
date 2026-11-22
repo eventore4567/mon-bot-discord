@@ -48,8 +48,6 @@ SUPERVISOR_INTERVAL_SECONDS = 60
 VIEW_REPAIR_INTERVAL_SECONDS = 3600
 HEALTH_SNAPSHOT_INTERVAL_SECONDS = 900
 MISSING_PERMISSIONS_SAMPLE = 100  # serveurs détaillés par instantané ; le total est gardé à part
-RISK_WINDOW_SECONDS = 3600
-RISK_LEVEL_DECAY_SECONDS = 86400
 
 RUNTIME_SCHEMA = """
 CREATE TABLE IF NOT EXISTS runtime_incidents (
@@ -183,7 +181,6 @@ class RuntimeRateLimitError(commands.CheckFailure):
 _AI_CACHE_PATCHED = False
 _GAME_CACHE_PATCHED = False
 _AI_CONCURRENCY_PATCHED = False
-_AUTOMOD_PATCHED = False
 _GAME_STATS_PATCHED = False
 _MINIGAMES_PATCHED = False
 _SOCIAL_DEDUPE_PATCHED = False
@@ -196,7 +193,6 @@ _AI_TEXT_SEMAPHORE = asyncio.Semaphore(AI_TEXT_CONCURRENCY)
 _AI_IMAGE_SEMAPHORE = asyncio.Semaphore(AI_IMAGE_CONCURRENCY)
 _AI_ACTIVE_USERS: set[int] = set()
 _RESOURCE_BUCKETS: dict[tuple[int, int, str], deque[float]] = defaultdict(deque)
-_AUTOMOD_LOCKS: dict[tuple[int, int], asyncio.Lock] = {}
 
 _RESOURCE_LIMITS: dict[str, tuple[int, float]] = {
     "image": (1, 45.0),
@@ -842,118 +838,11 @@ def _install_economy_atomicity(bot: commands.Bot) -> None:
     logger.info("Économie : rob, gamble, banque et vente rendus atomiques et anti-solde négatif.")
 
 
-def _risk_weight(reason: str) -> int:
-    value = (reason or "").casefold()
-    severe = ("scam", "arnaque", "phishing", "malware", "insulte", "multilingue", "menace", "raid")
-    return 2 if any(marker in value for marker in severe) else 1
-
-
-def _install_persistent_automod(bot: commands.Bot) -> None:
-    global _AUTOMOD_PATCHED
-    cog = bot.get_cog("Automod")
-    if cog is None or _AUTOMOD_PATCHED:
-        return
-    cls = type(cog)
-    current = cls._maybe_escalate
-    if getattr(current, "_sentrix_persistent_progressive", False):
-        _AUTOMOD_PATCHED = True
-        return
-
-    async def progressive_escalation(self, guild: discord.Guild, member: discord.Member, reason: str):
-        if member.id == guild.owner_id or member.id in getattr(__import__("config"), "OWNER_IDS", []):
-            return None, 0
-        conf = await self.get_automod_cached(guild.id)
-        if not conf.get("escalation", 0):
-            return None, 0
-        if not await _ensure_schema(self.bot):
-            return await current(self, guild, member, reason)
-
-        key = (guild.id, member.id)
-        lock = _AUTOMOD_LOCKS.setdefault(key, asyncio.Lock())
-        async with lock:
-            stamp = now()
-            weight = _risk_weight(reason)
-            await self.bot.db.execute(
-                "DELETE FROM automod_risk_events WHERE created_at < ?",
-                (stamp - RISK_WINDOW_SECONDS,),
-            )
-            await self.bot.db.execute(
-                "INSERT INTO automod_risk_events (guild_id,user_id,weight,reason,created_at) VALUES (?,?,?,?,?)",
-                (guild.id, member.id, weight, str(reason)[:700], stamp),
-            )
-            score_row = await self.bot.db.fetchone(
-                "SELECT COUNT(*) AS hits,COALESCE(SUM(weight),0) AS score FROM automod_risk_events "
-                "WHERE guild_id=? AND user_id=? AND created_at>=?",
-                (guild.id, member.id, stamp - RISK_WINDOW_SECONDS),
-            )
-            hits = int(score_row["hits"] if score_row else 0)
-            score = int(score_row["score"] if score_row else 0)
-            state = await self.bot.db.fetchone(
-                "SELECT sanction_level,last_action_at FROM automod_risk_state WHERE guild_id=? AND user_id=?",
-                (guild.id, member.id),
-            )
-            level = int(state["sanction_level"] if state else 0)
-            last_action = int(state["last_action_at"] if state else 0)
-            if last_action and stamp - last_action > RISK_LEVEL_DECAY_SECONDS:
-                level = 0
-
-            # Après le mute, deux nouvelles infractions suffisent pour passer au kick,
-            # puis deux autres pour le ban. Contrairement à l'ancien compteur remis à zéro,
-            # les niveaux de sanction persistent donc réellement entre deux séries.
-            threshold = 3 if level <= 0 else 2
-            if score < threshold:
-                await self.bot.db.execute(
-                    "INSERT INTO automod_risk_state (guild_id,user_id,sanction_level,last_action_at,updated_at) "
-                    "VALUES (?,?,?,?,?) ON CONFLICT(guild_id,user_id) DO UPDATE SET "
-                    "sanction_level=excluded.sanction_level,updated_at=excluded.updated_at",
-                    (guild.id, member.id, level, last_action, stamp),
-                )
-                return None, hits
-
-            me = guild.me
-            if me is None or member.top_role >= me.top_role:
-                return None, hits
-
-            action = "mute" if level <= 0 else ("kick" if level == 1 else "ban")
-            action_reason = f"AutoMod progressif : {hits} infraction(s), score {score} — {reason}"
-            try:
-                if action == "mute":
-                    await member.timeout(discord.utils.utcnow() + timedelta(minutes=10), reason=action_reason)
-                elif action == "kick":
-                    await member.kick(reason=action_reason)
-                else:
-                    await member.ban(reason=action_reason, delete_message_seconds=0)
-            except (discord.Forbidden, discord.HTTPException):
-                return None, hits
-
-            new_level = min(3, level + 1)
-            await self.bot.db.execute(
-                "INSERT INTO automod_risk_state (guild_id,user_id,sanction_level,last_action_at,updated_at) "
-                "VALUES (?,?,?,?,?) ON CONFLICT(guild_id,user_id) DO UPDATE SET "
-                "sanction_level=excluded.sanction_level,last_action_at=excluded.last_action_at,updated_at=excluded.updated_at",
-                (guild.id, member.id, new_level, stamp, stamp),
-            )
-            await self.bot.db.execute(
-                "DELETE FROM automod_risk_events WHERE guild_id=? AND user_id=?",
-                (guild.id, member.id),
-            )
-            try:
-                await self.bot.db.record_sanction(
-                    guild.id,
-                    member.id,
-                    int(getattr(getattr(self.bot, "user", None), "id", 0) or 0),
-                    action,
-                    action_reason,
-                    600 if action == "mute" else None,
-                )
-            except Exception:
-                logger.exception("Impossible d'historiser la sanction AutoMod progressive.")
-            return action, hits
-
-    progressive_escalation._sentrix_persistent_progressive = True
-    cls._maybe_escalate = progressive_escalation
-    _AUTOMOD_PATCHED = True
-    logger.info("AutoMod : escalade persistante et progressive mute -> kick -> ban activée.")
+# 22/11/2026 : _install_persistent_automod remplaçait AutoMod._maybe_escalate par une
+# escalade mute → kick → ban. Elle n'était jamais atteinte (cogs/content_filter_policy
+# remplaçait la méthode sur l'instance, ce qui l'emporte sur la classe) et contredisait
+# « ban que pour le nuke ». L'escalade a désormais une implémentation unique, dans
+# cogs/automod.py ; ses tables automod_risk_* restent créées pour les bases existantes.
 
 
 async def _reserve_social_delivery(bot: commands.Bot, subscription_id: int, item_id: str, item_url: str) -> bool:
@@ -1579,7 +1468,6 @@ async def install(bot: commands.Bot, extension_name: str = "") -> None:
     _install_settings_caches()
     _install_ai_concurrency()
     _install_game_statistics()
-    _install_persistent_automod(bot)
     _install_minigame_outcomes(bot)
     _install_social_dedupe(bot)
     _install_economy_atomicity(bot)

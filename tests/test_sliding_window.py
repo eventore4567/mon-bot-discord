@@ -75,21 +75,24 @@ def test_l_automod_utilise_des_compteurs_qui_oublient():
     from cogs.automod import AutoMod
 
     source = inspect.getsource(AutoMod.__init__)
-    for nom in ("spam_tracker", "join_tracker", "nuke_tracker", "infraction_tracker"):
+    # 22/11/2026 : infraction_tracker a quitté cette liste. Le compteur de
+    # l'escalade vit désormais en base (sentrix_contenu_escalade), parce qu'un
+    # compteur en mémoire était remis à zéro à chaque redémarrage.
+    for nom in ("spam_tracker", "join_tracker", "nuke_tracker"):
         assert f"self.{nom} = FenetreGlissante(" in source, nom
 
 
-def test_le_filtre_de_contenu_partage_le_meme_compteur():
-    """Il réimplémentait la logique avec ses propres dictionnaires : au premier
-    changement de structure, il aurait levé une AttributeError en production,
-    sur le chemin des sanctions."""
+def test_le_filtre_de_contenu_ne_tient_plus_son_propre_compteur():
+    """Il réimplémentait la logique avec ses propres compteurs. Depuis le
+    22/11/2026, il n'y a plus qu'un compteur d'escalade, en base, tenu par
+    AutoMod._maybe_escalate : la politique de contenu n'en tient aucun."""
     import inspect
 
     from cogs import content_filter_policy
 
     source = inspect.getsource(content_filter_policy)
-    assert "infraction_tracker.setdefault" not in source
-    assert "infraction_tracker.ajouter" in source
+    assert "infraction_tracker" not in source
+    assert "_insultes_confirmees" not in source
 
 
 def _automod_factice():

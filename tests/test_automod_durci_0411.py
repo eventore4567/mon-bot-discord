@@ -98,7 +98,11 @@ def test_le_spam_est_sanctionne_des_la_premiere_rafale():
     assert am.SPAM_ESCALATION_RESET_SECONDS <= 3600  # une heure calme remet à zéro
     assert am.SPAM_MUTE_DURATIONS_SECONDS[0] == 300
     assert max(am.SPAM_MUTE_DURATIONS_SECONDS) <= 7200
-    assert {action for _seuil, action in am.ESCALATION_RULES} == {"mute"}
+    # 22/11/2026 : ESCALATION_RULES a disparu (seuils en double, code mort) ;
+    # l'escalade des filtres de contenu ne connaît que l'avertissement et le mute,
+    # avec les mêmes paliers que le spam. « Ban que pour le nuke » tient toujours.
+    assert am.ESCALADE_AVERTISSEMENTS == 1
+    assert am.ESCALADE_MUTE_DURATIONS_SECONDS == am.SPAM_MUTE_DURATIONS_SECONDS
 
 
 def test_la_langue_du_serveur_est_reservee_au_staff():

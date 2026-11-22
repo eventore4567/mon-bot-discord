@@ -84,6 +84,9 @@ class ForbiddenWordsUI(commands.Cog):
             incident = runtime.incidents.get(key)
             if incident is not None and now_ts - incident.started < automod_module.INCIDENT_WINDOW_SECONDS:
                 incident.deleted += 1
+                # Une rafale reste un incident, mais chaque mot interdit compte
+                # pour l'escalade (avertissement puis mute).
+                await runtime._escalader_dans_incident(message, incident, filter_name, reason)
                 return
 
             incident = automod_module._Incident(
@@ -117,15 +120,18 @@ class ForbiddenWordsUI(commands.Cog):
                 reason=reason,
                 target=message.author,
             )
-            action, infraction_count = await runtime._maybe_escalate(
-                message.guild,
-                message.author,
-                reason,
-            )
-            incident.action = action
-            incident.infractions = infraction_count
+            async with incident.verrou_escalade:
+                action, infraction_count = await runtime._maybe_escalate(
+                    message.guild,
+                    message.author,
+                    reason,
+                )
+                if incident.action not in automod_module.SANCTIONS_D_INCIDENT:
+                    incident.action = action
+                incident.infractions = max(incident.infractions, infraction_count)
             if action == "mute":
-                incident.duration_s = automod_module.MUTE_ESCALATION_SECONDS
+                # Durée réelle du palier atteint (5 min, 10 min, 30 min…).
+                incident.duration_s = runtime.duree_mute_escalade(message.guild.id, message.author.id)
             # Même référence SX- et mêmes suites que les autres incidents AutoMod.
             await runtime._record_incident_trace(message, incident)
             if action:
@@ -143,10 +149,12 @@ class ForbiddenWordsUI(commands.Cog):
             )
             if action == "mute":
                 description += (
-                    " Exclusion temporaire de "
-                    + automod_module.helpers.format_duration(automod_module.MUTE_ESCALATION_SECONDS)
+                    " Récidive : exclusion temporaire de "
+                    + automod_module.helpers.format_duration(incident.duration_s)
                     + "."
                 )
+            elif action == "avertissement":
+                description += " Prochaine infraction dans l'heure : exclusion temporaire."
             try:
                 note = await message.channel.send(
                     content=message.author.mention,
