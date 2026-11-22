@@ -308,6 +308,19 @@ async def fake_request(self, route, *, files=None, form=None, **kwargs):
         return message_payload(9999, CID, (js or {}).get("content"))
     if re.match(r"/webhooks/\d+(/[^/]+)?$", path):
         return None
+    if re.match(r"/applications/\d+/emojis", path):
+        # 22/11/2026 : la règle fourre-tout ci-dessous rend [] pour TOUTE route
+        # /applications/..., ce qui convient à l'enregistrement des commandes
+        # (PUT .../commands rend bien une liste). Mais Discord rend les emojis
+        # d'application sous la forme {"items": [...]}, et discord.py lit
+        # data["items"] : sur une liste, ça lève
+        #
+        #   TypeError: list indices must be integers or slices, not str
+        #
+        # +emogi sortait donc « cassée » au balayage strict alors que la
+        # commande est correcte — c'est le banc de test qui modélisait mal
+        # l'API.
+        return {"items": []} if method == "GET" else {}
     if path.startswith("/applications/"):
         return []
     if path == "/oauth2/applications/@me":

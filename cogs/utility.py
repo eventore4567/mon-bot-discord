@@ -2025,7 +2025,19 @@ class Utility(commands.Cog, name="Utility"):
         """
         try:
             emojis = list(await self.bot.fetch_application_emojis())
-        except discord.HTTPException:
+        except Exception:  # noqa: BLE001
+            # 22/11/2026 : seul discord.HTTPException était rattrapé, et le
+            # balayage strict des commandes (tools/command_sweep) sortait rouge :
+            #
+            #   SXR-CMD-0001 TypeError: list indices must be integers or slices,
+            #   not str — discord/client.py fetch_application_emojis
+            #
+            # discord.py lit ``data["items"]`` dans la réponse ; une réponse
+            # d'une autre forme lève donc un TypeError, pas une HTTPException, et
+            # le membre voyait « Une erreur technique a interrompu la commande »
+            # au lieu du message prévu juste en dessous. Un export d'emojis ne
+            # mérite pas une carte d'erreur technique : on rattrape tout, on
+            # trace, et on explique.
             logger.exception("Impossible de récupérer les emojis d'application SentriX")
             return await panels.texte_court(
                 ctx,
