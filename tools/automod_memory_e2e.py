@@ -56,7 +56,10 @@ async def main() -> int:
     check("regarde ça hxxps://exemple-douteux[.]example/offre" in shown
           and "https://exemple-douteux.example" not in shown,
           "le message supprimé figure sur la carte, lien neutralisé", shown[-400:])
-    check("**Message bloqué — retiré, sans sanction**" in shown and "**Protection** · Anti-liens" in shown
+    # 22/11/2026 : la carte s'ouvre sur ce qui a été fait, en titre, et le statut
+    # passe en sous-titre ; chaque ligne porte son émoji (« 🛡️ **Protection** · … »).
+    check("### 🗑️ Message supprimé" in shown and "-# Message bloqué — retiré, sans sanction" in shown
+          and "**Protection** · Anti-liens" in shown
           and "**Action** · Message supprimé" in shown and "**Infractions (1 h)** · 1" in shown
           and "**Date** · <t:" in shown,
           "statut, protection, action réelle, date et infractions sont affichés", shown[-500:])
