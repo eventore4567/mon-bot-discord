@@ -537,7 +537,6 @@ CATALOG: tuple[SlashEntry, ...] = (
     # ----------------------------------------------------------------- À propos
     _e("bot info", "botinfo", "About SentriX."),
     _e("bot changelog", "changelog", "Show the latest SentriX updates."),
-    _e("bot emojis", "emojis", "List SentriX icons with their copyable code."),
     _e("bot feedback", "feedback", "Send feedback to the SentriX team."),
     _e("bot bug", "report-bug", "Report a bug to the SentriX team."),
     _e("bot status", "bot-status", "Show the current SentriX status."),

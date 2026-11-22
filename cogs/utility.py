@@ -13,6 +13,7 @@ import ipaddress
 import logging
 import re
 import socket
+from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import aiohttp
@@ -33,13 +34,18 @@ EMOJI_DIMENSION = 128
 EMOJI_EXPORT_CHUNK_SIZE = 1_850
 
 
-def _emoji_markup(emoji: discord.Emoji) -> str:
-    """Retourne le format Discord copiable, avec l'identifiant réel de l'emoji."""
+def _emoji_markup(emoji: Any) -> str:
+    """Retourne le format Discord copiable, avec l'identifiant réel de l'emoji.
+
+    Les emojis d'application et les emojis de serveur partagent ce format.  La
+    commande ``+emogi`` exporte volontairement les premiers : c'est le pack
+    officiel visible dans le Developer Portal de SentriX.
+    """
     prefix = "a" if emoji.animated else ""
     return f"<{prefix}:{emoji.name}:{emoji.id}>"
 
 
-def emoji_export_chunks(emojis: list[discord.Emoji], *, animated: bool) -> list[str]:
+def emoji_export_chunks(emojis: list[Any], *, animated: bool) -> list[str]:
     """Découpe les emojis en blocs de code qui restent copiables en MP.
 
     Discord limite un message à 2 000 caractères. Chaque ligne est volontairement
@@ -67,12 +73,19 @@ def emoji_export_chunks(emojis: list[discord.Emoji], *, animated: bool) -> list[
 
 
 class EmojiExportView(discord.ui.View):
-    """Panneau privé permettant à un administrateur de choisir un destinataire."""
+    """Panneau privé qui partage le pack d'emojis d'application SentriX."""
 
-    def __init__(self, author: discord.abc.User, guild: discord.Guild) -> None:
+    def __init__(
+        self,
+        author: discord.abc.User,
+        emojis: list[Any],
+    ) -> None:
         super().__init__(timeout=120)
         self.author_id = author.id
-        self.guild = guild
+        # Le cliché est volontaire : la liste reçue est exactement celle qui a
+        # été comptée dans le panneau, même si le Developer Portal change entre
+        # l'ouverture et le clic sur le bouton.
+        self.emojis = emojis
         self.member: discord.Member | None = None
         self.member_select = discord.ui.UserSelect(
             placeholder="Choisir le membre qui recevra la liste…",
@@ -123,18 +136,21 @@ class EmojiExportView(discord.ui.View):
                 "Choisissez d'abord un membre.", ephemeral=True
             )
 
-        emojis = sorted(self.guild.emojis, key=lambda emoji: (not emoji.animated, emoji.name.casefold()))
+        emojis = sorted(
+            self.emojis,
+            key=lambda emoji: (not emoji.animated, emoji.name.casefold()),
+        )
         animated_chunks = emoji_export_chunks(emojis, animated=True)
         static_chunks = emoji_export_chunks(emojis, animated=False)
         if not animated_chunks and not static_chunks:
             return await interaction.response.send_message(
-                "Ce serveur n'a aucun emoji personnalisé à envoyer.", ephemeral=True
+                "L'application SentriX n'a aucun emoji à envoyer.", ephemeral=True
             )
 
         await interaction.response.defer(ephemeral=True)
         try:
             await member.send(
-                f"Voici les **{len(emojis)} emojis personnalisés** de **{self.guild.name}**. "
+                f"Voici les **{len(emojis)} emojis officiels de l'application SentriX**. "
                 "Chaque bloc est prêt à être copié : les emojis animés utilisent `<a:nom:id>` "
                 "et les statiques `<:nom:id>`."
             )
@@ -2002,26 +2018,33 @@ class Utility(commands.Cog, name="Utility"):
     @commands.guild_only()
     @checks.is_owner_or_admin()
     async def emogi(self, ctx: commands.Context):
-        """Ouvre un panneau pour envoyer en MP les markups des emojis du serveur.
+        """Ouvre un panneau pour envoyer en MP le pack du Developer Portal.
 
         La commande reste volontairement en préfixe : elle sert surtout à exporter
         une longue liste copiable, et n'occupe donc pas une commande slash.
         """
-        emojis = list(ctx.guild.emojis)
+        try:
+            emojis = list(await self.bot.fetch_application_emojis())
+        except discord.HTTPException:
+            logger.exception("Impossible de récupérer les emojis d'application SentriX")
+            return await panels.texte_court(
+                ctx,
+                "Impossible de récupérer les emojis de l'application SentriX. Réessayez dans quelques instants.",
+            )
         if not emojis:
             return await panels.texte_court(
                 ctx,
-                "Ce serveur n'a aucun emoji personnalisé à exporter.",
+                "L'application SentriX n'a aucun emoji à exporter.",
             )
 
         animated_count = sum(emoji.animated for emoji in emojis)
         embed = await self._embed(
             ctx.guild.id,
-            title="Envoyer les emojis en message privé",
+            title="Envoyer les emojis SentriX en message privé",
             description=(
-                f"Ce serveur contient **{len(emojis)} emojis**, dont **{animated_count} animés**.\n\n"
+                f"L'application SentriX contient **{len(emojis)} emojis**, dont **{animated_count} animés**.\n\n"
                 "Choisissez un membre dans le menu, puis cliquez sur **Envoyer la liste**. "
-                "Il recevra des blocs prêts à copier avec les noms et identifiants Discord."
+                "Il recevra les emojis du **Developer Portal** sous forme de blocs prêts à copier, avec leurs noms et identifiants Discord."
             ),
             kind="primary",
         )
@@ -2029,13 +2052,14 @@ class Utility(commands.Cog, name="Utility"):
         # vue ne partent jamais ensemble par ctx.send — c'est ce mélange qui
         # avait fait passer 37 commandes pour migrées alors qu'elles rendaient
         # encore un embed. Le panneau reloge les composants lui-même.
+        # Signature de la vue reprise de la base : elle reçoit la liste des
+        # emojis, plus le serveur, depuis « fix: export SentriX application emojis ».
         await panels.envoyer(
             ctx,
             panels.avec_composants(
-                panels.depuis_embed(embed), EmojiExportView(ctx.author, ctx.guild)
+                panels.depuis_embed(embed), EmojiExportView(ctx.author, emojis)
             ),
         )
-
     @commands.hybrid_command(name="remind", description="Définir un rappel personnel.")
     @app_commands.describe(duree="Durée (ex: 10m, 2h, 1j)", texte="Le texte du rappel")
     async def remind(self, ctx: commands.Context, duree: str, *, texte: str):

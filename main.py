@@ -253,9 +253,6 @@ PRUNED_COMMANDS = COMMANDS_REPLACED_BY_SETUP | EXACT_DUPLICATE_COMMANDS | MOVED_
 PUBLIC_COMMANDS = frozenset({
     # Aide et utilitaires sans modification du serveur
     "help", "ping", "avatar", "info", "userinfo", "status", "about", "profile-card",
-    # 21/11/2026 : catalogue des icônes SentriX. Lecture seule, ne touche à
-    # rien sur le serveur, et le gros du catalogue part en privé.
-    "emojis",
     # +serverinfo est le pont installe par premium_ui_v81 vers « info serveur »,
     # +leaderboard celui vers leaderboard-levels : deux racines en lecture seule
     # dont les cibles sont deja publiques, mais qui n'avaient jamais ete classees.
