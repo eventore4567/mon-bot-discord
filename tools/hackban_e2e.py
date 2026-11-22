@@ -22,6 +22,8 @@ from suggestions_e2e import RESULTS, check  # noqa: E402
 MEMBER = dict(author_id=h.SECOND_ID, author_roles=(h.MEMBER_ROLE_ID,))
 MOD = dict(author_id=h.MOD_ID, author_roles=(h.MOD_ROLE_ID,))
 ABSENT = 100000000000009999
+ABSENT2 = 100000000000008888
+ABSENT3 = 100000000000007777
 
 
 async def main() -> int:
@@ -73,16 +75,28 @@ async def main() -> int:
     real_request = HTTPClient.request
 
     async def absent(self, route, *args, **kwargs):
-        if route.url.replace(Route.BASE, "") == f"/guilds/{h.GID}/members/{ABSENT}":
+        if route.url.replace(Route.BASE, "") in {
+            f"/guilds/{h.GID}/members/{uid}" for uid in (ABSENT, ABSENT2, ABSENT3)
+        }:
             raise discord.NotFound(type("R", (), {"status": 404, "reason": "Not Found"})(),
                                    {"code": 10007, "message": "Unknown Member"})
         return await real_request(self, route, *args, **kwargs)
 
     HTTPClient.request = absent
-    shown, bans = await run(f"+ban <@{ABSENT}> raid", MOD)
-    check(not bans and "n'est pas membre de ce serveur" in shown and f"+hackban {ABSENT}" in shown
-          and "Indiquez une mention" not in shown,
-          "+ban sur la mention d'un absent : « n'est pas membre de ce serveur » + « +hackban »", shown[:200])
+    # 22/11/2026 : « fais qu'on puisse ban avec l'ID ». +ban sur un compte absent
+    # ne renvoie plus vers +hackban : il le bannit, par le même chemin.
+    since = len(h.CALLS)
+    shown, bans = await run(f"+ban {ABSENT2} raid", MOD)
+    check(bans == [f"/guilds/{h.GID}/bans/{ABSENT2}"],
+          "+ban <ID> d'un compte absent le bannit directement", f"{bans} | {shown[:200]}")
+    rows = await sanctions(ABSENT2)
+    check(len(rows) == 1 and rows[0]["action"] == "ban" and rows[0]["moderator_id"] == h.MOD_ID,
+          "+ban <ID> enregistre le dossier au nom du modérateur", str(rows))
+    shown, bans = await run(f"+ban <@{ABSENT3}> raid", MOD)
+    check(bans == [f"/guilds/{h.GID}/bans/{ABSENT3}"] and "Indiquez une mention" not in shown,
+          "+ban sur la mention d'un absent le bannit aussi", f"{bans} | {shown[:200]}")
+    shown, bans = await run(f"+ban {ABSENT2} encore", MOD)
+    check(not bans, "+ban <ID> d'un compte déjà banni ne rebannit pas", shown[:160])
     shown, _ = await run(f"+warn <@{ABSENT}> spam", MOD)
     check("n'est pas membre de ce serveur" in shown and "hackban" not in shown,
           "+warn sur la mention d'un absent : la vraie raison, sans proposer +hackban", shown[:200])

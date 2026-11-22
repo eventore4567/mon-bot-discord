@@ -855,7 +855,7 @@ class Moderation(commands.Cog):
 
     @commands.hybrid_command(name="ban", description="Bannir définitivement un membre du serveur.")
     @app_commands.describe(
-        membre="Membre à bannir",
+        membre="Membre à bannir, ou identifiant d'un compte absent du serveur",
         raison="Raison du bannissement",
         envoyer_mp="True : envoyer le MP de sanction avant le ban ; False : aucun MP",
         supprimer_messages="Anciens messages à supprimer : conserver, 15 minutes, 1 heure ou 24 heures.",
@@ -864,20 +864,33 @@ class Moderation(commands.Cog):
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("ban_members",), target="member_moderation")
     async def ban(
-        self, ctx: commands.Context, membre: discord.Member, *,
+        self, ctx: commands.Context, membre: discord.Member | discord.User, *,
         raison: str = "Aucune raison fournie",
         envoyer_mp: bool = True,
         supprimer_messages: Literal["Conserver", "15 minutes", "1 heure", "24 heures"] = "Conserver",
     ):
-        """Bannit avec le choix de suppression fourni dans les options de la commande."""
+        """Bannit avec le choix de suppression fourni dans les options de la commande.
+
+        22/11/2026 : « fais qu'on puisse ban avec l'ID ». Un identifiant d'un
+        compte ABSENT du serveur est accepté et suit le chemin de +hackban
+        (_bannir_absent : compte réel vérifié, immunité, déjà banni…). Un membre
+        présent passe toujours par la hiérarchie des rôles ci-dessous.
+        """
         raison = clean_reason(raison)
-        if not await self.check_targetable(ctx, membre):
-            return
         periods = {"Conserver": 0, "15 minutes": 900, "1 heure": 3600, "24 heures": 86400}
         if supprimer_messages not in periods:
             return await self._reply(
                 ctx, "Choisissez Conserver, 15 minutes, 1 heure ou 24 heures.", ephemere=True,
             )
+        if not isinstance(membre, discord.Member):
+            present = ctx.guild.get_member(membre.id)
+            if present is None:
+                return await self._bannir_absent(
+                    ctx, membre, raison, delete_message_seconds=periods[supprimer_messages],
+                )
+            membre = present
+        if not await self.check_targetable(ctx, membre):
+            return
         await self._ack(ctx)
         result = await self._perform_ban(
             ctx, membre, raison, delete_message_seconds=periods[supprimer_messages], send_confirmation=True,
@@ -1077,9 +1090,11 @@ class Moderation(commands.Cog):
     async def hackban(self, ctx: commands.Context, user_id: str, *, raison: str = "Aucune raison fournie"):
         """Bannissement préventif d'un compte absent du serveur.
 
-        Une commande séparée plutôt qu'un +ban qui accepterait tout identifiant :
-        une faute de frappe dans +ban ne doit jamais bannir un inconnu. Une
-        personne PRÉSENTE est renvoyée vers +ban, où la hiérarchie s'applique.
+        22/11/2026 : +ban <ID> fait désormais la même chose (_bannir_absent) ;
+        +hackban reste pour qui en a l'habitude. Une faute de frappe ne bannit
+        pas un inconnu : l'identifiant doit désigner un compte Discord réel, et
+        la confirmation montre qui a été banni. Une personne PRÉSENTE est
+        renvoyée vers +ban, où la hiérarchie s'applique.
         """
         raison = clean_reason(raison)
         digits = user_id.strip().removeprefix("<@").removeprefix("!").removesuffix(">")
@@ -1093,6 +1108,26 @@ class Moderation(commands.Cog):
         if ctx.guild.get_member(uid) is not None:
             return await self._reply(ctx, f"<@{uid}> est sur le serveur : utilisez `+ban`, qui vérifie la hiérarchie des rôles.", ephemere=True)
         try:
+            user = await self.bot.fetch_user(uid)
+        except discord.NotFound:
+            return await self._reply(ctx, "Aucun compte Discord ne porte cet identifiant.", ephemere=True)
+        await self._bannir_absent(ctx, user, raison)
+
+    async def _bannir_absent(
+        self, ctx: commands.Context, user: discord.abc.User, raison: str, *, delete_message_seconds: int = 0,
+    ) -> None:
+        """Bannissement d'un compte absent du serveur, par +ban <ID> ou +hackban <ID>.
+
+        Le compte a été résolu par Discord (il existe réellement) : une faute de
+        frappe donne « aucun compte » au lieu de bannir un inconnu, et la
+        confirmation affiche son nom et son avatar.
+        """
+        uid = int(user.id)
+        if uid == ctx.author.id:
+            return await self._reply(ctx, "Vous ne pouvez pas vous bannir vous-même.", ephemere=True)
+        if uid == getattr(self.bot.user, "id", None) or uid == ctx.guild.owner_id:
+            return await self._reply(ctx, "Ce compte ne peut pas être banni.", ephemere=True)
+        try:
             row = await self.bot.db.fetchone(
                 "SELECT enabled FROM user_immunity_settings WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, uid),
             )
@@ -1100,10 +1135,6 @@ class Moderation(commands.Cog):
             row = None
         if row is not None and int(row["enabled"] or 0):
             return await self._reply(ctx, "Ce compte a activé son immunité SentriX.", ephemere=True)
-        try:
-            user = await self.bot.fetch_user(uid)
-        except discord.NotFound:
-            return await self._reply(ctx, "Aucun compte Discord ne porte cet identifiant.", ephemere=True)
         try:
             await ctx.guild.fetch_ban(user)
             return await self._reply(ctx, f"{user.mention} est déjà banni de ce serveur.", ephemere=True)
@@ -1113,7 +1144,9 @@ class Moderation(commands.Cog):
             return await self._reply(ctx, "Cette sanction vient déjà d'être lancée sur ce compte.", ephemere=True)
         await self._ack(ctx)
         log_service.mark_sanction(ctx.guild.id, uid, "ban")
-        await ctx.guild.ban(user, reason=f"{ctx.author} : {raison} (hors serveur)", delete_message_seconds=0)
+        await ctx.guild.ban(
+            user, reason=f"{ctx.author} : {raison} (hors serveur)", delete_message_seconds=delete_message_seconds,
+        )
         case_number, _error = await moderation_service.persist_sanction(
             self.bot, guild_id=ctx.guild.id, target_id=uid, actor_id=ctx.author.id, action="ban", reason=raison,
         )
