@@ -84,6 +84,9 @@ class ForbiddenWordsUI(commands.Cog):
             incident = runtime.incidents.get(key)
             if incident is not None and now_ts - incident.started < automod_module.INCIDENT_WINDOW_SECONDS:
                 incident.deleted += 1
+                # Une rafale reste un incident, mais chaque mot interdit compte
+                # pour l'escalade (avertissement puis mute).
+                await runtime._escalader_dans_incident(message, incident, filter_name, reason)
                 return
 
             incident = automod_module._Incident(

@@ -2961,17 +2961,15 @@ class AutoMod(commands.Cog, name="Automod"):
                 return "avertissement", infractions
 
             duree = ESCALADE_MUTE_DURATIONS_SECONDS[min(mutes, len(ESCALADE_MUTE_DURATIONS_SECONDS) - 1)]
-            # La carte d'incident AutoMod est le seul log : pas de doublon « Timeout appliqué ».
-            log_service.mark_sanction(guild.id, member.id, "timeout")
-            try:
-                await member.timeout(
-                    discord.utils.utcnow() + timedelta(seconds=duree),
-                    reason=f"AutoMod : récidive ({infractions} infractions sans une heure de calme) — {reason}",
-                )
-            except (discord.Forbidden, discord.HTTPException):
-                logger.warning(
-                    "Mute d'escalade impossible guild=%s membre=%s.", guild.id, member.id, exc_info=True,
-                )
+            # _muter, comme le spam : il garde un timeout plus long déjà en place
+            # (posé par un modérateur ou une autre protection), et si Discord refuse
+            # le timeout il bascule sur le mute SentriX (suppression de chaque
+            # message) et prévient le propriétaire, au lieu d'abandonner en silence.
+            resultat = await self._muter(
+                guild, member, duree,
+                f"récidive ({infractions} infractions sans une heure de calme) — {reason}",
+            )
+            if resultat == "mute_failed":
                 return "mute_failed", infractions
             await self._noter_mute_contenu(guild.id, member.id)
             self.__dict__.setdefault("_durees_escalade", {})[cle] = duree
@@ -5149,6 +5147,49 @@ class AutoMod(commands.Cog, name="Automod"):
         view.add_item(box)
         return view
 
+    async def _escalader_dans_incident(
+        self, message: discord.Message, incident: _Incident, filter_name: str, reason: str,
+    ) -> None:
+        """Compte une nouvelle infraction de contenu regroupée dans un incident en cours.
+
+        Une rafale reste UN incident (une carte, un avertissement), mais chaque
+        message fautif est une infraction : sans ce comptage, une deuxième
+        insulte ou un deuxième lien envoyé dans les 30 s n'atteignait jamais
+        l'escalade, et « 1 avertissement puis mute » ne mutait pas.
+        """
+        if incident.action in ("mute", "mute_failed", "derank"):
+            return  # déjà sanctionné dans cet incident : pas de palier par message
+        try:
+            action, infractions = await self._maybe_escalate(message.guild, message.author, reason)
+        except Exception:
+            logger.exception(
+                "Escalade AutoMod indisponible guild=%s user=%s filtre=%s.",
+                message.guild.id, message.author.id, filter_name,
+            )
+            return
+        incident.infractions = infractions
+        if action in (None, "avertissement"):
+            return
+        incident.action = action
+        if action == "mute":
+            incident.duration_s = self.duree_mute_escalade(message.guild.id, message.author.id)
+        try:
+            await self.bot.db.log_automod_action(
+                message.guild.id, message.author.id, filter_name, action, reason,
+            )
+        except Exception:
+            logger.exception("Historique de sanction AutoMod indisponible guild=%s.", message.guild.id)
+        if action == "mute":
+            try:
+                await panels.texte_court(
+                    message.channel,
+                    f"{message.author.mention}, récidive : mute de "
+                    f"{helpers.format_duration(incident.duration_s)}.",
+                    supprimer_apres=6,
+                )
+            except discord.HTTPException:
+                pass
+
     async def _delete_and_warn(
         self,
         message: discord.Message,
@@ -5243,6 +5284,8 @@ class AutoMod(commands.Cog, name="Automod"):
                 and not (filter_name == "antimention" and incident.filter_name != "antimention")):
             incident.deleted += 1
             await finish_deletion()
+            if allow_escalation and filter_name not in SPAM_FILTERS and filter_name != "antiscam":
+                await self._escalader_dans_incident(message, incident, filter_name, reason)
             return
         incident = _Incident(
             started=now_ts,
