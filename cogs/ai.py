@@ -1679,9 +1679,27 @@ class Ai(commands.Cog, name="Ai"):
                 return True
 
             if intent == "role.create":
+                name = str(action.slots["name"]).strip()[:100]
+                # 22/11/2026 : un deuxième « Ping live » ne sert à rien et embrouille
+                # les sélecteurs de /setup : on signale celui qui existe déjà.
+                existant = next(
+                    (r for r in guild.roles if ai_actions.normalize_text(r.name) == ai_actions.normalize_text(name)),
+                    None,
+                )
+                if existant is not None:
+                    await reply(f"Le rôle {existant.mention} existe déjà.")
+                    return True
+                colour = discord.Colour.default()
+                couleur = str(action.slots.get("color") or "").strip()
+                if couleur:
+                    parsed = self._parse_native_colour(couleur)
+                    if parsed is None:
+                        await reply("Couleur invalide. Utilisez un nom simple comme **rouge** ou un code **#RRGGBB**.")
+                        return True
+                    colour = parsed
                 try:
-                    role = await guild.create_role(name=str(action.slots["name"])[:100], reason=reason)
-                    await reply(f"Rôle créé : **{role.name}**.")
+                    role = await guild.create_role(name=name, colour=colour, reason=reason)
+                    await reply(f"Rôle créé : {role.mention}.")
                 except (discord.Forbidden, discord.HTTPException):
                     await reply("Je n’ai pas pu créer ce rôle.")
                 return True

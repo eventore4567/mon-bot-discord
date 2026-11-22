@@ -308,7 +308,7 @@ ACTIONS: dict[str, ActionSpec] = {
         description="rendre une catégorie privée et l'autoriser uniquement à un rôle",
     ),
     "role.create": ActionSpec(
-        "role.create", None, ("name",), (), None, "medium",
+        "role.create", None, ("name",), ("color",), None, "medium",
         description="créer un rôle",
     ),
     "role.color": ActionSpec(
@@ -818,6 +818,94 @@ def looks_action_request(text: str) -> bool:
     return direct or (polite and action_verb.start() <= 80)
 
 
+# 22/11/2026 : « je veux que tu crées le rôle Ping live » — SentriX répondait
+# qu'il ne pouvait pas, alors que l'action role.create existe. Les trois motifs
+# de création exigeaient la phrase exacte « crée un rôle X » : « crée LE rôle »,
+# « crée LA catégorie », « crée-MOI un salon », « ajoute un salon » ou une phrase
+# qui ne commence pas par le verbe ne déclenchaient rien. Et le nom était pris
+# dans le texte normalisé : « Ping live » devenait « ping live ».
+_VERBE_CREATION = r"(?:cr[ée]{1,2}[ée]?r?|creer|cree|ajoute[rz]?|fais|fait|fabrique|make|create)"
+_TEMPS_PASSE = re.compile(
+    r"(?:\b(?:as|a|avez|ai|t'?as|j'?ai|deja|déjà|tu\s+avais|il\s+a)\s+)$", re.IGNORECASE,
+)
+_CREATION_RE = re.compile(
+    rf"\b{_VERBE_CREATION}(?:[\s-]+(?:moi|nous|-moi))?\s+"
+    r"(?:(?:un|une|le|la|les|l['’]|des|du|mon|ma|nouveau|nouvelle)\s*)*"
+    r"(?P<genre>r[oô]le|cat[ée]gorie|category|salon|channel|vocal|vocale|voc|voice|textuel|texte|text)\b"
+    r"(?:\s+(?P<sous>vocal|vocale|voc|voice|textuel|texte|text|écrit|ecrit))?"
+    r"(?P<reste>.*)$",
+    re.IGNORECASE,
+)
+_COULEURS_ROLE = (
+    "rouge", "red", "bleu", "blue", "vert", "green", "jaune", "yellow", "orange", "violet", "purple",
+    "rose", "pink", "turquoise", "teal", "gris", "grey", "gray", "noir", "black", "blanc", "white",
+    "marron", "brown", "blurple", "or", "gold", "cyan",
+)
+
+
+def _nom_cree(reste: str) -> str:
+    reste = re.sub(r"^\s*(?:appel[ée]e?|nomm[ée]e?|qui\s+s['’]appelle|intitul[ée]e?|:|=)\s*", "", reste, flags=re.IGNORECASE)
+    # « … Ping live pas give », « … mais pas le donner » : la négation n'est pas le nom.
+    reste = re.split(r"\s+(?:et\s+|mais\s+)?(?:pas|ne\s+le|ne\s+la)\b", reste, maxsplit=1, flags=re.IGNORECASE)[0]
+    reste = re.sub(r"\s+(?:stp|svp|s'?il\s+te\s+pla[iî]t|merci|please|pls)\b.*$", "", reste, flags=re.IGNORECASE)
+    return reste.strip().strip("«»\"'“”‘’`").strip(" .,:;!?-")
+
+
+def _creation(question: str) -> "ParsedAction | None":
+    match = _CREATION_RE.search(question)
+    if match is None or _TEMPS_PASSE.search(question[: match.start()]):
+        return None
+    avant = normalize_text(question[: match.start()])
+    verbe = normalize_text(match.group(0).split()[0])
+    # « fais/fait » est trop courant (« ça fait un salon de trop », « il fait un
+    # role play ») : il ne vaut création qu'en tête de phrase, ou après une
+    # formule de politesse.
+    if verbe.startswith(("fai", "make")) and re.sub(
+        r"\b(?:stp|svp|s il te plait|tu peux|peux tu|je veux que tu|vas y|go|oui|non|et|alors)\b", "", avant,
+    ).strip():
+        return None
+    genre = normalize_text(match.group("genre"))
+    sous = normalize_text(match.group("sous") or "")
+    reste = match.group("reste") or ""
+    slots: dict[str, Any] = {}
+
+    if genre in {"role"}:
+        # « ajoute le rôle VIP à @bob » / « … à tout le monde » : c'est DONNER un
+        # rôle existant (role.give, role.mass), pas en créer un.
+        if re.search(r"\s(?:a|à|au|aux)\s+(?:@|<@|tout|tous|toutes|chaque|everyone)", reste, re.IGNORECASE):
+            return None
+        nom = _nom_cree(reste)
+        mots = nom.split()
+        if len(mots) >= 2 and normalize_text(mots[-1]) in _COULEURS_ROLE:
+            slots["color"] = mots[-1]
+            nom = " ".join(mots[:-1])
+        elif re.search(r"\s#?[0-9a-fA-F]{6}$", nom):
+            nom, couleur = nom.rsplit(maxsplit=1)
+            slots["color"] = couleur
+        if nom:
+            slots["name"] = nom[:100]
+        return ParsedAction("role.create", slots, 99, "local")
+
+    if genre in {"categorie", "category"}:
+        nom = _nom_cree(reste)
+        if nom:
+            slots["name"] = nom[:100]
+        return ParsedAction("category.create", slots, 99, "local")
+
+    vocal = genre in {"vocal", "vocale", "voc", "voice"} or sous in {"vocal", "vocale", "voc", "voice"}
+    dans = re.search(
+        r"\s+(?:dans|sous|en)\s+(?:la\s+)?(?:cat[ée]gorie|category)\s+(?P<cat>.+)$", reste, re.IGNORECASE,
+    )
+    if dans:
+        slots["category"] = _nom_cree(dans.group("cat"))[:100]
+        reste = reste[: dans.start()]
+    nom = _nom_cree(reste)
+    if nom:
+        slots["name"] = nom[:100]
+    return ParsedAction("channel.create_voice" if vocal else "channel.create_text", slots, 99, "local")
+
+
+
 def _gestes_courants(question: str, normalized: str) -> ParsedAction | None:
     """Salon (verrouiller, mode lent), préfixe et rôle pour tous (03/11/2026)."""
     if re.search(r"\b(?:deverrouille|unlock|rouvre)\b(?:\s+(?:le|ce|du))?\s+(?:salon|channel)\b", normalized):
@@ -892,34 +980,9 @@ def local_parse(question: str) -> ParsedAction | None:
         if re.search(r"\b(?:rejoint|rejoins|rejoin|regoin|reg|join|viens|connecte(?:[- ]?toi)?)\b", normalized):
             return ParsedAction("voice.join", {}, confidence=99, source="local")
 
-    # « crée une voc » doit être comprise comme une action incomplète : SentriX
-    # demandera simplement le nom au lieu de répondre qu'il ne peut pas agir.
-    create_match = re.search(
-        r"\b(?:cree|crée|creer|créer|ajoute|ajouter)\s+(?:moi\s+)?(?:un(?:e)?\s+)?"
-        r"(?:(?:salon|channel)\s+)?(vocal|vocale|voc|voice|textuel|texte|text)\b(.*)$",
-        question,
-        re.IGNORECASE,
-    )
-    if create_match:
-        kind = normalize_text(create_match.group(1))
-        tail = create_match.group(2).strip(" .,:;!-")
-        tail = re.sub(r"^(?:appele|appelé|nomme|nommé|qui s['’]appelle)\s+", "", tail, flags=re.IGNORECASE).strip()
-        slots: dict[str, Any] = {}
-        if tail:
-            slots["name"] = tail[:100]
-        return ParsedAction(
-            "channel.create_voice" if kind in {"vocal", "vocale", "voc", "voice"} else "channel.create_text",
-            slots,
-            confidence=99,
-            source="local",
-        )
-
-    category_create = re.search(
-        r"\b(?:cree|crée|creer|créer|ajoute|ajouter)\s+(?:moi\s+)?(?:une\s+)?categorie\s+(.+)$",
-        normalized,
-    )
-    if category_create:
-        return ParsedAction("category.create", {"name": category_create.group(1).strip(" .,:;!-")[:100]}, 99, "local")
+    creation = _creation(question)
+    if creation is not None:
+        return creation
 
     role_color = re.search(
         r"\b(?:mets|met|change|modifie)\s+(?:le\s+)?role\s+(.+?)\s+(?:en|couleur)\s+(#[0-9a-fA-F]{6}|[A-Za-zÀ-ÿ]+)\b",
@@ -933,13 +996,6 @@ def local_parse(question: str) -> ParsedAction | None:
             99,
             "local",
         )
-
-    role_create = re.search(
-        r"\b(?:cree|crée|creer|créer|ajoute|ajouter)\s+(?:moi\s+)?(?:un\s+)?role\s+(.+)$",
-        normalized,
-    )
-    if role_create:
-        return ParsedAction("role.create", {"name": role_create.group(1).strip(" .,:;!-")[:100]}, 99, "local")
 
     role_change = re.search(
         r"\b(donne|ajoute|retire|enleve|enlève)\s+(?:le\s+)?role\s+(.+?)\s+(?:a|à|de)\s+@?([^\s,;]+)",
