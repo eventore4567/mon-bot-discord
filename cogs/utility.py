@@ -45,14 +45,34 @@ def _emoji_markup(emoji: Any) -> str:
     return f"<{prefix}:{emoji.name}:{emoji.id}>"
 
 
-def emoji_export_chunks(emojis: list[Any], *, animated: bool) -> list[str]:
+def _emoji_image_url(emoji: Any) -> str:
+    """Lien direct de l'image, déduit de l'identifiant sans appel réseau.
+
+    Le CDN de Discord sert un emoji à ``/emojis/<id>.<ext>`` : ``.gif`` pour
+    un animé (sinon l'animation est perdue), ``.png`` pour un statique.
+    """
+    extension = "gif" if emoji.animated else "png"
+    return f"https://cdn.discordapp.com/emojis/{emoji.id}.{extension}"
+
+
+def emoji_export_chunks(
+    emojis: list[Any], *, animated: bool, links: bool = False
+) -> list[str]:
     """Découpe les emojis en blocs de code qui restent copiables en MP.
 
-    Discord limite un message à 2 000 caractères. Chaque ligne est volontairement
+    Discord limite un message à 2 000 caractères. Par défaut, chaque ligne est
     le markup complet (``<:nom:id>`` ou ``<a:nom:id>``) afin que le destinataire
     puisse tout sélectionner et coller sans devoir activer le mode développeur.
+
+    Avec ``links=True``, chaque ligne devient ``nom  lien-direct-de-l'image``.
+    Les liens partent dans des blocs séparés plutôt qu'à côté du markup : un
+    bloc de markup doit rester collable tel quel dans un message Discord.
     """
-    lines = [_emoji_markup(emoji) for emoji in emojis if emoji.animated is animated]
+    selected = [emoji for emoji in emojis if emoji.animated is animated]
+    if links:
+        lines = [f"{emoji.name}  {_emoji_image_url(emoji)}" for emoji in selected]
+    else:
+        lines = [_emoji_markup(emoji) for emoji in selected]
     if not lines:
         return []
 
@@ -142,6 +162,8 @@ class EmojiExportView(discord.ui.View):
         )
         animated_chunks = emoji_export_chunks(emojis, animated=True)
         static_chunks = emoji_export_chunks(emojis, animated=False)
+        animated_links = emoji_export_chunks(emojis, animated=True, links=True)
+        static_links = emoji_export_chunks(emojis, animated=False, links=True)
         if not animated_chunks and not static_chunks:
             return await interaction.response.send_message(
                 "L'application SentriX n'a aucun emoji à envoyer.", ephemeral=True
@@ -152,7 +174,8 @@ class EmojiExportView(discord.ui.View):
             await member.send(
                 f"Voici les **{len(emojis)} emojis officiels de l'application SentriX**. "
                 "Chaque bloc est prêt à être copié : les emojis animés utilisent `<a:nom:id>` "
-                "et les statiques `<:nom:id>`."
+                "et les statiques `<:nom:id>`. Les liens directs des images suivent, "
+                "en `.gif` pour les animés et en `.png` pour les statiques."
             )
             for index, chunk in enumerate(animated_chunks, start=1):
                 suffix = f" ({index}/{len(animated_chunks)})" if len(animated_chunks) > 1 else ""
@@ -160,6 +183,15 @@ class EmojiExportView(discord.ui.View):
             for index, chunk in enumerate(static_chunks, start=1):
                 suffix = f" ({index}/{len(static_chunks)})" if len(static_chunks) > 1 else ""
                 await member.send(f"**Emojis statiques{suffix}**\n```\n{chunk}\n```")
+            # Les liens restent dans des blocs de code : hors bloc, Discord
+            # afficherait un aperçu d'image par lien et noierait le MP.
+            for title, link_chunks in (
+                ("Liens des emojis animés", animated_links),
+                ("Liens des emojis statiques", static_links),
+            ):
+                for index, chunk in enumerate(link_chunks, start=1):
+                    suffix = f" ({index}/{len(link_chunks)})" if len(link_chunks) > 1 else ""
+                    await member.send(f"**{title}{suffix}**\n```\n{chunk}\n```")
         except discord.Forbidden:
             return await interaction.followup.send(
                 f"Impossible d'envoyer un message privé à {member.mention} : ses MP sont fermés.",
@@ -2056,7 +2088,7 @@ class Utility(commands.Cog, name="Utility"):
             description=(
                 f"L'application SentriX contient **{len(emojis)} emojis**, dont **{animated_count} animés**.\n\n"
                 "Choisissez un membre dans le menu, puis cliquez sur **Envoyer la liste**. "
-                "Il recevra les emojis du **Developer Portal** sous forme de blocs prêts à copier, avec leurs noms et identifiants Discord."
+                "Il recevra les emojis du **Developer Portal** sous forme de blocs prêts à copier, avec leurs noms et identifiants Discord, puis les liens directs de leurs images."
             ),
             kind="primary",
         )
