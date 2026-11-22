@@ -22,9 +22,42 @@ import re
 import unicodedata
 
 #: Chiffres et symboles utilisés à la place des lettres : « d0x », « n1k ».
-_LEET = str.maketrans({
+#: Lecture par défaut de chaque symbole. Gardée en dict pour que ``lectures``
+#: sache laquelle est DÉJÀ couverte et n'essaie que les autres.
+_LEET_LECTURE = {
     "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s",
-})
+}
+_LEET = str.maketrans(_LEET_LECTURE)
+
+#: 22/11/2026 : « vi@le » passait à travers. Le défaut n'était pas l'absence de
+#: traduction du « @ » — elle existait — mais le fait qu'un seul symbole peut
+#: remplacer PLUSIEURS lettres selon celui qui écrit. Ici le « @ » tient la
+#: place du O de « viole », pas celle d'un A : la traduction donnait « viale »,
+#: qui ne correspond à rien.
+#:
+#: On essaie donc chaque lecture plausible. La table ci-dessous liste les
+#: remplacements AMBIGUS seulement ; les autres restent dans _LEET.
+_AMBIGUS = {
+    "@": ("a", "o"),
+    "0": ("o", "a"),
+    "1": ("i", "l"),
+    "!": ("i", "l"),
+    "3": ("e",),
+    "4": ("a",),
+    "5": ("s",),
+    "7": ("t",),
+    "$": ("s",),
+    "+": ("t",),
+    "(": ("c",),
+    "€": ("e",),
+    "*": ("a", "e", "i", "o", "u"),
+}
+
+#: Le produit de toutes les lectures explose vite. Au-delà de cette limite on
+#: s'arrête : un message truffé de symboles est de toute façon attrapé par la
+#: lecture simple, et un filtre de sécurité ne doit pas pouvoir être transformé
+#: en bombe de calcul par un message choisi exprès.
+_MAX_VARIANTES = 24
 
 #: Qui est visé. « vsy » et « vas-y » précèdent souvent la menace, pas la cible.
 _CIBLE = (
@@ -65,6 +98,35 @@ def normaliser(texte: str) -> str:
     return re.sub(r"(.)\1{2,}", r"\1", plat)
 
 
+def lectures(texte: str) -> list[str]:
+    """Toutes les lectures plausibles du texte, la plus simple d'abord.
+
+    « jte vi@le » rend « jte viale » (le @ lu comme un A) ET « jte viole » (lu
+    comme un O). Il suffit qu'UNE lecture corresponde pour lever la main : un
+    obfuscateur ne peut pas choisir une graphie qui échappe aux deux.
+    """
+    brut = str(texte or "").casefold()
+    sorties = [normaliser(brut)]
+    for index, symbole in enumerate(brut):
+        candidats = _AMBIGUS.get(symbole)
+        if not candidats:
+            continue
+        # Celle que _LEET produit déjà est dans la lecture de base : inutile de
+        # la refaire. Un symbole ABSENT de _LEET — « ! », « + », « ( » — n'en a
+        # aucune, et c'est le défaut qui laissait passer « jte n!que » : la
+        # boucle sautait sa première lecture en croyant qu'elle était couverte.
+        deja = _LEET_LECTURE.get(symbole)
+        for lettre in candidats:
+            if lettre == deja:
+                continue
+            if len(sorties) >= _MAX_VARIANTES:
+                return sorties
+            candidat = normaliser(brut[:index] + lettre + brut[index + 1:])
+            if candidat not in sorties:
+                sorties.append(candidat)
+    return sorties
+
+
 def menace_probable(texte: str) -> str | None:
     """Le type de menace repérée, ou None. Large par choix : l'IA tranche après.
 
@@ -72,14 +134,18 @@ def menace_probable(texte: str) -> str | None:
     motif dans la sanction et dans les logs, pour qu'un modérateur comprenne
     d'un coup d'œil ce qui a déclenché.
     """
-    plat = normaliser(texte)
-    if not plat.strip():
+    candidats = [p for p in lectures(texte) if p.strip()]
+    if not candidats:
         return None
-    if _ACTES_GRAVES.search(plat):
-        return "menace_dox"
-    if _MENACE_CIBLEE.search(plat) or _MENACE_COLLEE.search(plat):
-        return "menace_violence"
+    # Le dox d'abord, sur toutes les lectures : c'est l'acte le plus grave et il
+    # ne demande pas de cible explicite.
+    for plat in candidats:
+        if _ACTES_GRAVES.search(plat):
+            return "menace_dox"
+    for plat in candidats:
+        if _MENACE_CIBLEE.search(plat) or _MENACE_COLLEE.search(plat):
+            return "menace_violence"
     return None
 
 
-__all__ = ["menace_probable", "normaliser"]
+__all__ = ["lectures", "menace_probable", "normaliser"]
