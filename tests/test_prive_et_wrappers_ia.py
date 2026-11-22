@@ -105,6 +105,11 @@ def test_l_ecouteur_prive_ne_touche_plus_a_l_ia():
     source = inspect.getsource(bot_experience_v5._install_reply_and_dm_conversations)
     bloc = source.split("if message.guild is None:")[1].split("# Les mentions")[0]
     assert "REFUS_MESSAGE_PRIVE" in bloc
-    assert "send_sentrix_reply" not in bloc, "plus aucun appel IA en privé"
+    # 22/11/2026 : « mp moi » rouvre le privé pour la personne qui l'a demandé,
+    # 24 h (utils/mp_ouvertes). L'appel IA n'existe donc plus que DERRIÈRE ce
+    # contrôle ; pour tous les autres, le refus reste la seule réponse. Le
+    # comportement est vérifié dans tests/test_mp_moi.py.
+    avant_appel = bloc.split("send_sentrix_reply")[0]
+    assert "mp_ouvertes.est_ouverte" in avant_appel, "aucun appel IA en privé sans « mp moi »"
     assert "_send_generated_image_natural" not in bloc, "ni génération d'image"
     assert "ctx.valid" in bloc, "les commandes préfixées restent utilisables en privé"

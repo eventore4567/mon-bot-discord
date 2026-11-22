@@ -334,6 +334,12 @@ ACTIONS: dict[str, ActionSpec] = {
         ), None, "medium",
         description="envoyer un embed riche (titre, texte, couleur, image, miniature, footer, champs, bouton, salon et mention)",
     ),
+    # 22/11/2026 : « mp moi ». Vers soi-même : tout le monde. Vers un autre
+    # membre : le staff seulement (Modérer les membres), voir cogs/ai.py.
+    "member.dm": ActionSpec(
+        "member.dm", None, (), ("target", "text"), "member", "medium",
+        description="envoyer un message privé à l'auteur (« mp moi ») ou, pour le staff, à un membre",
+    ),
     "member.nickname": ActionSpec(
         "member.nickname", None, ("target", "nickname"), (), "member", "medium",
         description="modifier le pseudo serveur d'un membre",
@@ -906,6 +912,46 @@ def _creation(question: str) -> "ParsedAction | None":
 
 
 
+# « mp moi », « dm moi », « écris-moi en privé », « viens en mp »…
+_MP_MOI = re.compile(
+    r"^(?:(?:stp|svp|vas[- ]y|allez|oui|ok|go)\s+)*(?:"
+    r"(?:mp|dm|pv)[- ]?moi"
+    r"|(?:envoie|ecris|écris|parle)[- ]?moi\s+(?:un\s+|en\s+)?(?:mp|dm|pv|message\s+priv[ée]|priv[ée])"
+    r"|viens\s+(?:en\s+)?(?:mp|dm|pv|priv[ée])"
+    r"|(?:tu\s+peux|peux[- ]tu|tu\s+pourrais)\s+m(?:e\s+|['’]\s*|\s+)(?:mp|dm|pv|[ée]crire\s+en\s+(?:mp|dm|priv[ée]))"
+    r")\b(?P<reste>.*)$",
+    re.IGNORECASE,
+)
+# « mp @bob : la réunion est à 20 h », « envoie un mp à @bob pour lui dire … »
+_MP_AUTRUI = re.compile(
+    r"^(?:(?:stp|svp)\s+)*(?:mp|dm|(?:envoie|ecris|écris)\s+(?:un\s+)?(?:mp|dm|message\s+priv[ée]|en\s+priv[ée])\s+[àa])\s+"
+    r"(?P<cible><@!?\d{15,22}>|@[^\s:,]+)\s*(?:[:,-]|pour\s+(?:lui\s+)?dire|dis[- ]lui|et\s+dis[- ]lui)?\s*(?P<texte>.*)$",
+    re.IGNORECASE,
+)
+
+
+def _message_prive(question: str) -> "ParsedAction | None":
+    texte = question.strip()
+    moi = _MP_MOI.match(texte)
+    if moi:
+        reste = moi.group("reste").strip(" .,:;!?-")
+        # Cible explicite : sans elle, la résolution prendrait une mention ou le
+        # message auquel on répond, et écrirait à quelqu'un d'autre.
+        slots: dict[str, Any] = {"target": "__self__"}
+        if reste and not re.fullmatch(r"(?:stp|svp|s'?il\s+te\s+pla[iî]t|please|pls|stp\s+merci)", reste, re.IGNORECASE):
+            slots["text"] = reste[:1500]
+        return ParsedAction("member.dm", slots, 99, "local")
+    autrui = _MP_AUTRUI.match(texte)
+    if autrui:
+        slots = {"target": autrui.group("cible").strip()}
+        message = autrui.group("texte").strip()
+        if message:
+            slots["text"] = message[:1500]
+        return ParsedAction("member.dm", slots, 99, "local")
+    return None
+
+
+
 def _gestes_courants(question: str, normalized: str) -> ParsedAction | None:
     """Salon (verrouiller, mode lent), préfixe et rôle pour tous (03/11/2026)."""
     if re.search(r"\b(?:deverrouille|unlock|rouvre)\b(?:\s+(?:le|ce|du))?\s+(?:salon|channel)\b", normalized):
@@ -979,6 +1025,10 @@ def local_parse(question: str) -> ParsedAction | None:
             return ParsedAction("voice.leave", {}, confidence=99, source="local")
         if re.search(r"\b(?:rejoint|rejoins|rejoin|regoin|reg|join|viens|connecte(?:[- ]?toi)?)\b", normalized):
             return ParsedAction("voice.join", {}, confidence=99, source="local")
+
+    prive = _message_prive(question)
+    if prive is not None:
+        return prive
 
     creation = _creation(question)
     if creation is not None:

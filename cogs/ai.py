@@ -1420,6 +1420,62 @@ class Ai(commands.Cog, name="Ai"):
             return discord.Colour(int(match.group(1), 16))
         return None
 
+    async def _message_prive(self, message, action, member, reply) -> bool:
+        """« mp moi » : SentriX écrit en privé, et la conversation y continue 24 h.
+
+        22/11/2026 : « genre ça MP la personne en lui disant "tu voulais me dire
+        quoi" ». Vers soi-même, tout le monde peut le demander. Vers un autre
+        membre, il faut « Modérer les membres » et un texte : le message privé
+        dit qui l'envoie, pour qu'on ne puisse pas faire parler SentriX à sa place.
+        """
+        from utils import mp_ouvertes
+
+        guild, actor = message.guild, message.author
+        texte = str(action.slots.get("text") or "").strip()
+        vers_autrui = member is not None and member.id != actor.id
+        if vers_autrui:
+            perms = getattr(actor, "guild_permissions", None)
+            if actor.id != guild.owner_id and not getattr(perms, "moderate_members", False):
+                await reply("Il faut la permission **Modérer les membres** pour que j'écrive à un autre membre.")
+                return True
+            if getattr(member, "bot", False):
+                await reply("Je n'écris pas en privé à un bot.")
+                return True
+            if not texte:
+                await reply(f"Que voulez-vous que je dise à {member.mention} ?")
+                return True
+            corps = (
+                f"📩 **Message de {actor.display_name}** (serveur **{guild.name}**) :\n"
+                f"> {texte[:1500]}"
+            )
+            destinataire = member
+        else:
+            corps = (
+                f"👋 Bonjour {actor.display_name} ! Vous m'avez demandé de vous écrire depuis "
+                f"**{guild.name}**.\n"
+                + (f"> {texte[:500]}\n" if texte else "")
+                + "Vous vouliez me dire quoi ? Répondez-moi ici, je vous écoute."
+            )
+            destinataire = actor
+        try:
+            await destinataire.send(corps, allowed_mentions=discord.AllowedMentions.none())
+        except discord.Forbidden:
+            qui = "ses" if vers_autrui else "vos"
+            await reply(f"Je ne peux pas écrire en privé : {qui} messages privés sont fermés.")
+            return True
+        except discord.HTTPException:
+            await reply("Discord a refusé l'envoi du message privé. Réessayez dans un instant.")
+            return True
+        if not vers_autrui:
+            try:
+                await mp_ouvertes.ouvrir(self.bot, actor.id, guild.id)
+            except Exception:  # noqa: BLE001 — le MP est parti ; la fenêtre est un plus
+                logger.warning("Fenêtre de conversation privée non ouverte pour %s.", actor.id, exc_info=True)
+            await reply("📩 Je vous ai écrit en message privé.")
+        else:
+            await reply(f"📩 Message privé envoyé à {member.mention}.")
+        return True
+
     async def _execute_native_action(
         self,
         message: discord.Message,
@@ -1517,6 +1573,9 @@ class Ai(commands.Cog, name="Ai"):
             except discord.HTTPException:
                 await reply("Je n’ai pas réussi à quitter le salon vocal.")
             return True
+
+        if intent == "member.dm":
+            return await self._message_prive(message, action, member, reply)
 
         if intent == "server.rename":
             if actor.id != guild.owner_id and not actor.guild_permissions.manage_guild:
