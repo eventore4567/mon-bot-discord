@@ -337,16 +337,39 @@ async def test_immunity_on_blocks_sentrix_sanctions():
     assert error is not None
     assert "immunité SentriX" in error
 
-def test_content_policy_wrapper_accepts_censored_content_and_honors_immunity_off():
-    from pathlib import Path
-    source = (Path(__file__).resolve().parents[1] / "cogs" / "content_filter_policy.py").read_text(encoding="utf-8")
-    assert "censored_content: str | None = None" in source
-    assert "censored_content=censored_content" in source
-    assert "override is False" in source
-    # 22/11/2026 : la politique ne remplace plus _maybe_escalate, elle n'a donc
-    # plus d'original à rappeler. L'immunité OFF du propriétaire est reprise dans
-    # AutoMod._maybe_escalate (test_le_proprietaire_qui_coupe_son_immunite_est_compte).
-    assert "original_maybe_escalate" not in source
+@pytest.mark.parametrize(
+    ("auteur_id", "override", "protege"),
+    [
+        (999, None, True),    # propriétaire du serveur, immunité par défaut
+        (999, True, True),
+        (999, False, False),  # il a coupé son immunité : les filtres s'appliquent
+        (42, None, False),    # membre ordinaire
+    ],
+)
+def test_le_proprietaire_du_serveur_est_protege_sauf_immunite_coupee(auteur_id, override, protege):
+    """22/11/2026 : la règle vivait dans un enrobage de _delete_and_warn installé
+    par cogs/content_filter_policy (ce test vérifiait alors le texte de cet
+    enrobage). Elle est maintenant dans AutoMod._proprietaire_protege, appelée
+    par _delete_and_warn et _maybe_escalate : on vérifie son comportement."""
+    import asyncio
+
+    cog = automod_module.AutoMod.__new__(automod_module.AutoMod)
+    cog.get_immunity_override_cached = AsyncMock(return_value=override)
+    guild = SimpleNamespace(id=1, owner_id=999)
+    assert asyncio.run(cog._proprietaire_protege(guild, SimpleNamespace(id=auteur_id))) is protege
+
+
+def test_un_proprietaire_protege_ne_voit_pas_son_message_supprime():
+    import asyncio
+
+    cog = automod_module.AutoMod.__new__(automod_module.AutoMod)
+    cog.get_immunity_override_cached = AsyncMock(return_value=None)
+    message = SimpleNamespace(
+        guild=SimpleNamespace(id=1, owner_id=999), author=SimpleNamespace(id=999), delete=AsyncMock(),
+    )
+    assert asyncio.run(cog._delete_and_warn(message, "lien", "antilink")) is None
+    message.delete.assert_not_awaited()
+
 
 def test_normalize_link_text_repairs_split_scheme_and_separates_concatenated_urls():
     raw = "https:/ /discord.gg/GgYzEFSshttps://discord.gg/Another"

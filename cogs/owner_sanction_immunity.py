@@ -195,8 +195,6 @@ def install(bot: commands.Bot) -> None:
     try:
         from . import automod
         original_exempt = automod.AutoMod.is_automod_exempt
-        original_delete_warn = automod.AutoMod._delete_and_warn
-        original_delete_timeout = automod.AutoMod._delete_and_timeout
         original_antinuke_exempt = automod.AutoMod.is_antinuke_exempt
         original_punish_nuker = automod.AutoMod.punish_nuker
 
@@ -204,16 +202,6 @@ def install(bot: commands.Bot) -> None:
             if is_bot_owner_id(getattr(member, "id", None)):
                 return True
             return await original_exempt(self, member)
-
-        async def delete_and_warn_protected(self, message, reason, filter_name="automod"):
-            if is_bot_owner_id(getattr(message.author, "id", None)):
-                return None
-            return await original_delete_warn(self, message, reason, filter_name)
-
-        async def delete_and_timeout_protected(self, message, reason, *, detection_kind):
-            if is_bot_owner_id(getattr(message.author, "id", None)):
-                return None
-            return await original_delete_timeout(self, message, reason, detection_kind=detection_kind)
 
         async def antinuke_exempt_protected(self, guild, actor):
             if is_bot_owner_id(getattr(actor, "id", None)):
@@ -252,10 +240,9 @@ def install(bot: commands.Bot) -> None:
 
         patches = (
             ("is_automod_exempt", original_exempt, is_automod_exempt_protected),
-            # _maybe_escalate n'est plus remplacée ici (22/11/2026) : l'exemption
-            # du propriétaire du bot est écrite dans la méthode elle-même.
-            ("_delete_and_warn", original_delete_warn, delete_and_warn_protected),
-            ("_delete_and_timeout", original_delete_timeout, delete_and_timeout_protected),
+            # _maybe_escalate, _delete_and_warn et _delete_and_timeout ne sont plus
+            # remplacées ici (22/11/2026) : l'exemption du propriétaire du bot est
+            # écrite dans AutoMod._proprietaire_protege, que les trois appellent.
             ("is_antinuke_exempt", original_antinuke_exempt, antinuke_exempt_protected),
             ("punish_nuker", original_punish_nuker, punish_nuker_protected),
         )

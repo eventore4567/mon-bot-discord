@@ -2926,19 +2926,9 @@ class AutoMod(commands.Cog, name="Automod"):
         content_filter_policy, owner_sanction_immunity et bot_excellence_runtime
         ont été retirés le 22/11/2026, avec leurs exemptions reprises ici.
         """
-        from utils.owner_access import is_bot_owner_id
-
-        if is_bot_owner_id(member.id):
+        # Même règle que pour la suppression du message (_proprietaire_protege).
+        if await self._proprietaire_protege(guild, member):
             return None, 0
-        if member.id == guild.owner_id:
-            # Le propriétaire du serveur n'est sanctionné que s'il a lui-même
-            # coupé son immunité (même règle que pour la suppression du message).
-            try:
-                override = await self.get_immunity_override_cached(guild.id, member.id)
-            except Exception:  # noqa: BLE001 — lecture impossible : on protège
-                override = None
-            if override is not False:
-                return None, 0
 
         cle = (int(guild.id), int(member.id))
         verrous = self.__dict__.setdefault("_verrous_escalade", {})
@@ -5115,7 +5105,7 @@ class AutoMod(commands.Cog, name="Automod"):
         utile. On ne republie jamais le contenu interdit ni l'URL supprimée.
         """
         labels = {
-            "blacklist_word": "votre message contient un mot interdit sur le serveur.",
+            "blacklist_word": "votre message a été censuré, car il contenait un mot interdit sur le serveur.",
             "blacklist_link": "les liens sont interdits dans ce salon.",
             "blacklist_word_link": "votre message contient un mot interdit et un lien interdit sur le serveur.",
             "antilink": "les liens sont interdits dans ce salon.",
@@ -5135,7 +5125,7 @@ class AutoMod(commands.Cog, name="Automod"):
             "antilink": ("🔗 Lien supprimé", "Les liens ne sont pas autorisés ici."),
             "blacklist_link": ("🔗 Lien bloqué", "Ce lien figure parmi les liens interdits."),
             "antiinvite": ("📨 Invitation bloquée", "Les invitations ne sont pas autorisées ici."),
-            "blacklist_word": ("🛡️ Message modéré", "Un mot interdit a été détecté."),
+            "blacklist_word": ("🛡️ Message censuré", "Votre message contenait un mot interdit sur le serveur."),
             "blacklist_word_link": ("🛡️ Message modéré", "Un mot et un lien interdits ont été détectés."),
             "antiscam": ("🛡️ Arnaque suspectée", "Un lien ou un contenu suspect a été détecté."),
         }
@@ -5152,6 +5142,21 @@ class AutoMod(commands.Cog, name="Automod"):
         )
         view.add_item(box)
         return view
+
+    async def _proprietaire_protege(self, guild, auteur) -> bool:
+        """Propriétaire du bot, ou propriétaire du serveur dont l'immunité est active."""
+        from utils.owner_access import is_bot_owner_id
+
+        auteur_id = getattr(auteur, "id", None)
+        if is_bot_owner_id(auteur_id):
+            return True
+        if auteur_id is None or auteur_id != getattr(guild, "owner_id", None):
+            return False
+        try:
+            override = await self.get_immunity_override_cached(guild.id, auteur_id)
+        except Exception:  # noqa: BLE001 — lecture impossible : on protège
+            override = None
+        return override is not False
 
     async def _escalader_dans_incident(
         self, message: discord.Message, incident: _Incident, filter_name: str, reason: str,
@@ -5216,6 +5221,12 @@ class AutoMod(commands.Cog, name="Automod"):
         pour inclure le nombre réel de messages supprimés). Détections suivantes dans la
         fenêtre : suppression silencieuse, compteur incrémenté.
         """
+        # Le propriétaire du bot n'est jamais visé, et le propriétaire du serveur ne
+        # l'est que s'il a coupé lui-même son immunité. 22/11/2026 : ces deux règles
+        # vivaient dans deux enrobages (owner_sanction_immunity et
+        # content_filter_policy) qui remplaçaient cette méthode ; elles sont ici.
+        if message.guild is not None and await self._proprietaire_protege(message.guild, message.author):
+            return None
         # 06/11/2026 : un admin a plus de marge qu'un membre (seuls spam, arnaque et
         # pub d'invitations le visent, avec des seuils plus hauts).
         try:
@@ -5889,76 +5900,17 @@ class AutoMod(commands.Cog, name="Automod"):
         *,
         detection_kind: str,
     ):
-        """Supprime le message et applique immédiatement un timeout de 10 minutes.
+        """Insulte ou menace confirmée : suppression, avertissement, puis le mute.
 
-        Même verrou d'idempotence que _delete_and_warn : jamais deux sanctions
-        sur un message détecté par plusieurs cogs simultanément.
+        Ce nom vient d'un ancien timeout direct de 10 minutes. En production, il
+        était remplacé depuis août par cogs/content_filter_policy, qui envoie ces
+        détections dans le flux commun des filtres de contenu ; l'ancien corps ne
+        s'exécutait plus. 22/11/2026 : le comportement réel est écrit ici, et le
+        remplacement a été retiré. La sanction vient de l'escalade unique
+        (_maybe_escalate) : un avertissement, puis le mute à la récidive.
         """
-        if await self._admin_exempte(message.author, message.guild.id):
-            return
-        if not self._sanctioned_messages.claim(message.guild.id, message.id):
-            logger.debug(
-                "AutoMod : timeout concurrent ignoré guild=%s message=%s",
-                message.guild.id, message.id,
-            )
-            return
-        self._mark_xp_skip(message.id)
-        try:
-            await message.delete()
-        except discord.HTTPException:
-            pass
-
-        member = message.author
-        timeout_applied = False
-        timeout_status = "Impossible à appliquer : permission ou hiérarchie insuffisante."
-        if isinstance(member, discord.Member):
-            until = discord.utils.utcnow() + timedelta(seconds=DATASET_TIMEOUT_SECONDS)
-            current_timeout = member.timed_out_until
-            if current_timeout and current_timeout > until:
-                timeout_applied = True
-                timeout_status = "Un timeout plus long était déjà actif; il a été conservé."
-            elif member.id != message.guild.owner_id:
-                if await self._muter(
-                    message.guild, member, DATASET_TIMEOUT_SECONDS,
-                    "contenu offensant détecté par le filtre multilingue",
-                ) != "mute_failed":
-                    timeout_applied = True
-                    timeout_status = "Exclusion temporaire appliquée pendant 10 minutes."
-
-        public_status = (
-            "Sanction : exclusion temporaire de 10 minutes."
-            if timeout_applied
-            else "Le message a été bloqué."
-        )
-        try:
-            # 07/11/2026 : « la bannière aux avertissements » — avertissement sans bannière.
-            note = await panels.envoyer(message.channel, panels.depuis_embed(embeds.warning(f'{message.author.mention}, votre message a été supprimé.\nRaison : contenu offensant détecté.\n{public_status}'), banniere=False))
-            await note.delete(delay=8)
-        except discord.HTTPException:
-            pass
-
-        action = "mute" if timeout_applied else "suppression"
-        await self.bot.db.log_automod_action(
-            message.guild.id,
-            message.author.id,
-            "multilingual_toxicity",
-            action,
-            reason,
-        )
-        e = embeds.log_entry(
-            "Action AutoMod — filtre multilingue",
-            config.COLOR_WARNING,
-            cible=message.author,
-            cible_label="Membre",
-            raison=reason,
-            extra={
-                "Salon": f"{message.channel.mention}\n`ID: {message.channel.id}`",
-                "Message": _automod_message_preview(message),
-                "Type de détection": detection_kind.replace("_", " "),
-                "Sanction": timeout_status,
-            },
-        )
-        await self.log_action(message.guild, e, "automod_word")
+        detail = reason or "Contenu offensant détecté par le filtre multilingue."
+        return await self._delete_and_warn(message, detail, "multilingual_toxicity")
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):

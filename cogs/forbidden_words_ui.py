@@ -5,10 +5,7 @@ l'interface publique. Les anciens noms restent cachés pour compatibilité inter
 """
 from __future__ import annotations
 
-import asyncio
 import logging
-import time
-from types import MethodType
 
 import discord
 from discord import app_commands
@@ -19,8 +16,6 @@ from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.forbidden-words-ui")
 
-PUBLIC_FILTER_MESSAGE = "votre message a été censuré, car il contenait un mot interdit sur le serveur."
-NATIVE_FILTER_MESSAGE = "Votre message a été censuré, car il contenait un mot interdit sur le serveur."
 
 
 class ForbiddenWordsUI(commands.Cog):
@@ -36,160 +31,12 @@ class ForbiddenWordsUI(commands.Cog):
         if automod is None or self._patched:
             return
 
-        original = automod._public_automod_message
-
-        def public_message(filter_name: str, reason: str) -> str:
-            if filter_name == "blacklist_word":
-                return PUBLIC_FILTER_MESSAGE
-            return original(filter_name, reason)
-
-        automod._public_automod_message = public_message
-        original_delete_and_warn = automod._delete_and_warn
-
-        async def delete_and_warn(
-            runtime,
-            message: discord.Message,
-            reason: str,
-            filter_name: str = "automod",
-            *,
-            censored_content: str | None = None,
-            **options,
-        ):
-            # 07/11/2026 : les options (allow_escalation…) sont transmises — sans
-            # elles, une insulte probable plantait ici et n'était jamais avertie.
-            if filter_name != "blacklist_word":
-                return await original_delete_and_warn(
-                    message,
-                    reason,
-                    filter_name,
-                    censored_content=censored_content,
-                    **options,
-                )
-
-            from cogs import automod as automod_module
-
-            runtime._mark_xp_skip(message.id)
-            deleted = False
-            try:
-                await message.delete()
-                deleted = True
-            except discord.HTTPException:
-                pass
-
-            if deleted and censored_content:
-                await runtime._repost_censored(message, censored_content)
-
-            key = (message.guild.id, message.author.id)
-            now_ts = time.monotonic()
-            incident = runtime.incidents.get(key)
-            if incident is not None and now_ts - incident.started < automod_module.INCIDENT_WINDOW_SECONDS:
-                incident.deleted += 1
-                # Une rafale reste un incident, mais chaque mot interdit compte
-                # pour l'escalade (avertissement puis mute).
-                await runtime._escalader_dans_incident(message, incident, filter_name, reason)
-                return
-
-            incident = automod_module._Incident(
-                started=now_ts,
-                filter_name=filter_name,
-                reason=reason,
-                channel_id=message.channel.id,
-                message_id=int(getattr(message, "id", 0) or 0),
-                raw_content=automod_module._contenu_brut(message),
-                deleted_ok=deleted,
-            )
-            runtime.incidents[key] = incident
-            if len(runtime.incidents) > 5000:
-                cutoff = now_ts - automod_module.INCIDENT_WINDOW_SECONDS
-                for candidate, item in list(runtime.incidents.items()):
-                    if item.started < cutoff:
-                        runtime.incidents.pop(candidate, None)
-
-            await runtime.bot.db.log_automod_action(
-                message.guild.id,
-                message.author.id,
-                filter_name,
-                "suppression",
-                reason,
-            )
-            await runtime.add_risk_signal(
-                message.guild,
-                message.author.id,
-                filter_name,
-                automod_module.RISK_SIGNAL_POINTS.get(filter_name, 10),
-                reason=reason,
-                target=message.author,
-            )
-            async with incident.verrou_escalade:
-                action, infraction_count = await runtime._maybe_escalate(
-                    message.guild,
-                    message.author,
-                    reason,
-                )
-                if incident.action not in automod_module.SANCTIONS_D_INCIDENT:
-                    incident.action = action
-                incident.infractions = max(incident.infractions, infraction_count)
-            if action == "mute":
-                # Durée réelle du palier atteint (5 min, 10 min, 30 min…).
-                incident.duration_s = runtime.duree_mute_escalade(message.guild.id, message.author.id)
-            # Même référence SX- et mêmes suites que les autres incidents AutoMod.
-            await runtime._record_incident_trace(message, incident)
-            if action:
-                await runtime.bot.db.log_automod_action(
-                    message.guild.id,
-                    message.author.id,
-                    filter_name,
-                    action,
-                    reason,
-                )
-
-            description = (
-                "❌ Votre message a été censuré, car il contenait un "
-                "**mot interdit sur le serveur**."
-            )
-            if action == "mute":
-                description += (
-                    " Récidive : exclusion temporaire de "
-                    + automod_module.helpers.format_duration(incident.duration_s)
-                    + "."
-                )
-            elif action == "avertissement":
-                description += " Prochaine infraction dans l'heure : exclusion temporaire."
-            try:
-                note = await message.channel.send(
-                    content=message.author.mention,
-                    embed=discord.Embed(
-                        description=description,
-                        colour=discord.Colour.red(),
-                    ),
-                    allowed_mentions=discord.AllowedMentions(
-                        users=True,
-                        roles=False,
-                        everyone=False,
-                        replied_user=False,
-                    ),
-                )
-                await note.delete(delay=8)
-            except discord.HTTPException:
-                pass
-
-            asyncio.create_task(
-                runtime._flush_incident_log(
-                    message.guild,
-                    message.author,
-                    key,
-                    incident,
-                )
-            )
-
-        automod._delete_and_warn = MethodType(delete_and_warn, automod)
-
-        try:
-            from cogs import automod as automod_module
-            automod_module.NATIVE_BLACKLIST_CUSTOM_MESSAGE = NATIVE_FILTER_MESSAGE
-        except Exception:
-            logger.exception("Impossible de mettre à jour le message natif mots interdits.")
-
+        # 22/11/2026 : ce module remplaçait aussi _public_automod_message et
+        # _delete_and_warn d'AutoMod, avec une copie parallèle du traitement des
+        # mots interdits. Cette copie ignorait la réservation anti-doublon, la file
+        # de suppression et le traitement des administrateurs. Le texte public est
+        # maintenant celui d'AutoMod, et les mots interdits suivent le flux commun.
+        # Ce module ne garde que l'interface publique (noms des commandes).
         for old_name in ("blacklist-add", "blacklist-remove", "blacklist-list"):
             command = self.bot.get_command(old_name)
             if command is not None:
