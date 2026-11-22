@@ -441,8 +441,7 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
         # porte déjà @checks.is_owner_or_admin_for("securite") dans
         # cogs/automod.py. On classe donc au niveau que l'auteur a choisi.
         "antibot-allow", "antibot-deny", "join-gate", "permission-guard",
-        "prune-guard", "risk-engine", "vanity-guard", "tout-securiser",
-        "admin-epargne",
+        "prune-guard", "risk-engine", "vanity-guard",
     }),
     "economie": frozenset({
         "shopsetup", "shoppanel", "shoprole", "give-money", "reset-economy",

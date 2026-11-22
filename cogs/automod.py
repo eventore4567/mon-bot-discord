@@ -1035,17 +1035,6 @@ TOGGLE_FIELDS = [
 #: messages : seulement ce qui protège le serveur sans toucher aux conversations.
 SECURITE_DE_BASE = ("antinuke", "antiraid", "escalation")
 
-#: Protections que « +tout-securiser » n'allume PAS. Le blocage des liens coupe
-#: aussi les liens légitimes (YouTube, GitHub, un lien d'aide) : c'est un choix
-#: éditorial, pas une protection, il reste donc à activer à la main.
-#:
-#: Les DEUX noms y figurent, et ce n'est pas une ceinture de sécurité :
-#: ``Database.set_automod`` écrit ``antilink`` et ``antilink_strict`` ensemble
-#: dès qu'on touche à l'un des deux (depuis V2026.09, « anti-liens » est strict
-#: par définition). N'exclure que ``antilink_strict`` laissait donc l'appel sur
-#: ``antilink`` rallumer le blocage total — exactement ce que la commande
-#: promet de ne pas faire.
-TOUT_SECURISER_EXCLUES = frozenset({"antilink", "antilink_strict"})
 
 
 # Protections qui inspectent un message et permettent le bypass par rôle
@@ -2642,7 +2631,7 @@ class AutoMod(commands.Cog, name="Automod"):
         Deux politiques pour une seule décision, et elles avaient divergé.
 
         Puis les propriétaires de SentriX, les admins désignés un par un
-        (``+admin-epargne``, même table que ``+immunity``) et ceux qui portent
+        (/setup → Sécurité → Personnaliser → Exceptions générales) et ceux qui portent
         un rôle exempté — ce dernier cas marchait déjà pour l'anti-nuke, et pas
         pour les filtres de messages.
         """
@@ -3207,95 +3196,6 @@ class AutoMod(commands.Cog, name="Automod"):
                 (int(guild_id), int(user_id)),
             )
         self.__dict__.setdefault("_epargnes_cache", {}).pop(int(guild_id), None)
-
-    @commands.hybrid_command(
-        name="admin-epargne", aliases=["admin-epargner", "spare-admin"],
-        description="Désigner un administrateur que « Sanctionner les admins » ne touchera pas.",
-        with_app_command=False,
-    )
-    @app_commands.describe(membre="L'administrateur à épargner", etat="Épargner (on) ou non (off)")
-    async def admin_epargne(self, ctx: commands.Context, membre: discord.Member, etat: str = "on"):
-        """« Un choix des admins à ne pas sanctionner » (21/11/2026).
-
-        Même autorisation que le mode strict lui-même : si n'importe quel admin
-        pouvait s'ajouter à la liste, l'option ne protégerait plus rien.
-        """
-        if ctx.guild is None:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(
-                "Cette commande s'utilise dans un serveur."
-            )))
-        if not self.peut_changer_mode_strict(ctx.author.id, ctx.guild):
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(
-                "Seul le propriétaire du serveur peut choisir les admins épargnés."
-            )))
-        normalise = _sans_accents(str(etat or "")).casefold().strip()
-        if normalise in {"off", "non", "0", "retirer", "desactiver"}:
-            epargne = False
-        elif normalise in {"on", "oui", "1", "activer", ""}:
-            epargne = True
-        else:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(
-                f"Utilisez `{ctx.clean_prefix}admin-epargne @membre on` ou `off`."
-            )))
-        await self.definir_admin_epargne(ctx.guild.id, membre.id, epargne, ctx.author.id)
-        if epargne:
-            texte = (f"**{membre.mention} est épargné.** Ni l'AutoMod ni l'anti-nuke ne "
-                     "le sanctionneront, même avec « Sanctionner les admins » activé.\n"
-                     "-# La modération à la main (`+ban`, `+kick`, `+mute`) reste possible : "
-                     "cette liste ne protège que des sanctions automatiques.")
-        else:
-            texte = (f"**{membre.mention} n'est plus épargné.** Il repasse par l'AutoMod "
-                     "comme les autres administrateurs.")
-        texte += ("\n-# Le propriétaire du serveur et les propriétaires de SentriX sont "
-                  "épargnés d'office, sans figurer dans cette liste.")
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(texte)))
-
-    @commands.hybrid_command(
-        name="tout-securiser", aliases=["securite-totale", "secure-all"],
-        description="Activer d'un coup toutes les protections de sécurité.",
-        with_app_command=False,
-    )
-    @checks.is_owner_or_admin_for("securite")
-    @app_commands.describe(liens="Ajouter le blocage TOTAL des liens (coupe aussi les liens légitimes)")
-    async def tout_securiser(self, ctx: commands.Context, liens: str = ""):
-        """« Une commande qui active tout au cas où » (21/11/2026).
-
-        Avant, tout allumer demandait dix-neuf commandes ou autant de clics dans
-        /setup → Sécurité. Quand un raid se prépare, personne n'a le temps. La
-        commande n'éteint jamais rien : elle n'allume que ce qui était coupé.
-        """
-        # 21/11/2026 : « je veux que ça bloque tous les liens ». Le blocage total
-        # reste hors de l'activation par défaut — il coupe aussi les liens
-        # légitimes — mais il s'ajoute à la demande, sans avoir à lancer une
-        # deuxième commande.
-        avec_liens = _sans_accents(str(liens or "")).casefold().strip() in {
-            "liens", "lien", "links", "on", "oui", "tout", "1",
-        }
-        champs = [cle for cle in TOGGLE_FIELDS
-                  if avec_liens or cle not in TOUT_SECURISER_EXCLUES]
-        await self.bot.db.execute(
-            "INSERT INTO automod_settings(guild_id) VALUES(?) ON CONFLICT(guild_id) DO NOTHING",
-            (ctx.guild.id,),
-        )
-        conf = await self.get_automod_cached(ctx.guild.id) or {}
-        allumees = [cle for cle in champs if not conf.get(cle)]
-        for cle in allumees:
-            await self.bot.db.set_automod(ctx.guild.id, cle, 1)
-            await config_journal.record(self.bot.db, ctx.guild.id, "automod." + cle, 0, 1)
-        self.automod_cache.pop(ctx.guild.id, None)
-        if allumees:
-            texte = (f"**{len(allumees)} protection(s) activée(s)** sur {len(champs)} :\n"
-                     + ", ".join(AUTOMOD_TOGGLE_LABELS.get(cle, cle) for cle in allumees) + ".")
-        else:
-            texte = f"**Les {len(champs)} protections étaient déjà actives.** Rien à changer."
-        if avec_liens:
-            texte += ("\n-# Blocage TOTAL des liens inclus : les liens légitimes "
-                      "(YouTube, GitHub…) sont coupés aussi.")
-        else:
-            texte += (f"\n-# Pour bloquer AUSSI tous les liens : "
-                      f"`{ctx.clean_prefix}tout-securiser liens`. "
-                      "Le mode raid s'arme dans /setup → Sécurité.")
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(texte)))
 
     # Le paramètre s'appelle `membre` et non `bot`, comme la commande voisine
     # +antinuke-whitelist-add. Ce n'est pas cosmétique : les gates V18
