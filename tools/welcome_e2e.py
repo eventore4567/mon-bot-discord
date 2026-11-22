@@ -137,10 +137,18 @@ async def main() -> int:
     check(not posts(since, DM_CHANNEL), "pas de message privé tant que l'option est coupée")
 
     # 2 — Plusieurs rôles d'arrivée, réglés par le vrai sélecteur du /setup.
-    view = await setup_page(bot, guild, "welcome")
-    select = control(view, lambda i: type(i).__name__ == "WelcomeAutoRolesSelect")
+    # 22/11/2026 (« il y a des doublons ») : ce réglage avait un sélecteur dans
+    # Bienvenue ET dans Rôles. Il ne vit plus que dans Rôles (« Arrivée ») ;
+    # Bienvenue l'affiche en lecture seule.
+    page_bienvenue = await setup_page(bot, guild, "welcome")
+    check(control(page_bienvenue, lambda i: isinstance(i, discord.ui.RoleSelect)
+                  and "arriv" in str(i.placeholder or "").casefold()) is None,
+          "la page Bienvenue n'a plus de sélecteur des rôles d'arrivée (doublon retiré)")
+    view = await setup_page(bot, guild, "roles")
+    select = control(view, lambda i: isinstance(i, discord.ui.RoleSelect)
+                     and str(i.placeholder or "").startswith("Arrivée"))
     check(select is not None and select.max_values == welcome_autoroles.MAX_ROLES,
-          "la page Bienvenue propose un sélecteur multi-rôles (5 max.)")
+          "la page Rôles propose le sélecteur multi-rôles d'arrivée (5 max.)")
     select._values = [guild.get_role(h.MEMBER_ROLE_ID), guild.get_role(h.PING_ROLE_ID)]
     await select.callback(admin_interaction(bot))
     await h.settle(idle=0.3, maximum=2)

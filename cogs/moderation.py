@@ -864,7 +864,10 @@ class Moderation(commands.Cog):
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("ban_members",), target="member_moderation")
     async def ban(
-        self, ctx: commands.Context, membre: discord.Member | discord.User, *,
+        # discord.User et non discord.Member : le sélecteur Discord accepte alors
+        # aussi l'identifiant d'un compte absent. Un membre présent est retrouvé
+        # juste en dessous et passe par la hiérarchie des rôles.
+        self, ctx: commands.Context, membre: discord.User, *,
         raison: str = "Aucune raison fournie",
         envoyer_mp: bool = True,
         supprimer_messages: Literal["Conserver", "15 minutes", "1 heure", "24 heures"] = "Conserver",
@@ -882,7 +885,9 @@ class Moderation(commands.Cog):
             return await self._reply(
                 ctx, "Choisissez Conserver, 15 minutes, 1 heure ou 24 heures.", ephemere=True,
             )
-        if not isinstance(membre, discord.Member):
+        # discord.User (et non Member) : le convertisseur n'a trouvé qu'un compte,
+        # pas un membre du serveur.
+        if isinstance(membre, discord.User) and not isinstance(membre, discord.Member):
             present = ctx.guild.get_member(membre.id)
             if present is None:
                 return await self._bannir_absent(
