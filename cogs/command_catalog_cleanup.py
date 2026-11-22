@@ -24,7 +24,7 @@ GAME_COMMANDS = frozenset({
 })
 
 NORMAL_DIRECT_COMMANDS = frozenset({
-    "help", "setup", "ping", "avatar", "userinfo", "translate", "timestamp", "afk", "setprefix", "setmodrole",
+    "help", "setup", "ping", "avatar", "userinfo", "translate", "timestamp", "afk",
     "ban", "unban", "kick", "mute", "unmute", "warn", "warnings", "clear",
     "lock", "unlock", "clearwarnings", "slowmode", "nickname", "resetnick",
     "giverole", "removerole",
@@ -76,7 +76,7 @@ PURE_DUPLICATE_COMMANDS = frozenset({
 })
 
 SETUP_MERGED_COMMANDS = frozenset({
-    "config-view", "config-reset", "create-logs", "logsetup", "logs-status",
+    "config-view", "config-reset", "setprefix", "setmodrole", "create-logs", "logsetup", "logs-status",
     "designsetup", "welcome-config", "shopsetup", "aisetup",
     "setwelcomechannel", "setwelcomemessage", "setgoodbyechannel",
     "setgoodbyemessage", "setlogchannel", "setticketlogchannel", "setwarnrole",
@@ -137,7 +137,7 @@ HELP_VISIBLE_EXTRA_COMMANDS = frozenset({
     # (setup_ticket_autoconfig_v72.py) ; un serveur voulant plusieurs types de tickets
     # n'avait aucun chemin découvrable. Les sous-commandes du hub (ticketpanel,
     # tickettype...) restent masquées, atteignables via ses boutons.
-    "ticketsetup",
+    "ticketsetup", "ticketrepair",
     # Logs/notifications/serveur : seules commandes réelles pour ces réglages,
     # jamais fusionnées dans /setup contrairement à leurs voisines (logsetup,
     # create-logs, automod-status...).

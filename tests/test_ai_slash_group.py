@@ -195,6 +195,10 @@ class AiGroupTests(unittest.IsolatedAsyncioTestCase):
 
         member = SimpleNamespace(id=1, guild_permissions=SimpleNamespace(administrator=False))
         guild = SimpleNamespace(id=1, owner_id=999)
+        # AI is opt-in on new guilds: first enable it, then verify that a
+        # regular member can use the public ask command without admin powers.
+        from cogs import setup_v2_core
+        await setup_v2_core.set_module_enabled(self.bot, guild.id, "ai", True)
         decision = await access_matrix.evaluate(self.bot, command_name="ai ask", author=member, guild=guild)
         self.assertTrue(decision.allowed)
 
