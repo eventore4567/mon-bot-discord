@@ -50,10 +50,39 @@ async def etats(view) -> dict[str, bool]:
     }
 
 
+def toutes_les_protections() -> tuple[str, ...]:
+    """Tout ce que « Activer la sécurité » allume.
+
+    22/11/2026 : « arrête de faire des commandes, tu dois améliorer, c'est dans
+    Sécurité que tu mets ça. » Le bouton n'allumait que les huit protections
+    affichées ; les dix autres (majuscules, flood d'émojis, comptes récents,
+    lien personnalisé, purges, permissions à risque, filtre des arrivées,
+    analyse comportementale, sanctions progressives) demandaient une commande
+    chacune. Elles passent par le bouton maintenant.
+
+    Le blocage des liens reste dehors : il coupe aussi les liens légitimes
+    (YouTube, GitHub, le lien d'aide d'un modérateur), donc c'est un choix
+    éditorial et pas une protection. Les DEUX noms sont exclus parce que
+    ``Database.set_automod`` les écrit ensemble.
+    """
+    from cogs.automod import TOGGLE_FIELDS
+
+    return tuple(cle for cle in TOGGLE_FIELDS
+                 if cle not in {"antilink", "antilink_strict"})
+
+
 async def activer_recommandees(view) -> list[str]:
-    """Active les protections recommandées encore coupées. Ne coupe jamais rien."""
-    actuels = await etats(view)
-    a_activer = [cle for cle in RECOMMANDEES if not actuels[cle]]
+    """Active toutes les protections encore coupées. Ne coupe jamais rien."""
+    from cogs import setup_v2_ui as policy
+
+    cibles = toutes_les_protections()
+    actuels = {}
+    for cle in cibles:
+        try:
+            actuels[cle] = (await policy._security_center_state(view.bot, view.guild.id, cle))[0]
+        except Exception:  # noqa: BLE001 — une protection illisible est traitée comme coupée
+            actuels[cle] = False
+    a_activer = [cle for cle in cibles if not actuels[cle]]
     if not a_activer:
         return []
     await view.bot.db.execute(
@@ -63,6 +92,11 @@ async def activer_recommandees(view) -> list[str]:
     for cle in a_activer:
         await view.bot.db.set_automod(view.guild.id, cle, 1)
         await config_journal.record(view.bot.db, view.guild.id, "automod." + cle, 0, 1)
+    # Le cache du cog sert chaque message : sans purge, les protections
+    # fraîchement allumées resteraient inertes une trentaine de secondes.
+    cog = view.bot.get_cog("Automod")
+    if cog is not None and hasattr(cog, "automod_cache"):
+        cog.automod_cache.pop(view.guild.id, None)
     return a_activer
 
 
@@ -209,4 +243,5 @@ async def ecran_simple(view) -> discord.ui.Container:
     return box
 
 
-__all__ = ["PROTECTION_RECOMMANDEE", "RECOMMANDEES", "activer_recommandees", "conteneur", "ecran_simple", "etats"]
+__all__ = ["PROTECTION_RECOMMANDEE", "RECOMMANDEES", "activer_recommandees", "conteneur",
+           "ecran_simple", "etats", "toutes_les_protections"]
