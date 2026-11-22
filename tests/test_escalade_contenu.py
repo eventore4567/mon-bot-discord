@@ -295,17 +295,23 @@ async def test_une_recidive_dans_la_meme_rafale_mute_quand_meme(base, horloge, m
 
 
 @pytest.mark.asyncio
-async def test_la_politique_de_contenu_ne_remplace_plus_l_escalade(base, horloge):
-    """Le chemin RÉELLEMENT emprunté en production : après installation de la
-    politique de contenu, l'instance doit encore appeler la vraie méthode."""
-    from cogs import content_filter_policy
+async def test_aucun_module_installe_ne_remplace_les_methodes_d_automod(base, horloge):
+    """Le chemin RÉELLEMENT emprunté en production : après l'installation des
+    modules qui remplaçaient ces méthodes sur l'instance, l'instance doit encore
+    appeler les vraies méthodes de la classe (22/11/2026)."""
+    from cogs import content_filter_policy, forbidden_words_ui
 
     cog = _cog(base)
-    bot = SimpleNamespace(get_cog=lambda name: cog if name == "Automod" else None)
-    content_filter_policy._patch_automod(bot)
+    bot = SimpleNamespace(
+        get_cog=lambda name: cog if name == "Automod" else None,
+        get_command=lambda name: None,
+        tree=SimpleNamespace(remove_command=lambda *a, **k: None),
+    )
+    content_filter_policy.install(bot)
+    forbidden_words_ui.ForbiddenWordsUI(bot)._patch_runtime()
 
-    assert cog._sentrix_delete_only_content_policy is True
-    assert "_maybe_escalate" not in vars(cog)
+    for methode in ("_maybe_escalate", "_delete_and_warn", "_delete_and_timeout", "_public_automod_message"):
+        assert methode not in vars(cog), methode
     membre = _membre()
     await cog._maybe_escalate(_guild(), membre, "lien")
     horloge[0] += 60

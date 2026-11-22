@@ -203,6 +203,10 @@ def test_personne_ne_remplace_plus_l_escalade():
     coupables = []
     for fichier in (racine / "cogs").rglob("*.py"):
         source = fichier.read_text(encoding="utf-8")
-        if re.search(r"\._maybe_escalate\s*=(?!=)", source):
-            coupables.append(fichier.name)
+        for methode in ("_maybe_escalate", "_delete_and_warn", "_delete_and_timeout", "_public_automod_message"):
+            if re.search(rf"\.{methode}\s*=(?!=)|\"{methode}\"\s*,\s*original", source):
+                coupables.append(f"{fichier.name}:{methode}")
+    # 22/11/2026 : _delete_and_warn, _delete_and_timeout et _public_automod_message
+    # rejoignent _maybe_escalate. Chacune était remplacée par deux ou trois modules,
+    # et le traitement des mots interdits en était une copie parallèle.
     assert coupables == []

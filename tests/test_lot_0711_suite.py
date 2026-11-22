@@ -36,44 +36,34 @@ def test_les_phrases_banales_restent_permises(texte):
     assert MultilingualModerationDataset().match(texte) is None
 
 
-def _automod_factice():
-    cog = SimpleNamespace()
-    cog._delete_and_warn = AsyncMock(return_value="averti")
-    cog._maybe_escalate = AsyncMock(return_value=(None, 1))
-    cog._delete_and_timeout = AsyncMock(return_value="mute")
-    cog.get_immunity_override_cached = AsyncMock(return_value=None)
-    bot = SimpleNamespace(get_cog=lambda nom: cog if nom == "Automod" else None)
-    return cog, bot
-
-
 def test_une_insulte_confirmee_suit_l_escalade_unique():
     """07/11/2026 : une insulte confirmée devait avertir, puis muter à la récidive.
 
-    22/11/2026 : c'est toujours le cas, mais par l'escalade unique des filtres de
-    contenu (AutoMod._maybe_escalate, appelée par _delete_and_warn) et non plus
-    par un compteur à part, en mémoire, qui appelait directement le timeout. Ce
-    test vérifie donc que chaque insulte passe par _delete_and_warn sous le nom
-    du filtre, sans jamais court-circuiter l'escalade ; l'échelle avertissement
-    puis mute est testée dans tests/test_escalade_contenu.py.
+    22/11/2026 : c'est l'escalade unique des filtres de contenu qui s'en charge
+    (AutoMod._maybe_escalate, via _delete_and_warn), testée dans
+    tests/test_escalade_contenu.py. Ce test vérifie que chaque insulte ou menace
+    confirmée passe par _delete_and_warn sous le nom du filtre, sans jamais
+    court-circuiter l'escalade par un timeout direct. Avant ce jour, la règle
+    vivait dans un remplacement installé par cogs/content_filter_policy ;
+    elle est désormais écrite dans AutoMod._delete_and_timeout.
     """
-    from cogs import content_filter_policy as politique
-
-    cog, bot = _automod_factice()
-    original_avertir, original_mute = cog._delete_and_warn, cog._delete_and_timeout
-    politique._patch_automod(bot)
+    cog = am.AutoMod.__new__(am.AutoMod)
+    cog._delete_and_warn = AsyncMock(return_value="averti")
     message = SimpleNamespace(guild=SimpleNamespace(id=1, owner_id=999), author=SimpleNamespace(id=7))
 
     for _ in range(2):
         asyncio.run(cog._delete_and_timeout(message, "insulte", detection_kind="phrase"))
-    assert original_mute.await_count == 0
-    assert original_avertir.await_count == 2
-    assert all(appel.args[2] == "multilingual_toxicity" for appel in original_avertir.await_args_list)
+    assert cog._delete_and_warn.await_count == 2
+    assert all(appel.args[2] == "multilingual_toxicity" for appel in cog._delete_and_warn.await_args_list)
 
 
-def test_les_options_des_avertissements_sont_transmises():
+def test_plus_aucun_enrobage_ne_perd_les_options_des_avertissements():
+    """07/11/2026 : des enrobages de _delete_and_warn perdaient ``allow_escalation``
+    (TypeError : l'insulte n'était ni supprimée ni sanctionnée). 22/11/2026 : ces
+    enrobages ont été retirés ; il n'y a plus rien à transmettre."""
     for chemin in ("cogs/content_filter_policy.py", "cogs/forbidden_words_ui.py"):
         source = (RACINE / chemin).read_text(encoding="utf-8")
-        assert "**options," in source and "**options" in source.split("original_delete_and_warn(", 2)[-1], chemin
+        assert "original_delete_and_warn" not in source, chemin
 
 
 def test_l_everyone_d_un_admin_n_est_plus_supprime_par_le_filtre_de_mentions():

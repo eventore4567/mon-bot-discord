@@ -63,7 +63,13 @@ def test_tous_les_filtres_de_messages_passent_par_le_mode_strict():
     source = (ROOT / "cogs/automod.py").read_text(encoding="utf-8")
     # Plus aucun « if _is_discord_administrator(...) : return » en dur sur un message.
     assert "if _is_discord_administrator(message.author):" not in source
-    assert source.count("await self._admin_exempte(") >= 4
+    # 22/11/2026 : 4 → 3. _delete_and_timeout ne fait plus son propre contrôle :
+    # elle délègue à _delete_and_warn, qui le fait (voir
+    # test_une_insulte_confirmee_suit_l_escalade_unique). Aucun chemin n'y échappe.
+    assert source.count("await self._admin_exempte(") >= 3
+    from cogs.automod import AutoMod
+    import inspect
+    assert "self._delete_and_warn(" in inspect.getsource(AutoMod._delete_and_timeout)
     assert "and not await self.admins_soumis(" in source
     # Discord refuse tout timeout sur un administrateur : réponse « abus privilégié ».
     # 22/11/2026 : la condition est maintenant écrite sur plusieurs lignes dans
