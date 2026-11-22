@@ -764,6 +764,22 @@ CREATE TABLE IF NOT EXISTS sentrix_automod_strict (
     updated_at INTEGER
 )
 """
+#: Admins que « Sanctionner les admins » ne touche pas. Sa propre table, et
+#: pas ``user_immunity_settings`` : 21/11/2026, trouvé en revue, cette dernière
+#: veut dire « immunité SentriX » au sens large, et
+#: services/moderation.py::_hierarchy_error la lit pour REFUSER un +ban, +kick,
+#: +mute ou +warn manuel. Y écrire aurait empêché le propriétaire de modérer à
+#: la main l'admin qu'il venait seulement d'exempter de l'AutoMod — l'inverse
+#: de ce qu'il demandait. Deux décisions différentes, deux stockages.
+STRICT_EPARGNES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS sentrix_strict_epargnes (
+    guild_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    ajoute_par INTEGER,
+    ajoute_a INTEGER,
+    PRIMARY KEY (guild_id, user_id)
+)
+"""
 _STRICT_TTL_SECONDES = 30.0
 #: Mesure de production du 17/11 : 1449 à 1879 ms sur gpt-5.6-luna. Au-delà, on
 #: fait attendre une sanction pour un verdict qui n'arrivera probablement pas.
@@ -2598,8 +2614,71 @@ class AutoMod(commands.Cog, name="Automod"):
         return False
 
     async def _admin_exempte(self, member, guild_id: int) -> bool:
-        """Administrateur exempté des filtres de messages, sauf en mode strict."""
-        return _is_discord_administrator(member) and not await self.admins_soumis(guild_id)
+        """Administrateur exempté des filtres de messages.
+
+        Hors mode strict, tout administrateur l'est. En mode strict, les
+        exceptions de ``admin_epargne_en_strict`` subsistent.
+        """
+        if not _is_discord_administrator(member):
+            return False
+        if not await self.admins_soumis(guild_id):
+            return True
+        return await self.admin_epargne_en_strict(member, guild_id)
+
+    async def admin_epargne_en_strict(self, member, guild_id: int) -> bool:
+        """En mode strict, qui reste malgré tout hors de portée de l'AutoMod.
+
+        21/11/2026 : « il y a un admin, c'est le owner, donc si possible éviter
+        de le sanctionner — ou bien, quand on met sanctionner les admins, on a
+        un choix des admins à ne pas sanctionner. »
+
+        Le propriétaire du serveur d'abord. Discord lui refuse de toute façon
+        tout timeout, donc la seule sanction qui lui soit applicable est le
+        retrait de ses rôles « à risque » : sur son propre serveur, ça n'a
+        aucun sens. Quatre chemins le sanctionnaient pourtant
+        (``_delete_and_warn``, ``_delete_and_timeout``, le bypass du filtre et
+        le dernier recours), parce qu'ils lisaient ``_admin_exempte`` seul
+        alors que ``is_automod_exempt``, lui, épargnait bien le propriétaire.
+        Deux politiques pour une seule décision, et elles avaient divergé.
+
+        Puis les propriétaires de SentriX, les admins désignés un par un
+        (``+admin-epargne``, même table que ``+immunity``) et ceux qui portent
+        un rôle exempté — ce dernier cas marchait déjà pour l'anti-nuke, et pas
+        pour les filtres de messages.
+        """
+        guild = getattr(member, "guild", None)
+        identifiant = int(getattr(member, "id", 0) or 0)
+        if not identifiant:
+            return False
+        if identifiant == int(getattr(guild, "owner_id", 0) or 0):
+            return True
+        if identifiant in {int(x) for x in (getattr(config, "OWNER_IDS", None) or [])}:
+            return True
+        try:
+            override = await self.get_immunity_override_cached(int(guild_id), identifiant)
+        except Exception:  # noqa: BLE001 — base illisible : pas d'exemption
+            logger.debug("Exemption admin illisible guild=%s", guild_id, exc_info=True)
+            override = None
+        # Un ``+immunity off`` est un refus EXPLICITE d'immunité : il gagne sur
+        # l'exemption par rôle, comme dans ``is_automod_exempt``. Laisser le
+        # rôle reprendre le dessus donnait deux réponses différentes à la même
+        # question selon le chemin emprunté.
+        if override is False:
+            return False
+        try:
+            if identifiant in await self.epargnes_du_mode_strict(int(guild_id)):
+                return True
+        except Exception:  # noqa: BLE001
+            logger.debug("Admins épargnés illisibles guild=%s", guild_id, exc_info=True)
+        if override is True:
+            return True
+        try:
+            exemptes = await self.get_exempt_roles_cached(int(guild_id))
+        except Exception:  # noqa: BLE001
+            exemptes = set()
+        if not exemptes:
+            return False
+        return any(r.id in exemptes for r in (getattr(member, "roles", None) or ()))
 
     async def admins_soumis(self, guild_id: int) -> bool:
         """Mode strict du propriétaire : les administrateurs passent aussi par l'AutoMod."""
@@ -3082,20 +3161,118 @@ class AutoMod(commands.Cog, name="Automod"):
             return True
         return identifiant in {int(x) for x in (getattr(config, "OWNER_IDS", None) or [])}
 
+    async def _epargnes_schema(self) -> None:
+        if not getattr(self, "_epargnes_schema_pret", False):
+            await self.bot.db.execute(STRICT_EPARGNES_SCHEMA)
+            self._epargnes_schema_pret = True
+
+    async def epargnes_du_mode_strict(self, guild_id: int) -> set[int]:
+        """Admins que le mode strict ne touche pas, sur ce serveur.
+
+        Mis en cache comme ``admins_soumis`` : la liste est lue sur le chemin
+        de chaque message d'administrateur.
+        """
+        cache = self.__dict__.setdefault("_epargnes_cache", {})
+        maintenant = time.monotonic()
+        connu = cache.get(int(guild_id))
+        if connu is not None and maintenant - connu[1] < _STRICT_TTL_SECONDES:
+            return connu[0]
+        epargnes: set[int] = set()
+        try:
+            await self._epargnes_schema()
+            lignes = await self.bot.db.fetchall(
+                "SELECT user_id FROM sentrix_strict_epargnes WHERE guild_id = ?",
+                (int(guild_id),),
+            )
+            epargnes = {int(ligne["user_id"]) for ligne in lignes or ()}
+        except Exception:  # noqa: BLE001 — base illisible : personne n'est épargné
+            logger.debug("Admins épargnés illisibles guild=%s", guild_id, exc_info=True)
+        cache[int(guild_id)] = (epargnes, maintenant)
+        return epargnes
+
+    async def definir_admin_epargne(self, guild_id: int, user_id: int, epargne: bool,
+                                    auteur_id: int = 0) -> None:
+        """Désigne (ou retire) un admin que le mode strict ne touchera pas."""
+        await self._epargnes_schema()
+        if epargne:
+            await self.bot.db.execute(
+                "INSERT INTO sentrix_strict_epargnes (guild_id, user_id, ajoute_par, ajoute_a) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT(guild_id, user_id) DO UPDATE SET "
+                "ajoute_par=excluded.ajoute_par, ajoute_a=excluded.ajoute_a",
+                (int(guild_id), int(user_id), int(auteur_id), int(time.time())),
+            )
+        else:
+            await self.bot.db.execute(
+                "DELETE FROM sentrix_strict_epargnes WHERE guild_id = ? AND user_id = ?",
+                (int(guild_id), int(user_id)),
+            )
+        self.__dict__.setdefault("_epargnes_cache", {}).pop(int(guild_id), None)
+
+    @commands.hybrid_command(
+        name="admin-epargne", aliases=["admin-epargner", "spare-admin"],
+        description="Désigner un administrateur que « Sanctionner les admins » ne touchera pas.",
+        with_app_command=False,
+    )
+    @app_commands.describe(membre="L'administrateur à épargner", etat="Épargner (on) ou non (off)")
+    async def admin_epargne(self, ctx: commands.Context, membre: discord.Member, etat: str = "on"):
+        """« Un choix des admins à ne pas sanctionner » (21/11/2026).
+
+        Même autorisation que le mode strict lui-même : si n'importe quel admin
+        pouvait s'ajouter à la liste, l'option ne protégerait plus rien.
+        """
+        if ctx.guild is None:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(
+                "Cette commande s'utilise dans un serveur."
+            )))
+        if not self.peut_changer_mode_strict(ctx.author.id, ctx.guild):
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(
+                "Seul le propriétaire du serveur peut choisir les admins épargnés."
+            )))
+        normalise = _sans_accents(str(etat or "")).casefold().strip()
+        if normalise in {"off", "non", "0", "retirer", "desactiver"}:
+            epargne = False
+        elif normalise in {"on", "oui", "1", "activer", ""}:
+            epargne = True
+        else:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(
+                f"Utilisez `{ctx.clean_prefix}admin-epargne @membre on` ou `off`."
+            )))
+        await self.definir_admin_epargne(ctx.guild.id, membre.id, epargne, ctx.author.id)
+        if epargne:
+            texte = (f"**{membre.mention} est épargné.** Ni l'AutoMod ni l'anti-nuke ne "
+                     "le sanctionneront, même avec « Sanctionner les admins » activé.\n"
+                     "-# La modération à la main (`+ban`, `+kick`, `+mute`) reste possible : "
+                     "cette liste ne protège que des sanctions automatiques.")
+        else:
+            texte = (f"**{membre.mention} n'est plus épargné.** Il repasse par l'AutoMod "
+                     "comme les autres administrateurs.")
+        texte += ("\n-# Le propriétaire du serveur et les propriétaires de SentriX sont "
+                  "épargnés d'office, sans figurer dans cette liste.")
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(texte)))
+
     @commands.hybrid_command(
         name="tout-securiser", aliases=["securite-totale", "secure-all"],
         description="Activer d'un coup toutes les protections de sécurité.",
         with_app_command=False,
     )
     @checks.is_owner_or_admin_for("securite")
-    async def tout_securiser(self, ctx: commands.Context):
+    @app_commands.describe(liens="Ajouter le blocage TOTAL des liens (coupe aussi les liens légitimes)")
+    async def tout_securiser(self, ctx: commands.Context, liens: str = ""):
         """« Une commande qui active tout au cas où » (21/11/2026).
 
         Avant, tout allumer demandait dix-neuf commandes ou autant de clics dans
         /setup → Sécurité. Quand un raid se prépare, personne n'a le temps. La
         commande n'éteint jamais rien : elle n'allume que ce qui était coupé.
         """
-        champs = [cle for cle in TOGGLE_FIELDS if cle not in TOUT_SECURISER_EXCLUES]
+        # 21/11/2026 : « je veux que ça bloque tous les liens ». Le blocage total
+        # reste hors de l'activation par défaut — il coupe aussi les liens
+        # légitimes — mais il s'ajoute à la demande, sans avoir à lancer une
+        # deuxième commande.
+        avec_liens = _sans_accents(str(liens or "")).casefold().strip() in {
+            "liens", "lien", "links", "on", "oui", "tout", "1",
+        }
+        champs = [cle for cle in TOGGLE_FIELDS
+                  if avec_liens or cle not in TOUT_SECURISER_EXCLUES]
         await self.bot.db.execute(
             "INSERT INTO automod_settings(guild_id) VALUES(?) ON CONFLICT(guild_id) DO NOTHING",
             (ctx.guild.id,),
@@ -3111,8 +3288,13 @@ class AutoMod(commands.Cog, name="Automod"):
                      + ", ".join(AUTOMOD_TOGGLE_LABELS.get(cle, cle) for cle in allumees) + ".")
         else:
             texte = f"**Les {len(champs)} protections étaient déjà actives.** Rien à changer."
-        texte += ("\n-# Le blocage total des liens reste à part : il coupe aussi les liens "
-                  "légitimes. Le mode raid s'arme dans /setup → Sécurité.")
+        if avec_liens:
+            texte += ("\n-# Blocage TOTAL des liens inclus : les liens légitimes "
+                      "(YouTube, GitHub…) sont coupés aussi.")
+        else:
+            texte += (f"\n-# Pour bloquer AUSSI tous les liens : "
+                      f"`{ctx.clean_prefix}tout-securiser liens`. "
+                      "Le mode raid s'arme dans /setup → Sécurité.")
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(texte)))
 
     # Le paramètre s'appelle `membre` et non `bot`, comme la commande voisine
@@ -6027,15 +6209,15 @@ class AutoMod(commands.Cog, name="Automod"):
             # 05/11/2026 : « les bypass doivent marcher aussi pour les admins » —
             # même avec « Sanctionner aussi les admins », un admin qui porte un
             # rôle exempté (/setup → Sécurité → Seuils et exceptions) reste protégé.
+            #
+            # 21/11/2026 : et un admin explicitement épargné aussi. Sans ça, la
+            # commande promettait « l'AutoMod ne le sanctionnera pas » et
+            # l'anti-nuke le bannissait quand même — c'est bien le même
+            # interrupteur « Sanctionner les admins » qui gouverne les deux.
             try:
-                exemptes = await self.get_exempt_roles_cached(guild.id)
+                return await self.admin_epargne_en_strict(member, guild.id)
             except Exception:  # noqa: BLE001 — lecture impossible : pas d'exemption
-                exemptes = set()
-            if not exemptes:
-                return False
-            try:
-                return any(int(role.id) in exemptes for role in list(member.roles))
-            except (TypeError, AttributeError, ValueError):
+                logger.debug("Exemption anti-nuke illisible guild=%s", guild.id, exc_info=True)
                 return False
         return True
 

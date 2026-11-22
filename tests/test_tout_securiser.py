@@ -59,7 +59,8 @@ def _cog(db, conf):
 
 
 def _ctx():
-    return SimpleNamespace(guild=SimpleNamespace(id=1), author=SimpleNamespace(id=7))
+    return SimpleNamespace(guild=SimpleNamespace(id=1), author=SimpleNamespace(id=7),
+                           clean_prefix="+")
 
 
 @pytest.mark.asyncio
@@ -141,3 +142,30 @@ async def test_le_cache_est_vide_pour_que_le_changement_prenne_tout_de_suite(env
     assert 1 in cog.automod_cache
     await AutoMod.tout_securiser.callback(cog, _ctx())
     assert 1 not in cog.automod_cache
+
+
+@pytest.mark.asyncio
+async def test_l_option_liens_ajoute_le_blocage_total(envoyes):
+    """« je veux que ça bloque tous les liens » (21/11/2026).
+
+    Le blocage total reste hors de l'activation par défaut — il coupe les liens
+    légitimes — mais il doit pouvoir s'ajouter sans lancer une seconde commande.
+    """
+    db = _Db()
+    cog = _cog(db, {cle: 0 for cle in TOGGLE_FIELDS})
+    await AutoMod.tout_securiser.callback(cog, _ctx(), "liens")
+
+    assert db.valeurs.get("antilink") == 1
+    assert db.valeurs.get("antilink_strict") == 1
+    assert {cle for cle, v in db.valeurs.items() if v} == set(TOGGLE_FIELDS)
+    assert "TOTAL des liens inclus" in envoyes[0]
+
+
+@pytest.mark.asyncio
+async def test_sans_l_option_la_commande_dit_comment_l_obtenir(envoyes):
+    """Sinon la seule façon de le savoir serait de lire le code."""
+    db = _Db()
+    cog = _cog(db, {cle: 0 for cle in TOGGLE_FIELDS})
+    await AutoMod.tout_securiser.callback(cog, _ctx())
+    assert "tout-securiser liens" in envoyes[0]
+    assert db.valeurs.get("antilink", 0) == 0
