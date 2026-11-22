@@ -3,8 +3,10 @@
 Règles globales demandées :
 - seul le propriétaire réel du serveur Discord peut ajouter/retirer des whitelists ;
 - le propriétaire du serveur est immunisé contre les filtres de contenu ;
-- les filtres de contenu (insultes, liens, spam, mentions, pièces jointes, etc.)
-  suppriment le message mais n'appliquent jamais de mute/kick/ban ;
+- les filtres de contenu (insultes, liens, mots interdits, etc.) suivent l'escalade
+  unique de cogs/automod.py (``_maybe_escalate``) : un avertissement, puis le mute.
+  Jusqu'au 22/11/2026 cette couche la remplaçait par « suppression seule » ;
+  le propriétaire a demandé l'inverse, et le remplacement a été retiré ;
 - l'anti-nuke reste indépendant et conserve ses sanctions fortes en cas d'attaque.
 
 Cette couche se branche sur le Cog AutoMod existant sans dupliquer son listener principal.
@@ -32,8 +34,6 @@ _OWNER_ONLY_WHITELIST_COMMANDS = {
     "automod-exempt-role-remove",
 }
 
-# Même fenêtre que le moteur historique : on conserve un compteur informatif, mais aucune
-# sanction n'est déclenchée par les filtres de contenu.
 
 
 async def _guild_owner_only(ctx: commands.Context) -> bool:
@@ -81,12 +81,6 @@ def _patch_automod(bot: commands.Bot) -> None:
     # blacklist de mots qui est volontairement évaluée avant is_automod_exempt() dans le
     # listener historique.
     original_delete_and_warn = automod._delete_and_warn
-    original_maybe_escalate = automod._maybe_escalate
-    original_delete_and_timeout = automod._delete_and_timeout
-    # `automod` ci-dessus est l'INSTANCE du cog ; le seuil d'abus est une
-    # constante de module. On importe le module sous un nom distinct pour
-    # que la différence saute aux yeux au lieu de produire une AttributeError.
-    from . import automod as _automod_module
 
     async def _owner_immunity_is_off(_self, message_or_member) -> bool:
         guild = getattr(message_or_member, "guild", None)
@@ -128,62 +122,14 @@ def _patch_automod(bot: commands.Bot) -> None:
 
     automod._delete_and_warn = MethodType(owner_safe_delete_and_warn, automod)
 
-    # 2) Une infraction de contenu reste comptée pour les logs/diagnostics, mais elle ne
-    # déclenche plus jamais mute, kick ou ban. L'anti-nuke n'utilise pas cette méthode et
-    # garde donc sa réponse forte contre les comptes staff compromis.
-    async def delete_only_escalation(
-        _self,
-        guild: discord.Guild,
-        member: discord.Member,
-        reason: str,
-    ) -> tuple[str | None, int]:
-        # Si le propriétaire a volontairement mis son immunité sur OFF, il passe
-        # par le moteur AutoMod normal, y compris l'escalade configurée.
-        if member.id == guild.owner_id:
-            try:
-                override = await _self.get_immunity_override_cached(guild.id, member.id)
-            except Exception:
-                override = None
-            if override is False:
-                return await original_maybe_escalate(guild, member, reason)
-
-        # Le compteur d'infractions est une FenetreGlissante depuis qu'il fuyait
-        # (une clé par membre, conservée à vie). Sa fenêtre est déjà celle de
-        # l'escalade AutoMod (ESCALATION_WINDOW), seule source de cette durée.
-        count = _self.infraction_tracker.ajouter((guild.id, member.id))
-
-        # Un membre hors de portée des sanctions Discord qui franchit le seuil
-        # d'abus avéré est la seule exception à la règle « suppression seule »,
-        # au même titre que l'anti-nuke. Il ne s'agit pas de sanctionner un
-        # membre pour un message : il s'agit de désarmer un staff qui abuse de
-        # sa position, et surtout de prévenir le propriétaire — sans quoi
-        # personne n'apprend jamais que c'est arrivé.
-        #
-        # Sans ce branchement, _repondre_abus_privilegie serait du code mort :
-        # cette politique remplace _maybe_escalate sur l'instance, donc tous les
-        # appelants passent ici et jamais par l'original.
-        moi = getattr(guild, "me", None)
-        if (
-            moi is not None
-            and member.id != guild.owner_id
-            and count >= _automod_module.ABUS_PRIVILEGIE_SEUIL
-            and member.top_role >= moi.top_role
-        ):
-            try:
-                await _self._repondre_abus_privilegie(guild, member, reason, count)
-            except Exception:
-                logger.exception(
-                    "Réponse à l'abus d'un membre privilégié impossible sur guild=%s membre=%s.",
-                    guild.id, member.id,
-                )
-
-        return None, count
-
-    automod._maybe_escalate = MethodType(delete_only_escalation, automod)
-
-    # 3) Le filtre multilingue d'insultes utilisait historiquement un timeout direct de
-    # 10 minutes. Il passe maintenant par le même flux "suppression + avertissement bref"
-    # que les liens/spams, sans aucune sanction sur le membre.
+    # 2) Le filtre multilingue d'insultes utilisait historiquement un timeout direct de
+    # 10 minutes. Il passe par le même flux que les autres filtres de contenu :
+    # suppression, avertissement, puis le mute de l'escalade unique.
+    #
+    # 22/11/2026 : il tenait son propre compteur de récidive, en mémoire (perdu à
+    # chaque redémarrage). Deux compteurs donnaient deux échelles contradictoires
+    # — une insulte après un lien pouvait annoncer « avertissement » et muter dans
+    # le même message. Il n'y a plus qu'un compteur, celui de _maybe_escalate.
     async def delete_only_toxicity(
         _self,
         message: discord.Message,
@@ -198,36 +144,13 @@ def _patch_automod(bot: commands.Bot) -> None:
         ):
             return None
         detail = reason or "Contenu offensant détecté par le filtre multilingue."
-        # 07/11/2026 : « des fois il n'avertit pas, pas bien du tout ». Une insulte
-        # confirmée n'était jamais sanctionnée. Désormais : 1re fois suppression +
-        # avertissement ; récidive dans l'heure, mute de 10 minutes.
-        if message.guild is not None and message.author.id != message.guild.owner_id:
-            import time as _time
-
-            suivi = _self.__dict__.setdefault("_insultes_confirmees", {})
-            cle = (int(message.guild.id), int(message.author.id))
-            maintenant = _time.monotonic()
-            recents = [t for t in suivi.get(cle, ()) if maintenant - t < INSULTE_FENETRE]
-            recents.append(maintenant)
-            suivi[cle] = recents
-            if len(suivi) > 5000:
-                suivi.clear()
-            if len(recents) >= 2:
-                suivi.pop(cle, None)
-                return await original_delete_and_timeout(message, detail, detection_kind=detection_kind)
-        return await _self._delete_and_warn(
-            message, f"{detail} Avertissement : la prochaine fois, c'est le mute.", "multilingual_toxicity",
-        )
+        return await _self._delete_and_warn(message, detail, "multilingual_toxicity")
 
     automod._delete_and_timeout = MethodType(delete_only_toxicity, automod)
 
     logger.info(
-        "Politique contenu activée : immunité propriétaire pilotable, filtres suppression seule sauf propriétaire immunité OFF, anti-nuke inchangé."
+        "Politique contenu activée : immunité propriétaire pilotable, escalade unique des filtres (avertissement puis mute), anti-nuke inchangé."
     )
-
-
-#: Fenêtre de récidive des insultes confirmées (1re : avertissement, 2e : mute).
-INSULTE_FENETRE = 3600
 
 
 def install(bot: commands.Bot) -> None:

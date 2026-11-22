@@ -51,7 +51,8 @@ def static_audit() -> None:
 
     required_markers = (
         "_install_ai_concurrency",
-        "_install_persistent_automod",
+        # _install_persistent_automod retiré le 22/11/2026 : l'escalade AutoMod a une
+        # implémentation unique dans cogs/automod.py (voir _maybe_escalate).
         "_install_economy_atomicity",
         "_install_game_statistics",
         "_install_social_dedupe",

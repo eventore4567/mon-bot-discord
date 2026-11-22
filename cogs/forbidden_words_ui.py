@@ -125,7 +125,8 @@ class ForbiddenWordsUI(commands.Cog):
             incident.action = action
             incident.infractions = infraction_count
             if action == "mute":
-                incident.duration_s = automod_module.MUTE_ESCALATION_SECONDS
+                # Durée réelle du palier atteint (5 min, 10 min, 30 min…).
+                incident.duration_s = runtime.duree_mute_escalade(message.guild.id, message.author.id)
             # Même référence SX- et mêmes suites que les autres incidents AutoMod.
             await runtime._record_incident_trace(message, incident)
             if action:
@@ -143,10 +144,12 @@ class ForbiddenWordsUI(commands.Cog):
             )
             if action == "mute":
                 description += (
-                    " Exclusion temporaire de "
-                    + automod_module.helpers.format_duration(automod_module.MUTE_ESCALATION_SECONDS)
+                    " Récidive : exclusion temporaire de "
+                    + automod_module.helpers.format_duration(incident.duration_s)
                     + "."
                 )
+            elif action == "avertissement":
+                description += " Prochaine infraction dans l'heure : exclusion temporaire."
             try:
                 note = await message.channel.send(
                     content=message.author.mention,
