@@ -318,3 +318,31 @@ def test_le_salon_annonce_le_mute_a_venir():
     )
     texte = vue.children[0].children[0].content
     assert "Prochaine infraction dans l'heure : mute." in texte
+
+
+@pytest.mark.asyncio
+async def test_des_messages_simultanes_ne_font_qu_une_sanction(base, horloge, monkeypatch):
+    """Revue Codex (PR #710, 2e passage) : cinq détections simultanées dans un
+    même incident passaient toutes la garde « déjà sanctionné ? » avant que le
+    premier mute n'aboutisse, et appliquaient 5 min, 10 min, 30 min, 1 h, 2 h."""
+    import asyncio
+
+    monkeypatch.setattr(automod.panels, "texte_court", AsyncMock())
+    cog, membre = _cog(base), _membre()
+
+    async def timeout_lent(*_args, **_kwargs):
+        await asyncio.sleep(0.05)
+
+    membre.timeout = AsyncMock(side_effect=timeout_lent)
+    message = SimpleNamespace(guild=_guild(), author=membre, channel=MagicMock())
+    incident = automod._Incident(
+        started=0.0, filter_name="antilink", reason="lien",
+        channel_id=1, message_id=1, raw_content="", deleted_ok=True,
+    )
+    incident.action, incident.infractions = await cog._maybe_escalate(message.guild, membre, "lien")
+
+    await asyncio.gather(*(
+        cog._escalader_dans_incident(message, incident, "antilink", "lien") for _ in range(5)
+    ))
+    membre.timeout.assert_awaited_once()
+    assert incident.action == "mute" and incident.duration_s == 300

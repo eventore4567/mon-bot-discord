@@ -120,13 +120,15 @@ class ForbiddenWordsUI(commands.Cog):
                 reason=reason,
                 target=message.author,
             )
-            action, infraction_count = await runtime._maybe_escalate(
-                message.guild,
-                message.author,
-                reason,
-            )
-            incident.action = action
-            incident.infractions = infraction_count
+            async with incident.verrou_escalade:
+                action, infraction_count = await runtime._maybe_escalate(
+                    message.guild,
+                    message.author,
+                    reason,
+                )
+                if incident.action not in automod_module.SANCTIONS_D_INCIDENT:
+                    incident.action = action
+                incident.infractions = max(incident.infractions, infraction_count)
             if action == "mute":
                 # Durée réelle du palier atteint (5 min, 10 min, 30 min…).
                 incident.duration_s = runtime.duree_mute_escalade(message.guild.id, message.author.id)

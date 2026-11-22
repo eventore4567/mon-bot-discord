@@ -566,6 +566,8 @@ CREATE TABLE IF NOT EXISTS sentrix_contenu_escalade (
 # l'escalade « 1 avertissement puis mute » ; le seuil garde sa valeur, il ne
 # change pas de sens : six infractions sans une heure de calme.
 ABUS_PRIVILEGIE_SEUIL = 6
+#: Une fois l'une de ces issues atteinte, un incident n'escalade plus message par message.
+SANCTIONS_D_INCIDENT = frozenset({"mute", "mute_failed", "derank"})
 
 # Une rafale de spam est traitée comme UN incident par membre : la première détection
 # supprime, sanctionne, prévient et journalise ; les détections suivantes dans la
@@ -857,6 +859,10 @@ class _Incident:
     raw_content: str = ""
     deleted_ok: bool | None = None
     duration_s: int | None = None
+    #: Sérialise la décision d'escalade dans un incident (revue Codex, PR #710) :
+    #: des messages simultanés passaient tous la garde « déjà sanctionné ? »
+    #: avant que le premier mute n'aboutisse, et empilaient les paliers.
+    verrou_escalade: asyncio.Lock = _champ(default_factory=asyncio.Lock, repr=False, compare=False)
 
 
 def _normalize_blocked_link_rule(value: str) -> str:
@@ -5157,22 +5163,25 @@ class AutoMod(commands.Cog, name="Automod"):
         insulte ou un deuxième lien envoyé dans les 30 s n'atteignait jamais
         l'escalade, et « 1 avertissement puis mute » ne mutait pas.
         """
-        if incident.action in ("mute", "mute_failed", "derank"):
-            return  # déjà sanctionné dans cet incident : pas de palier par message
-        try:
-            action, infractions = await self._maybe_escalate(message.guild, message.author, reason)
-        except Exception:
-            logger.exception(
-                "Escalade AutoMod indisponible guild=%s user=%s filtre=%s.",
-                message.guild.id, message.author.id, filter_name,
-            )
-            return
-        incident.infractions = infractions
-        if action in (None, "avertissement"):
-            return
-        incident.action = action
-        if action == "mute":
-            incident.duration_s = self.duree_mute_escalade(message.guild.id, message.author.id)
+        async with incident.verrou_escalade:
+            # La garde est relue SOUS le verrou : le premier message de l'incident
+            # (chemin principal) et les suivants prennent tous ce même verrou.
+            if incident.action in SANCTIONS_D_INCIDENT:
+                return  # déjà sanctionné dans cet incident : pas de palier par message
+            try:
+                action, infractions = await self._maybe_escalate(message.guild, message.author, reason)
+            except Exception:
+                logger.exception(
+                    "Escalade AutoMod indisponible guild=%s user=%s filtre=%s.",
+                    message.guild.id, message.author.id, filter_name,
+                )
+                return
+            incident.infractions = max(incident.infractions, infractions)
+            if action in (None, "avertissement"):
+                return
+            incident.action = action
+            if action == "mute":
+                incident.duration_s = self.duree_mute_escalade(message.guild.id, message.author.id)
         try:
             await self.bot.db.log_automod_action(
                 message.guild.id, message.author.id, filter_name, action, reason,
@@ -5430,11 +5439,14 @@ class AutoMod(commands.Cog, name="Automod"):
                 elif action == "mute_failed":
                     incident.action_label = f"⚠️ Mute prévu {helpers.format_duration(spam_duration or SPAM_TIMEOUT_SECONDS)} — non appliqué"
             elif allow_escalation:
-                action, infraction_count = await self._maybe_escalate(
-                    message.guild,
-                    message.author,
-                    reason,
-                )
+                async with incident.verrou_escalade:
+                    action, infraction_count = await self._maybe_escalate(
+                        message.guild,
+                        message.author,
+                        reason,
+                    )
+                    if incident.action not in SANCTIONS_D_INCIDENT:
+                        incident.action = action
         except Exception:
             # L'escalade est secondaire par rapport à la suppression déjà faite :
             # on garde l'avertissement public et le log d'incident au lieu de perdre
@@ -5446,8 +5458,11 @@ class AutoMod(commands.Cog, name="Automod"):
                 filter_name,
             )
 
-        incident.action = action
-        incident.infractions = infraction_count
+        # Un message regroupé de la même rafale a pu sanctionner pendant que ce
+        # premier message terminait : on ne rétrograde jamais une sanction.
+        if incident.action not in SANCTIONS_D_INCIDENT:
+            incident.action = action
+        incident.infractions = max(incident.infractions, infraction_count)
         # Suite annoncée dans le salon pour l'escalade des filtres de contenu
         # (le spam a ses propres textes, déjà complets).
         suite_escalade = ""
