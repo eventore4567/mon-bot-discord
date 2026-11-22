@@ -116,3 +116,57 @@ def test_l_ia_peut_desormais_accuser_et_pas_seulement_disculper():
     assert "menaces.menace_probable" in source
     # Asymétrie volontaire : on sanctionne SAUF si l'IA dit explicitement anodin.
     assert "_insulte_selon_contexte(message) is not False" in source
+
+
+# ------------------------------------------------- symboles ambigus (22/11/2026)
+
+@pytest.mark.parametrize("message", [
+    "jte vi@le",
+    "jte vi0le",
+    "je vais te d@x",
+    "jte b@ise",
+    "jte n!que",
+])
+def test_un_symbole_qui_remplace_une_autre_lettre_est_quand_meme_vu(message):
+    """« vi@le » passait à travers, et pas faute de traduire le « @ ».
+
+    Elle existait : « @ » valait « a ». Mais un même symbole remplace des
+    lettres DIFFÉRENTES selon celui qui écrit — ici le « @ » tient la place du O
+    de « viole », pas celle d'un A. La traduction donnait « viale », qui ne
+    correspond à rien. On essaie donc chaque lecture plausible : il suffit
+    qu'une corresponde.
+    """
+    assert menaces.menace_probable(message) is not None
+
+
+@pytest.mark.parametrize("message", [
+    "coucou ca va",
+    "je baisse le son",
+    "on va manger des pates a rincer",
+    "jvais te p0ur5uivre en justice",
+    "j'ai eu 20/20 au controle",
+    "mon @ mail c'est truc@machin.fr",
+])
+def test_les_phrases_ordinaires_restent_tranquilles(message):
+    """Un faux positif est un défaut au même titre qu'une fuite.
+
+    Essayer plusieurs lectures élargit la détection : il faut donc vérifier dans
+    les deux sens, sinon « j'ai eu 20/20 » finirait muté.
+    """
+    assert menaces.menace_probable(message) is None
+
+
+def test_le_nombre_de_lectures_est_plafonne():
+    """Un message truffé de symboles ne doit pas devenir une bombe de calcul.
+
+    Sans plafond, le produit de toutes les lectures explose, et un message
+    choisi exprès ferait travailler le filtre indéfiniment — sur le chemin de
+    CHAQUE message du serveur.
+    """
+    pire = "@" * 400 + "!" * 400
+    assert len(menaces.lectures(pire)) <= menaces._MAX_VARIANTES
+
+
+def test_la_lecture_simple_vient_toujours_en_premier():
+    """Le cas courant ne doit pas payer le coût des variantes."""
+    assert menaces.lectures("jte viole")[0] == menaces.normaliser("jte viole")

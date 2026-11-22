@@ -582,6 +582,15 @@ NATIVE_CLEANUP_TASK = "automod-native-rules-cleanup"
 SPAM_NOTICE_GROUP_WINDOW_SECONDS = 6.0
 SPAM_NOTICE_GROUP_DELAY_SECONDS = 1.0
 SPAM_NOTICE_MAX_MENTIONS = 10
+#: 22/11/2026 : « quand il est sûr d'avoir empêché un spam, il met son truc. »
+#: L'avertissement anti-spam s'auto-supprimait au bout de six secondes fixes.
+#: Pendant un spam CONTINU, cette échéance tombe au milieu de la rafale : le
+#: panneau disparaît sous les yeux du staff pendant que les messages continuent
+#: d'être supprimés, et le salon paraît détraqué. Le retrait attend donc que le
+#: salon soit calme, avec un plafond pour qu'un avertissement ne reste jamais
+#: indéfiniment si la rafale ne s'arrête pas.
+SPAM_NOTICE_CALME_SECONDES = 6.0
+SPAM_NOTICE_VIE_MAX_SECONDES = 90.0
 # 05/11/2026 : 24 h de mémoire faisaient muter dès la première rafale du
 # lendemain matin, « sans avertissement avant ». Une heure calme remet à zéro.
 SPAM_ESCALATION_RESET_SECONDS = 3600
@@ -5105,6 +5114,8 @@ class AutoMod(commands.Cog, name="Automod"):
             # de carte « Message supprimé » par message en plus — mesuré : 242 cartes
             # pour une vague de 20 spammeurs. Même règle que +clear.
             log_service.mark_purged((message.id,))
+            # Repousse le retrait de l'avertissement tant que ça spamme.
+            self._noter_bruit_spam(message.channel.id)
         garder = self.__dict__.get("_spam_messages_gardes")
         message_garde = bool(garder and int(getattr(message, "id", 0) or 0) in garder)
         if message_garde:
@@ -5169,6 +5180,37 @@ class AutoMod(commands.Cog, name="Automod"):
                 mention_action = await self._spam_timeout(message.guild, message.author, reason)
             except Exception:
                 logger.exception("Timeout %s impossible guild=%s user=%s", filter_name, message.guild.id, message.author.id)
+
+        # 22/11/2026 : « il commence par le plus dangereux, et dès qu'il a le
+        # temps il fait les autres. »
+        #
+        # La sanction anti-spam était calculée TOUT EN BAS, après la trace
+        # d'incident, après log_automod_action et après add_risk_signal — trois
+        # allers-retours en base. Pendant ce temps le spammeur continue, et
+        # chaque message qui arrive relance une suppression. D'où le salon qui
+        # part en vrille avant que le mute tombe.
+        #
+        # Ce qui ARRÊTE le flux passe donc en premier, et la suppression (déjà
+        # lancée plus haut, elle n'est pas attendue) tourne en parallèle : deux
+        # actions en même temps, la plus urgente d'abord.
+        spam_sanction = None
+        # ``not mute_immediat`` n'est pas décoratif : « antimention » appartient à
+        # SPAM_FILTERS, et un ping en masse vient de recevoir son mute fixe juste
+        # au-dessus. Les branches du bas étaient mutuellement exclusives ; en
+        # hissant l'appel j'avais perdu cette exclusivité, donc un ping en masse
+        # prenait DEUX sanctions : le mute anti-mentions, puis l'escalade de spam
+        # qui avance son compteur, peut rajouter un mute plus long et envoyer un
+        # second MP — alors que l'incident n'enregistre que le premier.
+        if filter_name in SPAM_FILTERS and not mute_immediat:
+            try:
+                spam_sanction = await self._spam_progressive_action(
+                    message.guild, message.author, reason,
+                )
+            except Exception:
+                logger.exception(
+                    "Sanction anti-spam impossible guild=%s user=%s filtre=%s.",
+                    message.guild.id, message.author.id, filter_name,
+                )
         await finish_deletion()
         if deletion.done() and not deletion.cancelled() and deletion.exception() is None:
             resultat = deletion.result()
@@ -5228,10 +5270,10 @@ class AutoMod(commands.Cog, name="Automod"):
                 incident.duration_s = SPAM_TIMEOUT_SECONDS
                 incident.action_label = "🔇 Mute anti-arnaque" if mention_action else "⚠️ Mute anti-arnaque non appliqué"
             elif filter_name in SPAM_FILTERS:
-                action, spam_stage, spam_duration, spam_public_text = await self._spam_progressive_action(
-                    message.guild,
-                    message.author,
-                    reason,
+                # Déjà appliquée plus haut : on ne sanctionne pas deux fois.
+                action, spam_stage, spam_duration, spam_public_text = (
+                    spam_sanction if spam_sanction is not None
+                    else (None, 0, None, None)
                 )
                 # 05/11/2026 : un flood d'émojis était annoncé comme « spam »
                 # tout court. Le message public nomme la vraie cause.
@@ -5321,6 +5363,12 @@ class AutoMod(commands.Cog, name="Automod"):
                 message.channel, message.author.mention, public_text
             ):
                 pass
+            elif filter_name in SPAM_FILTERS:
+                # Pas d'échéance fixe : le retrait attend que le salon se taise.
+                envoi = await panels.texte_court(
+                    message.channel, f"{message.author.mention}, {public_text}",
+                )
+                self._programmer_retrait_calme(envoi)
             else:
                 await panels.texte_court(
                     message.channel,
@@ -5379,11 +5427,59 @@ class AutoMod(commands.Cog, name="Automod"):
         if not lines:
             return
         try:
-            await panels.texte_court(channel, "\n".join(lines), supprimer_apres=6)
+            envoi = await panels.texte_court(channel, "\n".join(lines))
+            self._programmer_retrait_calme(envoi)
         except discord.HTTPException:
             pass
         except Exception:
             logger.exception("Avertissement anti-spam groupé impossible salon=%s", getattr(channel, "id", None))
+
+    def _noter_bruit_spam(self, channel_id: int) -> None:
+        """Dernier instant où du spam a été vu dans ce salon."""
+        self.__dict__.setdefault("_spam_dernier_bruit", {})[int(channel_id)] = time.monotonic()
+
+    async def _retirer_quand_calme(self, envoi) -> None:
+        """Supprime un avertissement anti-spam une fois la rafale terminée.
+
+        Une échéance fixe tombait au milieu du spam. On attend donc le silence —
+        ``SPAM_NOTICE_CALME_SECONDES`` sans nouveau message supprimé dans ce
+        salon — et on plafonne l'attente, pour qu'un spam qui ne s'arrête jamais
+        ne laisse pas l'avertissement en place indéfiniment.
+        """
+        if envoi is None:
+            return
+        canal = int(getattr(getattr(envoi, "channel", None), "id", 0) or 0)
+        # L'échéance se compte depuis le dernier spam OU depuis l'envoi, le plus
+        # tard des deux. Le bruit est noté à la suppression, et entre les deux il
+        # y a la sanction, plusieurs requêtes et l'envoi lui-même : sous une
+        # limite de débit Discord, ces six secondes pouvaient être déjà écoulées
+        # à l'envoi, et l'avertissement était supprimé aussitôt affiché —
+        # personne ne le voyait.
+        envoye_a = time.monotonic()
+        limite = envoye_a + SPAM_NOTICE_VIE_MAX_SECONDES
+        bruits = self.__dict__.setdefault("_spam_dernier_bruit", {})
+        while True:
+            maintenant = time.monotonic()
+            if maintenant >= limite:
+                break
+            depuis = max(bruits.get(canal, 0.0), envoye_a)
+            reste = SPAM_NOTICE_CALME_SECONDES - (maintenant - depuis)
+            if reste <= 0:
+                break
+            await asyncio.sleep(min(reste, limite - maintenant))
+        try:
+            await envoi.delete()
+        except Exception:  # noqa: BLE001 — déjà supprimé, salon fermé, droits
+            pass
+
+    def _programmer_retrait_calme(self, envoi) -> None:
+        try:
+            tache = asyncio.get_running_loop().create_task(self._retirer_quand_calme(envoi))
+        except RuntimeError:
+            return
+        taches = self.__dict__.setdefault("_retraits_calme", set())
+        taches.add(tache)
+        tache.add_done_callback(taches.discard)
 
     def _est_mute_sentrix(self, guild_id: int, user_id: int) -> bool:
         mutes = self.__dict__.get("_mutes_sentrix")
