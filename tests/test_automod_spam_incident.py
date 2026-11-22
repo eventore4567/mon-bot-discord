@@ -343,7 +343,10 @@ def test_content_policy_wrapper_accepts_censored_content_and_honors_immunity_off
     assert "censored_content: str | None = None" in source
     assert "censored_content=censored_content" in source
     assert "override is False" in source
-    assert "original_maybe_escalate" in source
+    # 22/11/2026 : la politique ne remplace plus _maybe_escalate, elle n'a donc
+    # plus d'original à rappeler. L'immunité OFF du propriétaire est reprise dans
+    # AutoMod._maybe_escalate (test_le_proprietaire_qui_coupe_son_immunite_est_compte).
+    assert "original_maybe_escalate" not in source
 
 def test_normalize_link_text_repairs_split_scheme_and_separates_concatenated_urls():
     raw = "https:/ /discord.gg/GgYzEFSshttps://discord.gg/Another"

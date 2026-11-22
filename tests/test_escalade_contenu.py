@@ -216,6 +216,15 @@ async def test_un_membre_hors_de_portee_passe_par_la_reponse_a_l_abus(base, horl
 
 
 @pytest.mark.asyncio
+async def test_un_administrateur_sous_le_bot_passe_aussi_par_la_reponse_a_l_abus(base, horloge):
+    """Discord refuse le timeout d'un administrateur, même sous le rôle du bot."""
+    cog, admin = _cog(base), _membre(role=10, admin=True)
+    assert (await _infraction(cog, admin))[0] == "derank"
+    cog._repondre_abus_privilegie.assert_awaited_once()
+    admin.timeout.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_un_mute_refuse_ne_fait_pas_monter_le_palier(base, horloge):
     cog, membre = _cog(base), _membre()
     await _infraction(cog, membre)
