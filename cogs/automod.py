@@ -1526,6 +1526,19 @@ class _MessageDApplication:
         return hash(self.id)
 
 
+class _ReponseDeCommande(_MessageDApplication):
+    """La réponse d'un bot du serveur à une commande /, vue comme un message du
+    membre qui a lancé la commande — pour l'anti-spam UNIQUEMENT.
+
+    22/11/2026 : « si un mec spam les commandes / ». Une commande / ne produit
+    aucun message du membre, seulement la réponse du bot : l'anti-spam ne
+    voyait rien. Le contenu, lui, n'est pas filtré : il est écrit par un bot
+    que les administrateurs ont installé, pas par le membre.
+    """
+
+    _sentrix_external_app = False
+
+
 class _MessageModifie(_MessageDApplication):
     """Un message MODIFIÉ, filtré comme un nouveau message.
 
@@ -4092,6 +4105,70 @@ class AutoMod(commands.Cog, name="Automod"):
             return False
         return True
 
+    def _commande_du_serveur(self, message: discord.Message):
+        """Le membre qui a lancé la commande / d'un bot installé sur le serveur.
+
+        None pour tout le reste : message sans commande, application installée
+        par un utilisateur (badge « APP », traitée par _handle_external_app_message),
+        ou lanceur qui n'est plus sur le serveur.
+        """
+        meta = getattr(message, "interaction_metadata", None)
+        if meta is None or not message.guild:
+            return None
+        try:
+            if meta.is_user_integration():
+                return None
+        except Exception:  # noqa: BLE001 — métadonnées incomplètes : pas une commande sûre
+            return None
+        user = getattr(meta, "user", None)
+        membre = message.guild.get_member(user.id) if user is not None else None
+        if membre is None or membre.bot:
+            return None
+        return membre
+
+    async def _handle_command_spam(self, message: discord.Message) -> bool:
+        """Spam de commandes / : les réponses des bots comptent pour le lanceur.
+
+        Une commande = une détection, même si le bot répond en plusieurs messages
+        (suivis d'une même interaction) : seul le premier message d'une
+        interaction est compté ; les suivants sont supprimés avec la rafale si
+        elle est en cours. Retourne True si le message a été traité comme spam.
+        """
+        membre = self._commande_du_serveur(message)
+        if membre is None:
+            return False
+        conf = await self.get_automod_cached(message.guild.id)
+        if not conf or conf.get("security_module_disabled") or not conf.get("antispam"):
+            return False
+        if await self._proprietaire_protege(message.guild, membre):
+            return False
+
+        proxy = _ReponseDeCommande(message, membre, message.content or "")
+        cle = (message.guild.id, membre.id)
+        incident = self.incidents.get(cle)
+        en_rafale = (
+            incident is not None
+            and incident.filter_name in SPAM_FILTERS
+            and time.monotonic() - incident.started < SPAM_INCIDENT_WINDOW_SECONDS
+        )
+        interaction_id = getattr(getattr(message, "interaction_metadata", None), "id", None)
+        vues = self.__dict__.setdefault("_interactions_comptees", {})
+        deja_comptee = interaction_id is not None and interaction_id in vues
+        if deja_comptee and not en_rafale:
+            return False  # suite d'une commande déjà comptée, hors rafale : rien à faire
+        if interaction_id is not None:
+            if len(vues) > 5000:
+                limite = time.monotonic() - 60
+                for ancien, quand in list(vues.items()):
+                    if quand < limite:
+                        vues.pop(ancien, None)
+            vues[interaction_id] = time.monotonic()
+
+        resultat = await self._filtre_anti_spam(
+            proxy, conf, _normalize_link_text(proxy.content), commande=True,
+        )
+        return resultat is not None or self.incidents.get(cle) is not incident
+
     async def _handle_external_app_message(self, message: discord.Message) -> bool:
         invoker = self._external_app_invoker(message)
         if invoker is None:
@@ -4189,6 +4266,8 @@ class AutoMod(commands.Cog, name="Automod"):
                     logger.exception("Garde des webhooks en échec guild=%s", message.guild.id)
             try:
                 if await self._handle_external_app_message(message):
+                    return
+                if await self._handle_command_spam(message):
                     return
                 invoker = self._external_app_invoker(message)
                 if isinstance(invoker, discord.Member):
@@ -4507,6 +4586,20 @@ class AutoMod(commands.Cog, name="Automod"):
             if emoji_count > 10:
                 return await self._delete_and_warn(message, "Spam d'émojis détecté.", "antiemoji")
 
+        return await self._filtre_anti_spam(message, conf, link_content)
+
+    async def _filtre_anti_spam(self, message, conf: dict, link_content: str, *, commande: bool = False):
+        """Rafales, spam soutenu, raid coordonné, spam multi-salons, répétitions.
+
+        22/11/2026 : extrait tel quel de la fin d'on_message pour que les réponses
+        aux commandes / (voir _handle_command_spam) passent par le même anti-spam,
+        sans passer par les filtres de contenu.
+
+        ``commande`` : le message est la réponse d'un bot à une commande / d'un
+        membre. Le contrôle « même message publié par plusieurs comptes » est
+        alors sauté : deux membres qui lancent /daily reçoivent des réponses
+        identiques sans former un raid.
+        """
         # Une modification n'est pas un nouveau message : la compter ferait passer
         # une simple correction de faute pour une rafale.
         if (
@@ -4515,7 +4608,9 @@ class AutoMod(commands.Cog, name="Automod"):
         ):
             key = (message.guild.id, message.author.id)
             seuils = await self._spam_seuils(message.guild.id)
-            group = self._coordinated_copies(message, link_content, seuils.comptes_coordonnes)
+            group = None if commande else self._coordinated_copies(
+                message, link_content, seuils.comptes_coordonnes
+            )
             if group:
                 self._noter_spammeur(message.guild, message.author.id, raid=True)
                 reason = "Même message publié par plusieurs comptes (raid coordonné)."
