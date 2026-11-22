@@ -5194,7 +5194,14 @@ class AutoMod(commands.Cog, name="Automod"):
         # lancée plus haut, elle n'est pas attendue) tourne en parallèle : deux
         # actions en même temps, la plus urgente d'abord.
         spam_sanction = None
-        if filter_name in SPAM_FILTERS:
+        # ``not mute_immediat`` n'est pas décoratif : « antimention » appartient à
+        # SPAM_FILTERS, et un ping en masse vient de recevoir son mute fixe juste
+        # au-dessus. Les branches du bas étaient mutuellement exclusives ; en
+        # hissant l'appel j'avais perdu cette exclusivité, donc un ping en masse
+        # prenait DEUX sanctions : le mute anti-mentions, puis l'escalade de spam
+        # qui avance son compteur, peut rajouter un mute plus long et envoyer un
+        # second MP — alors que l'incident n'enregistre que le premier.
+        if filter_name in SPAM_FILTERS and not mute_immediat:
             try:
                 spam_sanction = await self._spam_progressive_action(
                     message.guild, message.author, reason,
@@ -5442,13 +5449,21 @@ class AutoMod(commands.Cog, name="Automod"):
         if envoi is None:
             return
         canal = int(getattr(getattr(envoi, "channel", None), "id", 0) or 0)
-        limite = time.monotonic() + SPAM_NOTICE_VIE_MAX_SECONDES
+        # L'échéance se compte depuis le dernier spam OU depuis l'envoi, le plus
+        # tard des deux. Le bruit est noté à la suppression, et entre les deux il
+        # y a la sanction, plusieurs requêtes et l'envoi lui-même : sous une
+        # limite de débit Discord, ces six secondes pouvaient être déjà écoulées
+        # à l'envoi, et l'avertissement était supprimé aussitôt affiché —
+        # personne ne le voyait.
+        envoye_a = time.monotonic()
+        limite = envoye_a + SPAM_NOTICE_VIE_MAX_SECONDES
         bruits = self.__dict__.setdefault("_spam_dernier_bruit", {})
         while True:
             maintenant = time.monotonic()
             if maintenant >= limite:
                 break
-            reste = SPAM_NOTICE_CALME_SECONDES - (maintenant - bruits.get(canal, 0.0))
+            depuis = max(bruits.get(canal, 0.0), envoye_a)
+            reste = SPAM_NOTICE_CALME_SECONDES - (maintenant - depuis)
             if reste <= 0:
                 break
             await asyncio.sleep(min(reste, limite - maintenant))

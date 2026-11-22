@@ -151,3 +151,50 @@ async def test_sans_envoi_il_n_y_a_rien_a_retirer():
 def test_chaque_suppression_de_spam_repousse_le_retrait():
     corps = SOURCE.split("async def _delete_and_warn", 1)[1].split("\n    def ", 1)[0]
     assert "self._noter_bruit_spam(message.channel.id)" in corps
+
+
+# ------------------------------------------------- 2e tour de revue (22/11/2026)
+
+def test_un_ping_en_masse_ne_prend_pas_deux_sanctions():
+    """Régression de ma propre correction, trouvée en revue.
+
+    « antimention » appartient à SPAM_FILTERS, et un ping en masse reçoit son
+    mute fixe juste au-dessus (``mute_immediat``). Les branches du bas étaient
+    mutuellement exclusives ; en hissant l'appel j'avais perdu cette
+    exclusivité, donc le membre prenait le mute anti-mentions PUIS l'escalade de
+    spam — compteur avancé, mute éventuellement plus long, second MP, alors que
+    l'incident n'enregistre que le premier.
+    """
+    from cogs.automod import SPAM_FILTERS
+
+    assert "antimention" in SPAM_FILTERS, "le piège n'existe plus, le garde non plus"
+    corps = SOURCE.split("async def _delete_and_warn", 1)[1].split("\n    def ", 1)[0]
+    assert "if filter_name in SPAM_FILTERS and not mute_immediat:" in corps
+
+
+@pytest.mark.asyncio
+async def test_un_avertissement_envoye_en_retard_reste_visible(monkeypatch):
+    """Le bruit est noté à la suppression, l'envoi vient bien après.
+
+    Entre les deux : la sanction, plusieurs requêtes, et l'envoi lui-même. Sous
+    une limite de débit Discord ces six secondes pouvaient être DÉJÀ écoulées à
+    l'affichage, et l'avertissement était supprimé aussitôt — personne ne le
+    voyait. L'échéance part donc du plus tard des deux instants.
+    """
+    import time as _time
+
+    import cogs.automod as mod
+
+    monkeypatch.setattr(mod, "SPAM_NOTICE_CALME_SECONDES", 0.30)
+    monkeypatch.setattr(mod, "SPAM_NOTICE_VIE_MAX_SECONDES", 5.0)
+    cog = _cog()
+    envoi = SimpleNamespace(channel=SimpleNamespace(id=7), delete=AsyncMock())
+
+    # Le spam a été vu il y a longtemps : l'ancienne formule supprimait tout de
+    # suite, puisque « maintenant - dernier_bruit » dépassait déjà le délai.
+    cog.__dict__["_spam_dernier_bruit"] = {7: _time.monotonic() - 60.0}
+    debut = _time.monotonic()
+    await cog._retirer_quand_calme(envoi)
+
+    assert _time.monotonic() - debut >= 0.25, "supprimé aussitôt affiché"
+    envoi.delete.assert_awaited_once()
