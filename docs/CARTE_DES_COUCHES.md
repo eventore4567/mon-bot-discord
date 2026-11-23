@@ -8,7 +8,7 @@ appel les traverse toutes, et il suffit qu'une seule plante (ou change de signat
 pour que la fonction ne marche plus — c'est l'origine des bugs « l'insulte n'est
 pas avertie » et « l'IA ne répond pas à une image » de novembre 2026.
 
-**380 fonctions remplacées, 784 remplacements au total.**
+**373 fonctions remplacées, 772 remplacements au total.**
 
 ## Fonctions remplacées par au moins deux fichiers
 
@@ -47,7 +47,6 @@ pas avertie » et « l'IA ne répond pas à une image » de novembre 2026.
 | 4 | `edit_original_response` | final_interaction_policy.py, plain_response_policy.py, premium_style_runtime.py, top_command_banners.py |
 | 4 | `format_command_line` | command_clarity.py, common_command_names.py, help_complete.py, user_facing_hygiene.py |
 | 4 | `handle_index` | __init__.py, brand_avatar_v39.py, dashboard_frontend_freeze_v55.py, dashboard_live_response_v15.py |
-| 4 | `punish_nuker` | antinuke_emergency_v55.py, antinuke_rollback.py, production_alert_noise_fix.py, security_v2_runtime.py |
 | 4 | `reward_game_winner` | bot_excellence_runtime.py, bot_mastery_runtime.py, game_seasons_v9.py, stability_runtime.py |
 | 4 | `send_setup` | setup_components_v73.py, setup_experience_v74.py, setup_invitations.py |
 | 4 | `style_embed` | command_style_v2.py, community_v32.py, premium_style_runtime.py, sentrix_visual_cleanup.py |
@@ -57,9 +56,9 @@ pas avertie » et « l'IA ne répond pas à une image » de novembre 2026.
 | 3 | `_help_home` | final_runtime_polish.py, help_clean_style.py |
 | 3 | `_manageable_guild` | dashboard_ops_suite_plus.py, dashboard_product_v18.py, dashboard_recovery_v54.py |
 | 3 | `_send` | bot_tracker.py, create_sentrix_v3.py, setup_v2_core.py |
+| 3 | `action` | automod.py |
 | 3 | `build_server` | runtime_fix_v1.py, server_builder_moderation_space.py, server_builder_ready_setup.py |
 | 3 | `close_ticket` | logs_unified_v6.py, sentrix_ultimate.py, ticket_claim_security.py |
-| 3 | `duration_s` | automod.py |
 | 3 | `execute` | member_data_retention_v17.py, runtime_finish_v94.py, v17_shared.py |
 | 3 | `generate_image` | ai_disable_guard.py, bot_excellence_runtime.py, bot_mastery_runtime.py |
 | 3 | `handle_guilds` | dashboard_ops_suite_plus.py, dashboard_product_v18.py, dashboard_recovery_v54.py |
@@ -75,7 +74,6 @@ pas avertie » et « l'IA ne répond pas à une image » de novembre 2026.
 | 2 | `_cache_message` | setup_v2_core.py, setup_v2_runtime.py |
 | 2 | `_category_for` | help_category_rework.py, user_facing_hygiene.py |
 | 2 | `_command_usage` | common_command_names.py, user_facing_hygiene.py |
-| 2 | `_delete_and_warn` | content_filter_policy.py, forbidden_words_ui.py |
 | 2 | `_force_rich_args` | command_style_v2.py, send_argument_safety_v20.py |
 | 2 | `_health_alert` | community_v33.py, production_alert_noise_fix.py |
 | 2 | `_home` | setup_simple_v68.py, setup_ticket_autoconfig_v72.py |
@@ -85,7 +83,6 @@ pas avertie » et « l'IA ne répond pas à une image » de novembre 2026.
 | 2 | `_prepare_and_generate` | community_v3.py, community_v34.py |
 | 2 | `_prune_redundant_commands` | help_v8_final_guard.py, integrity_hardening.py |
 | 2 | `_render_home` | setup_experience_v2.py, setup_oxyde_style.py |
-| 2 | `action` | automod.py, forbidden_words_ui.py |
 | 2 | `aliases` | command_integrity_v18.py |
 | 2 | `ask_ai` | community_v3.py, natural_music_intent_guard.py |
 | 2 | `ban` | owner_sanction_immunity.py |
@@ -99,12 +96,12 @@ pas avertie » et « l'IA ne répond pas à une image » de novembre 2026.
 | 2 | `content` | ai.py, sentrix_plus.py |
 | 2 | `convert` | bot_v16_commands.py, common_command_names.py |
 | 2 | `create_log_channels` | runtime_fix_v1.py, setup_auto_fix.py |
+| 2 | `duration_s` | automod.py |
 | 2 | `error_message` | ai_disable_guard.py, v17_ai_economy_games.py |
 | 2 | `error_title` | ai_disable_guard.py, v17_ai_economy_games.py |
 | 2 | `get_conversation_history` | bot_mastery_runtime.py, bot_v12_machine.py |
 | 2 | `get_log_setting` | bot_tracker.py, create_sentrix_v3.py |
 | 2 | `handle_control_button` | ticket_claim_security.py, ticket_controls_minimal.py |
-| 2 | `infractions` | automod.py, forbidden_words_ui.py |
 | 2 | `install` | plain_text_all_extension.py, v17_user_facing_hotfix.py |
 | 2 | `is_bot_creator` | bot_v14_core.py, runtime_quality_v25.py |
 | 2 | `is_error_code` | ai_disable_guard.py, v17_ai_economy_games.py |

@@ -196,7 +196,6 @@ def install(bot: commands.Bot) -> None:
         from . import automod
         original_exempt = automod.AutoMod.is_automod_exempt
         original_antinuke_exempt = automod.AutoMod.is_antinuke_exempt
-        original_punish_nuker = automod.AutoMod.punish_nuker
 
         async def is_automod_exempt_protected(self, member):
             if is_bot_owner_id(getattr(member, "id", None)):
@@ -208,43 +207,15 @@ def install(bot: commands.Bot) -> None:
                 return True
             return await original_antinuke_exempt(self, guild, actor)
 
-        async def punish_nuker_protected(self, guild, actor_id, reason):
-            if is_bot_owner_id(actor_id):
-                logger.warning("Anti-nuke ignoré pour le propriétaire vérifié de SentriX sur %s.", guild.id)
-                return None
-
-            # Défense en profondeur : revalide l'exemption juste avant toute sanction.
-            # Ainsi, une entrée /antinuke-whitelist-* (ou le propriétaire du serveur / bot)
-            # reste protégée même si un autre runtime appelle punish_nuker() directement et
-            # contourne accidentellement les listeners qui font normalement ce contrôle.
-            actor = guild.get_member(int(actor_id)) or discord.Object(id=int(actor_id))
-            try:
-                if await self.is_antinuke_exempt(guild, actor):
-                    logger.warning(
-                        "Anti-nuke ignoré pour un utilisateur exempté/whitelisté sur guild=%s actor=%s.",
-                        guild.id,
-                        actor_id,
-                    )
-                    return None
-            except Exception:
-                # Fail-safe : une panne de lecture de la whitelist ne doit jamais provoquer
-                # un ban/derank potentiellement irréversible d'un compte protégé.
-                logger.exception(
-                    "Vérification whitelist anti-nuke impossible sur guild=%s actor=%s ; sanction bloquée par sécurité.",
-                    guild.id,
-                    actor_id,
-                )
-                return None
-
-            return await original_punish_nuker(self, guild, actor_id, reason)
-
         patches = (
             ("is_automod_exempt", original_exempt, is_automod_exempt_protected),
+            # punish_nuker n'est plus remplacée ici (22/11/2026) : cette protection
+            # n'était jamais exécutée (les couches d'instance avaient capturé la
+            # méthode avant) ; elle est écrite dans AutoMod.punish_nuker.
             # _maybe_escalate, _delete_and_warn et _delete_and_timeout ne sont plus
             # remplacées ici (22/11/2026) : l'exemption du propriétaire du bot est
             # écrite dans AutoMod._proprietaire_protege, que les trois appellent.
             ("is_antinuke_exempt", original_antinuke_exempt, antinuke_exempt_protected),
-            ("punish_nuker", original_punish_nuker, punish_nuker_protected),
         )
         for name, original, replacement in patches:
             if getattr(original, "_sentrix_owner_protection", False):

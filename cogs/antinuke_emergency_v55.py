@@ -1190,65 +1190,9 @@ class AntiNukeEmergencyV55(commands.Cog, name=_COG_NAME):
             return total
 
 
-def _patch_punishment(bot: commands.Bot) -> None:
-    """Confinement d'abord, restauration ensuite, avec anti-doublon de rafale."""
-    automod = bot.get_cog("Automod")
-    if automod is None or getattr(automod, "_sentrix_punish_v55", False):
-        return
-
-    original_punish = automod.punish_nuker
-    locks: dict[tuple[int, int], asyncio.Lock] = defaultdict(asyncio.Lock)
-    last_punish: dict[tuple[int, int], float] = {}
-
-    async def punish_v55(_self, guild: discord.Guild, actor_id: int, reason: str):
-        key = (guild.id, int(actor_id))
-        async with locks[key]:
-            now = time.monotonic()
-            if now - last_punish.get(key, 0.0) < PUNISH_COOLDOWN_SECONDS:
-                return
-            last_punish[key] = now
-
-            member_before = guild.get_member(int(actor_id))
-            await original_punish(guild, int(actor_id), reason)
-
-            if member_before is None:
-                try:
-                    await guild.ban(
-                        discord.Object(id=int(actor_id)),
-                        reason=f"SentriX anti-nuke V55 : {reason}",
-                        delete_message_seconds=3600,
-                    )
-                except (discord.Forbidden, discord.HTTPException):
-                    logger.warning(
-                        "Anti-nuke V55: impossible de bannir par ID l'auteur %s sur %s.",
-                        actor_id,
-                        guild.id,
-                    )
-
-            try:
-                # Le suivi est une FenetreGlissante (plus un dict) depuis le 04/11.
-                cle = (guild.id, int(actor_id))
-                if hasattr(automod.nuke_tracker, "reinitialiser"):
-                    automod.nuke_tracker.reinitialiser(cle)
-                else:
-                    automod.nuke_tracker[cle] = []
-            except Exception:
-                logger.warning("Étape non critique ignorée dans punish_v55", exc_info=True)
-
-            rollback = bot.get_cog(_COG_NAME)
-            if rollback is not None:
-                try:
-                    await rollback.restore_burst(guild, int(actor_id), reason)
-                except Exception:
-                    logger.exception(
-                        "Anti-nuke V55: restauration incomplète sur %s après confinement de %s.",
-                        guild.id,
-                        actor_id,
-                    )
-
-    automod.punish_nuker = MethodType(punish_v55, automod)
-    automod._sentrix_punish_v55 = True
-    logger.info("Anti-nuke V55: sanction avant rollback + anti-doublon activés.")
+# 22/11/2026 : _patch_punishment remplaçait AutoMod.punish_nuker (verrou et
+# anti-doublon, ban par identifiant, restauration après confinement). Tout cela
+# est écrit dans punish_nuker (cogs/automod.py), qui appelle restore_burst.
 
 
 async def install(bot: commands.Bot) -> None:
@@ -1266,7 +1210,6 @@ async def install(bot: commands.Bot) -> None:
     _patch_audit_actor(bot)
     if bot.get_cog(_COG_NAME) is None:
         await bot.add_cog(AntiNukeEmergencyV55(bot))
-    _patch_punishment(bot)
 
     bot._sentrix_antinuke_emergency_v55 = True
     logger.info(
