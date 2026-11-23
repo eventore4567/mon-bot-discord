@@ -870,7 +870,11 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             for cle in log_service.CATEGORY_KEYS
         }
         configurees = [cle for cle, r in reglages.items() if r.get("channel_id") and r.get("enabled")]
-        manquantes = [cle for cle in log_service.CATEGORY_KEYS if cle not in configurees]
+        # Revue Codex (PR #716) : « sans salon » = AUCUN salon, que la catégorie
+        # soit active ou non. Une catégorie coupée volontairement garde son salon ;
+        # l'envoi groupé ne doit ni la réactiver, ni la rediriger.
+        manquantes = [cle for cle, r in reglages.items() if not r.get("channel_id")]
+        module_logs = await core.module_enabled(self.bot, self.guild.id, "logs")
         detail = discord.ui.Button(label=t("Réglages détaillés", "Detailed settings"), style=discord.ButtonStyle.secondary)
 
         async def ouvrir_logs(interaction: discord.Interaction):
@@ -881,6 +885,11 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             f"**{len(configurees)}/{len(reglages)}** catégories envoyées dans un salon.",
             f"**{len(configurees)}/{len(reglages)}** categories sent to a channel.",
         )
+        if not module_logs:
+            ligne_logs += "\n-# " + t(
+                "⚪ Module Logs coupé : aucun journal n'est envoyé.",
+                "⚪ Logs module off: no log is sent.",
+            )
         if manquantes:
             noms = ", ".join(log_service.CATEGORIES.get(cle, cle) for cle in manquantes[:6])
             ligne_logs += "\n-# " + t("Sans salon : ", "No channel: ") + noms + ("…" if len(manquantes) > 6 else "")
@@ -967,8 +976,11 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             await log_service.set_log_channel(self.bot, self.guild.id, cle, salon_id)
             faites.append(cle)
         if faites:
-            await setup_v2_core.enable_module_if_unset(
-                self.bot, self.guild.id, "logs", actor_id=interaction.user.id,
+            # Revue Codex (PR #716) : enable_module_if_unset ne fait rien. Comme la
+            # page Logs détaillée, choisir un salon allume le module Logs ; sans
+            # lui, send_log_v2 rejette tout et rien ne part.
+            await setup_v2_core.set_module_enabled(
+                self.bot, self.guild.id, "logs", True, actor_id=interaction.user.id,
             )
         await self.refresh(interaction)
         if refusees:

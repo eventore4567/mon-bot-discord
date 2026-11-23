@@ -108,6 +108,15 @@ async def main() -> int:
           "le seuil de ban automatique se règle depuis la section", str(conf["warn_ban_threshold"]))
 
     from utils import log_service
+    from cogs import setup_v2_core as core
+
+    # Revue Codex (PR #716) : une catégorie coupée volontairement garde son salon
+    # et doit rester coupée ; module Logs coupé, l'envoi groupé doit le rallumer.
+    await log_service.set_log_channel(bot, guild.id, "messages", h.CID)
+    await log_service.set_log_enabled(bot, guild.id, "messages", False)
+    await core.set_module_enabled(bot, guild.id, "logs", False, actor_id=h.ADMIN_ID)
+    view.clear_items()
+    await view._build_page(view.page)
 
     tous = control(view, lambda i: isinstance(i, discord.ui.ChannelSelect))
     check(tous is not None, "la section propose d'envoyer les logs sans salon dans un salon")
@@ -118,6 +127,11 @@ async def main() -> int:
         if not (await log_service.get_log_setting(bot, guild.id, cle)).get("channel_id")
     ]
     check(not sans_salon, "un seul choix configure toutes les catégories de logs restantes", str(sans_salon))
+    messages = await log_service.get_log_setting(bot, guild.id, "messages")
+    check(int(messages.get("channel_id") or 0) == h.CID and not messages.get("enabled"),
+          "une catégorie coupée volontairement n'est ni réactivée ni redirigée", str(messages))
+    check(await core.module_enabled(bot, guild.id, "logs"),
+          "l'envoi groupé rallume le module Logs (sinon aucun journal ne part)")
     check(control(view, lambda i: isinstance(i, discord.ui.ChannelSelect)) is None,
           "une fois tout configuré, le sélecteur disparaît")
 
