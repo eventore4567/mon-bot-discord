@@ -1412,6 +1412,12 @@ class Ai(commands.Cog, name="Ai"):
             "noir": 0x1F1F1F, "black": 0x1F1F1F,
             "blanc": 0xFFFFFF, "white": 0xFFFFFF,
             "gris": 0x95A5A6, "grey": 0x95A5A6, "gray": 0x95A5A6,
+            # Revue Codex (PR #712) : le routeur reconnaissait aussi ces couleurs à
+            # la création d'un rôle ; sans elles ici, la création était refusée.
+            "turquoise": 0x1ABC9C, "teal": 0x1ABC9C, "cyan": 0x00BCD4,
+            "marron": 0x8B4513, "brown": 0x8B4513,
+            "or": 0xF1C40F, "gold": 0xF1C40F,
+            "blurple": 0x5865F2,
         }
         if value in named:
             return discord.Colour(named[value])

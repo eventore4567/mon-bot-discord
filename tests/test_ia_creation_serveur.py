@@ -107,3 +107,36 @@ def test_sans_gerer_les_roles_l_ia_refuse():
     guild, reponses, _ = _creer_role({"name": "VIP"}, actor_perms=False)
     guild.create_role.assert_not_awaited()
     assert "Gérer les rôles" in reponses[0]
+
+
+def test_toute_couleur_reconnue_est_comprise_par_l_executeur():
+    """Revue Codex (PR #712) : « crée un rôle VIP gold » était reconnu, puis
+    refusé à l'exécution (« couleur invalide ») — rien n'était créé."""
+    from cogs.ai import Ai
+
+    for couleur in ai_actions._COULEURS_ROLE:
+        assert Ai._parse_native_colour(couleur) is not None, couleur
+
+
+@pytest.mark.parametrize("phrase", ["ajoute le role VIP à Bob", "ajoute le role VIP a 123456789012345678"])
+def test_donner_un_role_a_un_nom_ou_un_identifiant_reste_un_don(phrase):
+    action = ai_actions.local_parse(phrase)
+    assert action is not None and action.intent == "role.give", (phrase, action)
+
+
+@pytest.mark.parametrize("phrase", [
+    "comment créer un rôle ?", "c est quoi créer une catégorie", "est-ce que je peux créer un salon ?",
+])
+def test_une_question_n_est_pas_une_demande_de_creation(phrase):
+    assert not ai_actions.looks_action_request(phrase)
+    action = ai_actions.local_parse(phrase)
+    assert action is None or action.intent not in {"role.create", "category.create", "channel.create_text"}
+
+
+@pytest.mark.parametrize("phrase", [
+    "non je veux tu crée le role Ping live pas give", "mp moi", "tu peux me mp ?", "écris-moi en privé",
+])
+def test_la_porte_du_routeur_laisse_passer_ces_demandes(phrase):
+    """Revue Codex (PR #712), P1 : reconnues par le parseur, ces phrases étaient
+    arrêtées en amont par looks_action_request et n'y arrivaient jamais."""
+    assert ai_actions.looks_action_request(phrase)

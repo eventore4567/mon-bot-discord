@@ -44,15 +44,28 @@ async def est_ouverte(bot, user_id: int, *, maintenant: float | None = None) -> 
 
     Une base illisible ferme le privé : c'est l'état par défaut, jamais l'inverse.
     """
+    return await serveur(bot, user_id, maintenant=maintenant) is not None
+
+
+async def serveur(bot, user_id: int, *, maintenant: float | None = None) -> int | None:
+    """Le serveur où « mp moi » a été demandé, si la conversation est ouverte.
+
+    Revue Codex (PR #712) : sans serveur, le pipeline IA sautait la limite
+    quotidienne et l'enregistrement de l'usage — 24 h de conversation privée
+    hors quota. La conversation privée est donc rattachée à ce serveur : sa
+    limite, ses réglages IA et ses rôles autorisés s'y appliquent.
+    """
     try:
         await bot.db.execute(SCHEMA)
         row = await bot.db.fetchone(
-            "SELECT expire_at FROM sentrix_mp_ouvertes WHERE user_id = ?", (int(user_id),),
+            "SELECT guild_id, expire_at FROM sentrix_mp_ouvertes WHERE user_id = ?", (int(user_id),),
         )
     except Exception:  # noqa: BLE001
         logger.warning("Fenêtre de conversation privée illisible pour %s.", user_id, exc_info=True)
-        return False
+        return None
     if row is None:
-        return False
+        return None
     instant = maintenant if maintenant is not None else time.time()
-    return int(row["expire_at"] or 0) > instant
+    if int(row["expire_at"] or 0) <= instant:
+        return None
+    return int(row["guild_id"])

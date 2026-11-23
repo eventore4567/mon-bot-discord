@@ -786,6 +786,13 @@ def looks_action_request(text: str) -> bool:
         return False
     if is_bare_action_candidate(normalized):
         return True
+    # 22/11/2026 (revue Codex, PR #712) : « mp moi » et « non je veux que tu crées
+    # le rôle Ping live » étaient reconnus par le parseur, mais cette porte, en
+    # amont, les renvoyait à la conversation : ils n'atteignaient jamais le
+    # parseur. Ces deux reconnaissances sont locales, déterministes et gardées
+    # contre les questions : si elles reconnaissent la phrase, c'est une demande.
+    if _message_prive(text) is not None or _creation(text) is not None:
+        return True
 
     # Une question de connaissance ne doit jamais devenir une action par accident.
     if re.match(
@@ -862,7 +869,17 @@ def _creation(question: str) -> "ParsedAction | None":
     if match is None or _TEMPS_PASSE.search(question[: match.start()]):
         return None
     avant = normalize_text(question[: match.start()])
+    # Une question n'est pas une demande : « comment créer un rôle ? », « c'est
+    # quoi une catégorie », « est-ce que JE peux créer un salon ? ». Une demande
+    # polite (« est-ce que TU peux créer… ») reste une demande.
+    if re.search(
+        r"\b(?:comment|pourquoi|c est quoi|qu est ce|a quoi sert|je peux|on peut|peut on|"
+        r"je pourrais|on pourrait|doit on|faut il|il faut)\b",
+        avant,
+    ):
+        return None
     verbe = normalize_text(match.group(0).split()[0])
+    verbe_creation = verbe
     # « fais/fait » est trop courant (« ça fait un salon de trop », « il fait un
     # role play ») : il ne vaut création qu'en tête de phrase, ou après une
     # formule de politesse.
@@ -879,6 +896,11 @@ def _creation(question: str) -> "ParsedAction | None":
         # « ajoute le rôle VIP à @bob » / « … à tout le monde » : c'est DONNER un
         # rôle existant (role.give, role.mass), pas en créer un.
         if re.search(r"\s(?:a|à|au|aux)\s+(?:@|<@|tout|tous|toutes|chaque|everyone)", reste, re.IGNORECASE):
+            return None
+        # Revue Codex (PR #712) : « ajoute le rôle VIP à Bob » ou « … à 1234… »,
+        # sans mention, est aussi un don ; le résolveur de role.give comprend les
+        # noms et les identifiants.
+        if verbe_creation.startswith("ajout") and re.search(r"\s(?:a|à|au|aux)\s+\S", reste, re.IGNORECASE):
             return None
         nom = _nom_cree(reste)
         mots = nom.split()
