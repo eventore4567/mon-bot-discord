@@ -1434,6 +1434,8 @@ class Ai(commands.Cog, name="Ai"):
         texte = str(action.slots.get("text") or "").strip()
         vers_autrui = member is not None and member.id != actor.id
         if vers_autrui:
+            # Défense en profondeur : _execute_native_action a déjà vérifié
+            # « Modérer les membres » avant d'arriver ici.
             perms = getattr(actor, "guild_permissions", None)
             if actor.id != guild.owner_id and not getattr(perms, "moderate_members", False):
                 await reply("Il faut la permission **Modérer les membres** pour que j'écrive à un autre membre.")
@@ -1575,6 +1577,15 @@ class Ai(commands.Cog, name="Ai"):
             return True
 
         if intent == "member.dm":
+            # Écrire à un AUTRE membre : staff seulement. « mp moi » est ouvert à
+            # tous, puisque l'auteur est le destinataire.
+            if (
+                member is not None and member.id != actor.id
+                and actor.id != guild.owner_id
+                and not actor.guild_permissions.moderate_members
+            ):
+                await reply("Il faut la permission **Modérer les membres** pour que j'écrive à un autre membre.")
+                return True
             return await self._message_prive(message, action, member, reply)
 
         if intent == "server.rename":

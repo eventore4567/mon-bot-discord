@@ -159,3 +159,26 @@ def test_mp_fermes_le_dit_clairement():
     asyncio.run(cog._message_prive(message, action, auteur, reply))
     assert "messages privés sont fermés" in reponses[0]
     assert not asyncio.run(mp_ouvertes.est_ouverte(cog.bot, 42))
+
+
+def test_le_point_d_entree_natif_refuse_aussi_l_ecriture_a_autrui():
+    """Le chemin réellement emprunté par le routeur : _execute_native_action."""
+    from cogs.ai import Ai
+
+    reponses = []
+    bob = SimpleNamespace(id=7, bot=False, mention="<@7>", send=AsyncMock())
+    auteur = SimpleNamespace(
+        id=42, display_name="Jay", send=AsyncMock(),
+        guild_permissions=SimpleNamespace(moderate_members=False),
+    )
+    message = SimpleNamespace(
+        guild=SimpleNamespace(id=1, name="S", owner_id=9, me=SimpleNamespace()),
+        author=auteur,
+        reply=AsyncMock(side_effect=lambda texte, **_: reponses.append(texte)),
+    )
+    cog = Ai.__new__(Ai)
+    cog.bot = SimpleNamespace(db=_Base())
+    action = ai_actions.ParsedAction("member.dm", {"target": "<@7>", "text": "salut"}, 99, "local")
+    asyncio.run(cog._execute_native_action(message, action, member=bob))
+    bob.send.assert_not_awaited()
+    assert "Modérer les membres" in reponses[0]
