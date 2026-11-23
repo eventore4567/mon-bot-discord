@@ -578,6 +578,9 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         if section is None:
             self.page = None
             return await self._build_home()
+        # Toute entrée dans une section la mémorise (pas seulement le bouton de
+        # l'accueil) : « Retour » depuis un réglage doit y revenir.
+        self._section = cle
         _cle, nom_fr, nom_en, icone, desc_fr, desc_en, pages = section
         english = (
             await language_runtime.get_language(self.bot, self.guild.id)
@@ -585,6 +588,8 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         )
         if cle == "securite":
             return await self._build_section_securite(english)
+        if cle == "moderation":
+            return await self._build_section_moderation(english)
         states = await setup_ui.module_switch_states(self.bot, self.guild.id)
         etats_detail = await self._effective_states()
 
@@ -780,6 +785,203 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         container.add_item(discord.ui.Separator())
         container.add_item(discord.ui.ActionRow(retour, fermer))
         self.add_item(container)
+
+    async def _build_section_moderation(self, english: bool) -> None:
+        """Section Modération (22/11/2026, étape 3 de la refonte).
+
+        Les trois pages (Modération, Logs, Invitations) font déjà 22 à 25
+        composants chacune : les fusionner dépasserait la limite Discord de 40.
+        La section résume donc chacune, avec ses réglages les plus utiles sur
+        place, et un bouton vers le détail :
+        - le seuil de ban automatique, réglable ici ;
+        - « Envoyer tous les logs non configurés dans… » : un seul choix au lieu
+          d'aller-retours catégorie par catégorie ;
+        - l'état des deux salons d'invitations.
+        """
+        from utils import log_service, sentrix_emojis as icons
+        from . import invite_tracker_runtime as invitations, setup_moderation_clear_v76 as moderation
+
+        t = (lambda fr, en: en) if english else (lambda fr, en: fr)
+        conf = await self.bot.db.get_guild_config(self.guild.id)
+        try:
+            seuil = int(setup_ui._get(conf, "warn_ban_threshold") or 0)
+        except (TypeError, ValueError):
+            seuil = 0
+        dm_rows = await moderation._dm_settings(self)
+        dm_actifs = sum(
+            1 for action, _label in moderation.DM_ACTIONS
+            if action not in dm_rows or bool(moderation._row_value(dm_rows.get(action), "enabled", 1))
+        )
+
+        container = discord.ui.Container(accent_colour=0x6C57CC)
+        v73.poser_banniere(container)
+        container.add_item(discord.ui.TextDisplay(
+            f"# {icons.titre('mod', t('Modération', 'Moderation'))}\n"
+            + t("Sanctions, journaux et suivi des invitations.", "Sanctions, logs and invite tracking.")
+        ))
+
+        # — Modération
+        container.add_item(discord.ui.Separator())
+        texte_seuil = (
+            t(f"ban automatique après **{seuil} avertissements**", f"automatic ban after **{seuil} warnings**")
+            if seuil > 0 else t("ban automatique **désactivé**", "automatic ban **off**")
+        )
+        messages = discord.ui.Button(label=t("Messages de sanction", "Sanction messages"), style=discord.ButtonStyle.secondary)
+
+        async def ouvrir_moderation(interaction: discord.Interaction):
+            await self._ouvrir_page(interaction, "moderation", english)
+
+        messages.callback = ouvrir_moderation
+        container.add_item(discord.ui.Section(
+            discord.ui.TextDisplay(
+                f"### ⚖️ {t('Sanctions', 'Sanctions')}\n"
+                f"{texte_seuil[:1].upper() + texte_seuil[1:]} · "
+                + t(f"MP de sanction : **{dm_actifs}/{len(moderation.DM_ACTIONS)}**",
+                    f"Sanction DMs: **{dm_actifs}/{len(moderation.DM_ACTIONS)}**")
+            ),
+            accessory=messages,
+        ))
+        seuil_select = discord.ui.Select(
+            placeholder=t("Ban automatique après…", "Automatic ban after…"),
+            options=[
+                discord.SelectOption(label=t("Désactivé", "Off"), value="0", default=seuil == 0),
+                *(
+                    discord.SelectOption(
+                        label=t(f"{n} avertissements", f"{n} warnings"), value=str(n), default=seuil == n,
+                    )
+                    for n in (2, 3, 4, 5)
+                ),
+            ],
+        )
+
+        async def regler_seuil(interaction: discord.Interaction):
+            if not interaction.response.is_done():
+                await interaction.response.defer()
+            await self.bot.db.set_guild_config(self.guild.id, "warn_ban_threshold", int(seuil_select.values[0]))
+            await self.refresh(interaction)
+
+        seuil_select.callback = regler_seuil
+        container.add_item(discord.ui.ActionRow(seuil_select))
+
+        # — Logs
+        container.add_item(discord.ui.Separator())
+        reglages = {
+            cle: await log_service.get_log_setting(self.bot, self.guild.id, cle)
+            for cle in log_service.CATEGORY_KEYS
+        }
+        configurees = [cle for cle, r in reglages.items() if r.get("channel_id") and r.get("enabled")]
+        manquantes = [cle for cle in log_service.CATEGORY_KEYS if cle not in configurees]
+        detail = discord.ui.Button(label=t("Réglages détaillés", "Detailed settings"), style=discord.ButtonStyle.secondary)
+
+        async def ouvrir_logs(interaction: discord.Interaction):
+            await self._ouvrir_page(interaction, "logs", english)
+
+        detail.callback = ouvrir_logs
+        ligne_logs = t(
+            f"**{len(configurees)}/{len(reglages)}** catégories envoyées dans un salon.",
+            f"**{len(configurees)}/{len(reglages)}** categories sent to a channel.",
+        )
+        if manquantes:
+            noms = ", ".join(log_service.CATEGORIES.get(cle, cle) for cle in manquantes[:6])
+            ligne_logs += "\n-# " + t("Sans salon : ", "No channel: ") + noms + ("…" if len(manquantes) > 6 else "")
+        container.add_item(discord.ui.Section(
+            discord.ui.TextDisplay(f"### 📜 {t('Logs du serveur', 'Server logs')}\n{ligne_logs}"),
+            accessory=detail,
+        ))
+        if manquantes:
+            tous = discord.ui.ChannelSelect(
+                placeholder=t(
+                    f"Envoyer les {len(manquantes)} catégories sans salon dans…",
+                    f"Send the {len(manquantes)} unconfigured categories to…",
+                ),
+                min_values=1, max_values=1,
+                channel_types=[discord.ChannelType.text],
+            )
+
+            async def tout_router(interaction: discord.Interaction):
+                await self._router_logs_manquants(interaction, tous.values[0].id, manquantes, english)
+
+            tous.callback = tout_router
+            container.add_item(discord.ui.ActionRow(tous))
+
+        # — Invitations
+        container.add_item(discord.ui.Separator())
+        await invitations.ensure_schema(self.bot)
+        flux = await invitations.get_feed_setting(self.bot, self.guild.id)
+        logs_invit = await log_service.get_log_setting(self.bot, self.guild.id, invitations.CATEGORY)
+
+        def salon(identifiant) -> str:
+            canal = self.guild.get_channel(int(identifiant)) if identifiant else None
+            return canal.mention if canal else t("aucun", "none")
+
+        ouvrir_invit = discord.ui.Button(label=t("Ouvrir", "Open"), style=discord.ButtonStyle.secondary)
+
+        async def ouvrir_invitations(interaction: discord.Interaction):
+            await self._ouvrir_page(interaction, "invitations", english)
+
+        ouvrir_invit.callback = ouvrir_invitations
+        container.add_item(discord.ui.Section(
+            discord.ui.TextDisplay(
+                f"### 🔗 {t('Invitations', 'Invites')}\n"
+                + t("Salon public : ", "Public channel: ") + salon(flux.get("feed_channel_id"))
+                + (" 🟢" if flux.get("feed_enabled") and flux.get("feed_channel_id") else " ⚪")
+                + " · " + t("Logs : ", "Logs: ") + salon(logs_invit.get("channel_id"))
+            ),
+            accessory=ouvrir_invit,
+        ))
+
+        retour = discord.ui.Button(label=t("Retour", "Back"), style=discord.ButtonStyle.secondary, emoji="↩️")
+
+        async def accueil(interaction: discord.Interaction):
+            self._section = None
+            self.page = None
+            self.backend = self._new_backend(None)
+            await self.refresh(interaction)
+
+        retour.callback = accueil
+        fermer = discord.ui.Button(label=t("Fermer", "Close"), style=discord.ButtonStyle.secondary)
+
+        async def clore(interaction: discord.Interaction):
+            await self._close(interaction)
+
+        fermer.callback = clore
+        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.ActionRow(retour, fermer))
+        self.add_item(container)
+
+    async def _router_logs_manquants(
+        self, interaction: discord.Interaction, salon_id: int, categories: list[str], english: bool,
+    ) -> None:
+        """Envoie toutes les catégories de logs sans salon dans le salon choisi."""
+        from utils import log_service
+        from . import setup_v2_core
+
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        faites, refusees = [], []
+        for cle in categories:
+            ok, raison = log_service.validate_channel(self.guild, salon_id, needs_file=(cle == "files"))
+            if not ok:
+                refusees.append((cle, raison))
+                continue
+            await log_service.set_log_channel(self.bot, self.guild.id, cle, salon_id)
+            faites.append(cle)
+        if faites:
+            await setup_v2_core.enable_module_if_unset(
+                self.bot, self.guild.id, "logs", actor_id=interaction.user.id,
+            )
+        await self.refresh(interaction)
+        if refusees:
+            raison = refusees[0][1]
+            noms = ", ".join(log_service.CATEGORIES.get(cle, cle) for cle, _ in refusees)
+            message = (
+                f"{len(faites)} categories set. Not set ({noms}): {raison}." if english
+                else f"{len(faites)} catégories réglées. Non réglées ({noms}) : {raison}."
+            )
+            try:
+                await interaction.followup.send(message, ephemeral=True)
+            except discord.HTTPException:
+                pass
 
     async def _ouvrir_page(self, interaction: discord.Interaction, selected: str, english: bool) -> None:
         """Ouvre un réglage, avec les deux cas particuliers de l'ancien menu."""
