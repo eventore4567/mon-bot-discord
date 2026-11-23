@@ -70,6 +70,30 @@ async def main() -> int:
     check(bouton(view, "Toutes les protections sont actives") is not None,
           "l'accueil indique ensuite que tout est actif")
 
+    # Section Sécurité tout-en-un (étape 2) : un clic par protection, en base.
+    async def antispam_actif() -> bool:
+        return (await securite_simple.etats(view))["antispam"]
+
+    view.page = "section:securite"
+    view.clear_items()
+    await view._build_page(view.page)
+    check(bouton(view, "Spam") is not None and bouton(view, "Nuke") is not None,
+          "la section Sécurité montre les huit protections en boutons")
+    etat_avant = await antispam_actif()
+    await cliquer(bot, bouton(view, "Spam"))
+    check(await antispam_actif() is (not etat_avant) and view.page == "section:securite",
+          "un clic sur « Spam » change la protection en base et reste sur la section")
+    await cliquer(bot, bouton(view, "Spam"))
+    check(await antispam_actif() is etat_avant, "un second clic la remet comme avant")
+    automod = bot.get_cog("Automod")
+    check(guild.id not in getattr(automod, "automod_cache", {}),
+          "le cache d'AutoMod est purgé : le changement agit tout de suite")
+    await cliquer(bot, bouton(view, "Réglages avancés"))
+    texte_avance = "\n".join(i.content for i in view.walk_children() if isinstance(i, discord.ui.TextDisplay))
+    check(view.page == "security" and bouton(view, "Retour à /setup") is not None
+          and "personnaliser" in texte_avance,
+          "« Réglages avancés » ouvre directement l'écran « Personnaliser »", texte_avance[:120])
+
     # Revue Codex (PR #714) : tout coché, mais SentriX sans « Voir le journal
     # d'audit » ni « Expulser » — l'accueil ne doit pas annoncer « protégé ».
     from unittest.mock import PropertyMock, patch

@@ -451,9 +451,8 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         labels = dict(setup_ui.MODULE_SWITCHES)
         actifs = [key for key in labels if states.get(key) == "enabled"]
         a_terminer = [key for key in labels if states.get(key) in {"empty", "not_configured"}]
-        protections = await securite_simple.etats(self)
-        protegees = sum(1 for actif in protections.values() if actif)
-        total = len(protections) or 1
+        resume = await self._resume_protection(english)
+        protegees, total = resume["protegees"], resume["total"]
 
         container = discord.ui.Container(accent_colour=0x6C57CC)
         v73.poser_banniere(container)
@@ -471,33 +470,9 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         ))
         container.add_item(discord.ui.Separator())
 
-        # Revue Codex (PR #714) : une protection cochée n'agit pas forcément.
-        # Sans « Voir le journal d'audit », l'anti-nuke ne sait pas qui agit ;
-        # sans « Expulser », l'anti-bot ne peut rien. Même diagnostic que la
-        # page Sécurité : on ne dit « protégé » que si tout est opérationnel.
-        from utils.protection_requirements import diagnostic
-
-        permissions = self.guild.me.guild_permissions if self.guild.me else discord.Permissions.none()
-        inertes, degradees = diagnostic(permissions, {cle for cle, actif in protections.items() if actif})
-        bridees = len(inertes) + len(degradees)
-
-        pleins = round(10 * protegees / total)
-        barre = "🟩" * pleins + "⬜" * (10 - pleins)
-        if protegees == total and bridees:
-            verdict = (
-                f"⚠️ {bridees} limited by SentriX's missing permissions (see Security)." if english
-                else f"⚠️ {bridees} bridée(s) par des permissions manquantes de SentriX (voir Sécurité)."
-            )
-        elif protegees == total:
-            verdict = "Server protected." if english else "Serveur protégé."
-        else:
-            verdict = (
-                f"{total - protegees} protection(s) off." if english
-                else f"{total - protegees} protection(s) coupée(s)."
-            )
         lignes = [
             ("### 🛡️ Protection" if english else "### 🛡️ Protection du serveur"),
-            f"{barre}  **{protegees}/{total}** · {verdict}",
+            resume["ligne"],
         ]
         if a_terminer:
             noms = ", ".join(self._nom_cle(key, english) for key in a_terminer)
@@ -553,6 +528,42 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         container.add_item(discord.ui.ActionRow(tout, close))
         self.add_item(container)
 
+    async def _resume_protection(self, english: bool) -> dict:
+        """État de protection du serveur, lu comme il agit vraiment.
+
+        Partagé par l'accueil et la section Sécurité : module compris (revue
+        Codex PR #714) et permissions de SentriX comprises (même diagnostic que
+        la page Sécurité) — on ne dit « protégé » que si tout est opérationnel.
+        """
+        from utils.protection_requirements import diagnostic
+        from . import securite_simple
+
+        protections = await securite_simple.etats(self)
+        protegees = sum(1 for actif in protections.values() if actif)
+        total = len(protections) or 1
+        permissions = self.guild.me.guild_permissions if self.guild.me else discord.Permissions.none()
+        inertes, degradees = diagnostic(permissions, {cle for cle, actif in protections.items() if actif})
+        bridees = len(inertes) + len(degradees)
+        pleins = round(10 * protegees / total)
+        barre = "🟩" * pleins + "⬜" * (10 - pleins)
+        if protegees == total and bridees:
+            verdict = (
+                f"⚠️ {bridees} limited by SentriX's missing permissions (see Security)." if english
+                else f"⚠️ {bridees} bridée(s) par des permissions manquantes de SentriX (voir Sécurité)."
+            )
+        elif protegees == total:
+            verdict = "Server protected." if english else "Serveur protégé."
+        else:
+            verdict = (
+                f"{total - protegees} protection(s) off." if english
+                else f"{total - protegees} protection(s) coupée(s)."
+            )
+        return {
+            "protections": protections, "protegees": protegees, "total": total,
+            "bridees": bridees, "inertes": inertes, "degradees": degradees,
+            "ligne": f"{barre}  **{protegees}/{total}** · {verdict}",
+        }
+
     def _nom_cle(self, cle: str, english: bool) -> str:
         if cle in EXTRAS:
             return EXTRAS[cle][2] if english else EXTRAS[cle][0]
@@ -572,6 +583,8 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             await language_runtime.get_language(self.bot, self.guild.id)
             == language_runtime.LANG_EN
         )
+        if cle == "securite":
+            return await self._build_section_securite(english)
         states = await setup_ui.module_switch_states(self.bot, self.guild.id)
         etats_detail = await self._effective_states()
 
@@ -613,6 +626,141 @@ class SentriXSetupV74(v73.SentriXSetupV73):
 
             ouvrir.callback = aller
             container.add_item(discord.ui.Section(discord.ui.TextDisplay(texte), accessory=ouvrir))
+
+        retour = discord.ui.Button(label="Back" if english else "Retour", style=discord.ButtonStyle.secondary, emoji="↩️")
+
+        async def accueil(interaction: discord.Interaction):
+            self._section = None
+            self.page = None
+            self.backend = self._new_backend(None)
+            await self.refresh(interaction)
+
+        retour.callback = accueil
+        fermer = discord.ui.Button(label="Close" if english else "Fermer", style=discord.ButtonStyle.secondary)
+
+        async def clore(interaction: discord.Interaction):
+            await self._close(interaction)
+
+        fermer.callback = clore
+        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.ActionRow(retour, fermer))
+        self.add_item(container)
+
+    async def _build_section_securite(self, english: bool) -> None:
+        """Section Sécurité, tout-en-un (22/11/2026, étape 2 de la refonte).
+
+        Avant : Accueil → Sécurité → « Ouvrir » → panneau → « Personnaliser » →
+        protection → « Activer ». Ici, les huit protections sont des boutons :
+        un clic les allume ou les coupe. Le mode raid, les mots bloqués, les
+        réglages avancés et la vérification sont à un clic.
+        """
+        from utils import sentrix_emojis as icons
+        from . import securite_simple
+
+        self._securite_mode = "simple"  # « Réglages avancés » ne doit pas rester collé
+        resume = await self._resume_protection(english)
+        protections = resume["protections"]
+        module = await securite_simple._module_securite_actif(self)
+        arme = securite_simple._raid_arme(self)
+
+        container = discord.ui.Container(accent_colour=0xED4245 if arme else 0x6C57CC)
+        v73.poser_banniere(container)
+        lignes = [f"# {icons.titre('security', 'Security' if english else 'Sécurité')}", resume["ligne"]]
+        if not module:
+            lignes.append(
+                "-# The Security module is off: no protection runs. « Turn on every protection » restores it."
+                if english else
+                "-# Le module Sécurité est coupé : aucune protection ne tourne. « Activer toutes les protections » le rallume."
+            )
+        if arme:
+            lignes.append(
+                "🔴 **Raid mode ARMED** — every new member is kicked." if english
+                else "🔴 **Mode raid ARMÉ** — chaque nouvel arrivant est expulsé."
+            )
+        container.add_item(discord.ui.TextDisplay("\n".join(lignes)))
+        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.TextDisplay(
+            "### Protections\n-# Green = on. One click turns it on or off." if english
+            else "### Protections\n-# Vert = active. Un clic l'allume ou la coupe."
+        ))
+
+        boutons = []
+        for cle, nom in securite_simple.PROTECTION_RECOMMANDEE:
+            court = dict(securite_simple.PROTECTION_COURTE).get(cle, cle)
+            actif = protections.get(cle, False)
+            bouton = discord.ui.Button(
+                label=court[:1].upper() + court[1:],
+                style=discord.ButtonStyle.success if actif else discord.ButtonStyle.secondary,
+                emoji="✅" if actif else None,
+            )
+
+            async def basculer(interaction: discord.Interaction, _cle=cle, _actif=actif):
+                if not interaction.response.is_done():
+                    await interaction.response.defer()
+                await securite_simple.basculer_protection(
+                    self, _cle, not _actif, actor_id=interaction.user.id,
+                )
+                await self.refresh(interaction)
+
+            bouton.callback = basculer
+            boutons.append(bouton)
+        container.add_item(discord.ui.ActionRow(*boutons[:4]))
+        container.add_item(discord.ui.ActionRow(*boutons[4:8]))
+        container.add_item(discord.ui.Separator())
+
+        tout = discord.ui.Button(
+            label="Turn on every protection" if english else "Activer toutes les protections",
+            style=discord.ButtonStyle.success,
+            emoji=icons.partiel("security") or None,
+            disabled=module and resume["protegees"] == resume["total"],
+        )
+
+        async def tout_activer(interaction: discord.Interaction):
+            await securite_simple._activer(self, interaction)
+
+        tout.callback = tout_activer
+        raid = discord.ui.Button(
+            label=("Raid mode: ARMED" if english else "Mode raid : ARMÉ") if arme else ("Raid mode" if english else "Mode raid"),
+            style=discord.ButtonStyle.danger if arme else discord.ButtonStyle.secondary,
+            emoji=icons.partiel("shield") or None,
+        )
+
+        async def basculer_raid(interaction: discord.Interaction):
+            await securite_simple._basculer_mode_raid(self, interaction)
+
+        raid.callback = basculer_raid
+        mots = discord.ui.Button(label="Blocked words" if english else "Mots bloqués", style=discord.ButtonStyle.secondary)
+
+        async def ouvrir_mots(interaction: discord.Interaction):
+            from . import mots_bloques
+
+            await mots_bloques.ouvrir(interaction, self.guild)
+
+        mots.callback = ouvrir_mots
+        container.add_item(discord.ui.ActionRow(tout, raid, mots))
+
+        avance = discord.ui.Button(
+            label="Advanced settings" if english else "Réglages avancés",
+            style=discord.ButtonStyle.secondary, emoji=icons.partiel("settings") or None,
+        )
+
+        async def ouvrir_avance(interaction: discord.Interaction):
+            # Le panneau complet, directement sur l'écran « Personnaliser » :
+            # exceptions, sanctions, admins épargnés, liste blanche anti-nuke…
+            self._securite_mode = "detail"
+            await self._ouvrir_page(interaction, "security", english)
+
+        avance.callback = ouvrir_avance
+        verification = discord.ui.Button(
+            label=self._nom_cle("rules_access", english),
+            style=discord.ButtonStyle.secondary, emoji=icons.partiel("note") or None,
+        )
+
+        async def ouvrir_verification(interaction: discord.Interaction):
+            await self._ouvrir_page(interaction, "rules_access", english)
+
+        verification.callback = ouvrir_verification
+        container.add_item(discord.ui.ActionRow(avance, verification))
 
         retour = discord.ui.Button(label="Back" if english else "Retour", style=discord.ButtonStyle.secondary, emoji="↩️")
 

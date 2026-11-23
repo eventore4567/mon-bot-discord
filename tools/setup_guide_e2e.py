@@ -77,9 +77,14 @@ async def main() -> int:
         section = next(s for s in v74.SECTIONS if page in s[6])
         view = await cliquer(view, section[1])
         check(view.page == f"section:{section[0]}", f"la section {section[1]} s'ouvre", str(view.page))
-        ouvrir = [it for top in view.children for it in walk(top)
-                  if isinstance(it, discord.ui.Button) and it.label == "Ouvrir"]
-        await ouvrir[section[6].index(page)].callback(interaction(bot))
+        if section[0] == "securite" and page == "security":
+            # Étape 2 : la section Sécurité est tout-en-un ; le panneau complet
+            # s'ouvre par « Réglages avancés », directement sur « Personnaliser ».
+            await bouton(view, "Réglages avancés").callback(interaction(bot))
+        else:
+            ouvrir = [it for top in view.children for it in walk(top)
+                      if isinstance(it, discord.ui.Button) and it.label == "Ouvrir"]
+            await ouvrir[section[6].index(page)].callback(interaction(bot))
         await h.settle(idle=0.2, maximum=2)
         check(view.page == page and bouton(view, "Retour") is not None, f"la section ouvre la page {page}")
         view = await cliquer(view, "Retour")
