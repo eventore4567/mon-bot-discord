@@ -75,7 +75,11 @@ async def main() -> int:
           "l'accueil n'a plus de menu de 22 entrées")
     for page in pages:
         section = next(s for s in v74.SECTIONS if page in s[6])
-        view = await cliquer(view, section[1])
+        # 23/11/2026 : l'accueil présente des fiches ; chacune a son « Ouvrir ».
+        ouvrir = [it for top in view.children for it in walk(top)
+                  if isinstance(it, discord.ui.Button) and it.label == "Ouvrir"]
+        await ouvrir[[s[0] for s in v74.SECTIONS].index(section[0])].callback(interaction(bot))
+        await h.settle(idle=0.2, maximum=2)
         check(view.page == f"section:{section[0]}", f"la section {section[1]} s'ouvre", str(view.page))
         if section[0] == "moderation" and page == "logs":
             # Étape 3 : la section Modération résume les logs ; le détail

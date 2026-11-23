@@ -28,6 +28,14 @@ def bouton(view, libelle):
     return control(view, lambda i: isinstance(i, discord.ui.Button) and i.label == libelle)
 
 
+def fiche(view, cle):
+    """Le bouton « Ouvrir » de la fiche d'une section, sur l'accueil (23/11/2026)."""
+    from cogs import setup_experience_v74 as v74
+
+    ouvrir = [i for i in view.walk_children() if isinstance(i, discord.ui.Button) and i.label == "Ouvrir"]
+    return ouvrir[[s[0] for s in v74.SECTIONS].index(cle)]
+
+
 async def cliquer(bot, item):
     await item.callback(admin_interaction(bot))
     await h.settle(idle=0.3, maximum=3)
@@ -43,14 +51,18 @@ async def main() -> int:
     view.clear_items()
     await view._build_home()
 
+    texte_accueil = "\n".join(i.content for i in view.walk_children() if isinstance(i, discord.ui.TextDisplay))
     noms = [s[1] for s in v74.SECTIONS]
-    check(all(bouton(view, nom) is not None for nom in noms), "l'accueil propose les six sections", str(noms))
+    ouvrir = [i for i in view.walk_children() if isinstance(i, discord.ui.Button) and i.label == "Ouvrir"]
+    check(all(f"**{nom}**" in texte_accueil for nom in noms) and len(ouvrir) == 6,
+          "l'accueil présente les six sections en fiches, chacune avec « Ouvrir »", str(noms))
+    check("⬜" not in texte_accueil and "🟩" not in texte_accueil, "plus de barre de carrés sur l'accueil")
     check(control(view, lambda i: isinstance(i, discord.ui.Select)) is None,
           "l'accueil n'a plus le menu de 22 entrées")
 
     # Communauté garde la présentation « une ligne + Ouvrir » ; Sécurité et
     # Modération sont des panneaux tout-en-un (étapes 2 et 3).
-    await cliquer(bot, bouton(view, "Communauté"))
+    await cliquer(bot, fiche(view, "communaute"))
     check(view.page == "section:communaute" and bouton(view, "Ouvrir") is not None,
           "une section s'ouvre et liste ses réglages", str(view.page))
 
@@ -62,7 +74,8 @@ async def main() -> int:
     check(view.page == "section:communaute", "« Retour » revient à la section, pas à l'accueil", str(view.page))
 
     await cliquer(bot, bouton(view, "Retour"))
-    check(view.page is None and bouton(view, "Sécurité") is not None, "« Retour » de la section revient à l'accueil")
+    check(view.page is None and bouton(view, "Activer toutes les protections") is not None,
+          "« Retour » de la section revient à l'accueil")
 
     avant = await securite_simple.etats(view)
     await cliquer(bot, bouton(view, "Activer toutes les protections"))

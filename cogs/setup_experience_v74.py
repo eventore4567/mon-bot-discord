@@ -299,6 +299,29 @@ SECTIONS = (
      ("ai", "prefixes", "language")),
 )
 
+#: Icônes des fiches de l'accueil : l'émoji ANIMÉ du pack SentriX (« mets les
+#: émojis animés », 23/11/2026), et un repli Unicode tant que le pack n'est
+#: pas synchronisé sur l'application.
+ICONES_SECTIONS = {
+    "securite": ("sentrix_live_security", "🛡️"),
+    "moderation": ("sentrix_live_mod", "⚖️"),
+    "communaute": ("sentrix_live_member_join", "👥"),
+    "engagement": ("sentrix_live_level", "🏆"),
+    "outils": ("sentrix_live_ticket", "🧰"),
+    "systeme": ("sentrix_ai", "⚙️"),
+}
+
+
+def icone_section(cle: str) -> str:
+    from utils import sentrix_emojis
+
+    nom, repli = ICONES_SECTIONS.get(cle, ("", "•"))
+    marque = sentrix_emojis.emoji(nom) if nom else ""
+    # emoji() rend le repli typographique (ou rien) tant que le pack n'est pas
+    # chargé : seul un vrai émoji personnalisé remplace l'Unicode.
+    return marque if marque.startswith("<") else repli
+
+
 #: Réglages hors modules : nom, description, nom anglais, description anglaise.
 EXTRAS = {
     "rules_access": ("Règlement et vérification", "Règles, CAPTCHA, rôles et accès aux salons",
@@ -470,22 +493,27 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         ))
         container.add_item(discord.ui.Separator())
 
-        lignes = [
-            ("### 🛡️ Protection" if english else "### 🛡️ Protection du serveur"),
-            resume["ligne"],
-        ]
+        # 23/11/2026 : « le plus beau et le plus facile, bien placé, pas bourrin,
+        # comme Raid Protect ». Plus de barre de carrés ni de rangées de boutons
+        # gris : une fiche par section — icône, nom, résumé en une ligne — et un
+        # bouton « Ouvrir » aligné à droite.
+        bouclier = icons.emoji("sentrix_bouclier")
+        etat = (
+            f"{bouclier if bouclier.startswith('<') else '🛡️'} **{protegees}/{total}** "
+            + ("protections on" if english else "protections actives")
+            + " · " + resume["verdict"]
+        )
         if a_terminer:
             noms = ", ".join(self._nom_cle(key, english) for key in a_terminer)
-            lignes.append(("-# To finish: " if english else "-# À terminer : ") + noms)
-        container.add_item(discord.ui.TextDisplay("\n".join(lignes)))
+            etat += "\n-# " + ("To finish: " if english else "À terminer : ") + noms
+        container.add_item(discord.ui.TextDisplay(etat))
         container.add_item(discord.ui.Separator())
 
-        boutons = []
-        for cle, nom_fr, nom_en, icone, _desc_fr, _desc_en, _pages in SECTIONS:
-            bouton = discord.ui.Button(
-                label=nom_en if english else nom_fr,
-                style=discord.ButtonStyle.secondary,
-                emoji=icons.partiel(icone) or None,
+        resumes = await self._resumes_sections(english, states, resume)
+        for cle, nom_fr, nom_en, _icone, _desc_fr, _desc_en, _pages in SECTIONS:
+            ouvrir = discord.ui.Button(
+                label="Open" if english else "Ouvrir", style=discord.ButtonStyle.secondary,
+                emoji=icons.partiel("sentrix_fleche") or None,
             )
 
             async def ouvrir_section(interaction: discord.Interaction, _cle=cle):
@@ -494,10 +522,13 @@ class SentriXSetupV74(v73.SentriXSetupV73):
                 self.backend = self._new_backend(None)
                 await self.refresh(interaction)
 
-            bouton.callback = ouvrir_section
-            boutons.append(bouton)
-        container.add_item(discord.ui.ActionRow(*boutons[:3]))
-        container.add_item(discord.ui.ActionRow(*boutons[3:]))
+            ouvrir.callback = ouvrir_section
+            container.add_item(discord.ui.Section(
+                discord.ui.TextDisplay(
+                    f"{icone_section(cle)} **{nom_en if english else nom_fr}**\n-# {resumes.get(cle, '')}"
+                ),
+                accessory=ouvrir,
+            ))
         container.add_item(discord.ui.Separator())
 
         tout = discord.ui.Button(
@@ -528,6 +559,47 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         container.add_item(discord.ui.ActionRow(tout, close))
         self.add_item(container)
 
+    async def _resumes_sections(self, english: bool, states: dict, resume: dict) -> dict[str, str]:
+        """Le résumé d'une ligne de chaque section, pour les fiches de l'accueil."""
+        from . import securite_simple
+
+        t = (lambda fr, en: en) if english else (lambda fr, en: fr)
+
+        def pastille(cle: str) -> str:
+            return "🟢" if states.get(cle) == "enabled" else "⚪"
+
+        conf = await self.bot.db.get_guild_config(self.guild.id)
+        try:
+            seuil = int(setup_ui._get(conf, "warn_ban_threshold") or 0)
+        except (TypeError, ValueError):
+            seuil = 0
+        try:
+            from utils import log_service
+
+            avec_salon = 0
+            for cle in log_service.CATEGORY_KEYS:
+                if (await log_service.get_log_setting(self.bot, self.guild.id, cle)).get("channel_id"):
+                    avec_salon += 1
+            logs = t(f"logs {avec_salon}/{len(log_service.CATEGORY_KEYS)}", f"logs {avec_salon}/{len(log_service.CATEGORY_KEYS)}")
+        except Exception:  # noqa: BLE001 — un résumé ne doit jamais casser l'accueil
+            logs = t("logs", "logs")
+        langue = await language_runtime.get_language(self.bot, self.guild.id)
+        raid = securite_simple._raid_arme(self)
+        return {
+            "securite": f"{resume['protegees']}/{resume['total']} " + t("protections", "protections")
+                        + (" · 🔴 " + t("mode raid armé", "raid mode armed") if raid else ""),
+            "moderation": (t(f"ban auto après {seuil} avert.", f"auto-ban after {seuil} warns") if seuil
+                           else t("ban auto désactivé", "auto-ban off")) + " · " + logs,
+            "communaute": f"{pastille('welcome')} " + t("bienvenue", "welcome")
+                          + f" · {pastille('goodbye')} " + t("départs", "goodbye")
+                          + f" · {pastille('roles')} " + t("rôles", "roles"),
+            "engagement": f"{pastille('levels')} " + t("niveaux", "levels")
+                          + f" · {pastille('economy')} " + t("économie", "economy"),
+            "outils": f"{pastille('tickets')} tickets · " + t("embeds, commandes, automatisations", "embeds, commands, automations"),
+            "systeme": f"{pastille('ai')} " + t("IA", "AI") + " · " + t("langue ", "language ")
+                       + ("EN" if langue == language_runtime.LANG_EN else "FR"),
+        }
+
     async def _resume_protection(self, english: bool) -> dict:
         """État de protection du serveur, lu comme il agit vraiment.
 
@@ -544,8 +616,6 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         permissions = self.guild.me.guild_permissions if self.guild.me else discord.Permissions.none()
         inertes, degradees = diagnostic(permissions, {cle for cle, actif in protections.items() if actif})
         bridees = len(inertes) + len(degradees)
-        pleins = round(10 * protegees / total)
-        barre = "🟩" * pleins + "⬜" * (10 - pleins)
         if protegees == total and bridees:
             verdict = (
                 f"⚠️ {bridees} limited by SentriX's missing permissions (see Security)." if english
@@ -561,7 +631,8 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         return {
             "protections": protections, "protegees": protegees, "total": total,
             "bridees": bridees, "inertes": inertes, "degradees": degradees,
-            "ligne": f"{barre}  **{protegees}/{total}** · {verdict}",
+            "verdict": verdict,
+            "ligne": f"🛡️ **{protegees}/{total}** " + ("protections on" if english else "protections actives") + f" · {verdict}",
         }
 
     def _nom_cle(self, cle: str, english: bool) -> str:
