@@ -48,16 +48,18 @@ async def main() -> int:
     check(control(view, lambda i: isinstance(i, discord.ui.Select)) is None,
           "l'accueil n'a plus le menu de 22 entrées")
 
-    await cliquer(bot, bouton(view, "Modération"))
-    check(view.page == "section:moderation" and bouton(view, "Ouvrir") is not None,
+    # Communauté garde la présentation « une ligne + Ouvrir » ; Sécurité et
+    # Modération sont des panneaux tout-en-un (étapes 2 et 3).
+    await cliquer(bot, bouton(view, "Communauté"))
+    check(view.page == "section:communaute" and bouton(view, "Ouvrir") is not None,
           "une section s'ouvre et liste ses réglages", str(view.page))
 
     ouvrir = [b for b in view.walk_children() if isinstance(b, discord.ui.Button) and b.label == "Ouvrir"]
-    await cliquer(bot, ouvrir[0])
-    check(view.page == "moderation", "« Ouvrir » mène au réglage", str(view.page))
+    await cliquer(bot, ouvrir[2])
+    check(view.page == "roles", "« Ouvrir » mène au réglage", str(view.page))
 
     await cliquer(bot, bouton(view, "Retour"))
-    check(view.page == "section:moderation", "« Retour » revient à la section, pas à l'accueil", str(view.page))
+    check(view.page == "section:communaute", "« Retour » revient à la section, pas à l'accueil", str(view.page))
 
     await cliquer(bot, bouton(view, "Retour"))
     check(view.page is None and bouton(view, "Sécurité") is not None, "« Retour » de la section revient à l'accueil")
@@ -93,6 +95,50 @@ async def main() -> int:
     check(view.page == "security" and bouton(view, "Retour à /setup") is not None
           and "personnaliser" in texte_avance,
           "« Réglages avancés » ouvre directement l'écran « Personnaliser »", texte_avance[:120])
+
+    # Section Modération (étape 3) : seuil sur place, logs en un choix.
+    view.page = "section:moderation"
+    view.clear_items()
+    await view._build_page(view.page)
+    seuil = control(view, lambda i: isinstance(i, discord.ui.Select) and str(i.placeholder or "").startswith("Ban automatique"))
+    seuil._values = ["3"]
+    await cliquer(bot, seuil)
+    conf = await bot.db.get_guild_config(guild.id)
+    check(int(conf["warn_ban_threshold"] or 0) == 3 and view.page == "section:moderation",
+          "le seuil de ban automatique se règle depuis la section", str(conf["warn_ban_threshold"]))
+
+    from utils import log_service
+    from cogs import setup_v2_core as core
+
+    # Revue Codex (PR #716) : une catégorie coupée volontairement garde son salon
+    # et doit rester coupée ; module Logs coupé, l'envoi groupé doit le rallumer.
+    await log_service.set_log_channel(bot, guild.id, "messages", h.CID)
+    await log_service.set_log_enabled(bot, guild.id, "messages", False)
+    await core.set_module_enabled(bot, guild.id, "logs", False, actor_id=h.ADMIN_ID)
+    view.clear_items()
+    await view._build_page(view.page)
+
+    tous = control(view, lambda i: isinstance(i, discord.ui.ChannelSelect))
+    check(tous is not None, "la section propose d'envoyer les logs sans salon dans un salon")
+    tous._values = [guild.get_channel(h.LOGCID)]
+    await cliquer(bot, tous)
+    sans_salon = [
+        cle for cle in log_service.CATEGORY_KEYS
+        if not (await log_service.get_log_setting(bot, guild.id, cle)).get("channel_id")
+    ]
+    check(not sans_salon, "un seul choix configure toutes les catégories de logs restantes", str(sans_salon))
+    messages = await log_service.get_log_setting(bot, guild.id, "messages")
+    check(int(messages.get("channel_id") or 0) == h.CID and not messages.get("enabled"),
+          "une catégorie coupée volontairement n'est ni réactivée ni redirigée", str(messages))
+    check(await core.module_enabled(bot, guild.id, "logs"),
+          "l'envoi groupé rallume le module Logs (sinon aucun journal ne part)")
+    check(control(view, lambda i: isinstance(i, discord.ui.ChannelSelect)) is None,
+          "une fois tout configuré, le sélecteur disparaît")
+
+    await cliquer(bot, bouton(view, "Réglages détaillés"))
+    check(view.page == "logs", "« Réglages détaillés » ouvre la page Logs", str(view.page))
+    await cliquer(bot, bouton(view, "Retour"))
+    check(view.page == "section:moderation", "« Retour » depuis Logs revient à la section Modération", str(view.page))
 
     # Revue Codex (PR #714) : tout coché, mais SentriX sans « Voir le journal
     # d'audit » ni « Expulser » — l'accueil ne doit pas annoncer « protégé ».

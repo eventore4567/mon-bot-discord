@@ -77,7 +77,11 @@ async def main() -> int:
         section = next(s for s in v74.SECTIONS if page in s[6])
         view = await cliquer(view, section[1])
         check(view.page == f"section:{section[0]}", f"la section {section[1]} s'ouvre", str(view.page))
-        if section[0] == "securite" and page == "security":
+        if section[0] == "moderation" and page == "logs":
+            # Étape 3 : la section Modération résume les logs ; le détail
+            # s'ouvre par « Réglages détaillés ».
+            await bouton(view, "Réglages détaillés").callback(interaction(bot))
+        elif section[0] == "securite" and page == "security":
             # Étape 2 : la section Sécurité est tout-en-un ; le panneau complet
             # s'ouvre par « Réglages avancés », directement sur « Personnaliser ».
             await bouton(view, "Réglages avancés").callback(interaction(bot))
