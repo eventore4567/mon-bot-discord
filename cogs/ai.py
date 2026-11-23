@@ -1426,6 +1426,37 @@ class Ai(commands.Cog, name="Ai"):
             return discord.Colour(int(match.group(1), 16))
         return None
 
+    #: Une demande de ping par minute et par membre (23/11/2026).
+    PING_DELAI_S = 60
+
+    def _attente_ping(self, guild_id: int, user_id: int) -> int:
+        """Secondes restantes avant le prochain ping autorisé (0 = autorisé, et noté)."""
+        import time as _time
+
+        derniers = self.__dict__.setdefault("_pings_ia", {})
+        cle = (int(guild_id), int(user_id))
+        maintenant = _time.monotonic()
+        reste = self.PING_DELAI_S - (maintenant - derniers.get(cle, -1e9))
+        if reste > 0:
+            return int(reste) + 1
+        if len(derniers) > 5000:
+            derniers.clear()
+        derniers[cle] = maintenant
+        return 0
+
+    @staticmethod
+    def _membre_au_hasard(message):
+        """Un membre humain, autre que l'auteur, qui voit le salon de la demande."""
+        import random
+
+        canal = message.channel
+        candidats = [
+            m for m in getattr(message.guild, "members", []) or []
+            if not m.bot and m.id != message.author.id
+            and canal.permissions_for(m).view_channel
+        ]
+        return random.choice(candidats) if candidats else None
+
     async def _message_prive(self, message, action, member, reply) -> bool:
         """« mp moi » : SentriX écrit en privé, et la conversation y continue 24 h.
 
@@ -1580,6 +1611,30 @@ class Ai(commands.Cog, name="Ai"):
                 await reply("J’ai quitté le salon vocal et arrêté la lecture.")
             except discord.HTTPException:
                 await reply("Je n’ai pas réussi à quitter le salon vocal.")
+            return True
+
+        if intent == "member.ping":
+            # Ouvert à tous (23/11/2026), mais limité : jamais @everyone, @here
+            # ni un rôle, un seul membre, une demande par minute et par membre.
+            # Le contrôle « auteur » de ce bloc est la limite elle-même, et non
+            # une permission : demander un ping n'exige aucun droit.
+            if member is None:
+                await reply("Qui voulez-vous que je mentionne ?")
+                return True
+            if getattr(member, "bot", False):
+                await reply("Je ne mentionne pas un bot.")
+                return True
+            if not me.guild_permissions.send_messages:
+                await reply("Il me manque la permission **Envoyer des messages**.")
+                return True
+            attente = self._attente_ping(guild.id, actor.id)
+            if attente:
+                await reply(f"Doucement : encore {attente} s avant de pouvoir faire mentionner quelqu'un.")
+                return True
+            await message.channel.send(
+                f"{member.mention} — {getattr(actor, 'display_name', 'quelqu’un')} vous appelle.",
+                allowed_mentions=discord.AllowedMentions(users=[member], everyone=False, roles=False),
+            )
             return True
 
         if intent == "member.dm":
@@ -2365,6 +2420,9 @@ class Ai(commands.Cog, name="Ai"):
             if target_text == "__self__":
                 # « donne-moi un rôle » : la personne qui écrit.
                 resolution = ai_actions.MemberResolution(member=message.author)
+            elif target_text == "__random__":
+                # « @ un mec au hasard » : un membre humain qui voit ce salon.
+                resolution = ai_actions.MemberResolution(member=self._membre_au_hasard(message))
             elif target_text == "__recent__":
                 recent = self._recent_target(message)
                 resolution = ai_actions.MemberResolution(

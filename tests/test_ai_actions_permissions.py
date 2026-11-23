@@ -40,6 +40,10 @@ def test_chaque_action_native_verifie_la_permission_de_l_auteur():
         # Rejoindre/quitter un vocal : l'auteur doit déjà être dans le salon (ou avoir
         # une permission de gestion, vérifiée dans le bloc voice.leave).
         "voice.join",
+        # Faire mentionner un membre est ouvert à tous (23/11/2026, demande du
+        # propriétaire) : la garde est la limite (un membre, jamais @everyone ni
+        # rôle, une demande par minute), testée dans tests/test_ping_ia.py.
+        "member.ping",
     }
     manquantes = []
     for intent, bloc in _corps_des_intentions_natives().items():
