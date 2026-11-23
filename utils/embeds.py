@@ -521,7 +521,10 @@ def clean_view(view: Any) -> Any:
         # Components V2 peut lui aussi afficher un accent vertical si un vieux
         # Container a reçu accent_color/accent_colour. On le neutralise ici
         # dans le dernier nettoyage de vue.
-        if isinstance(item, discord.ui.Container):
+        # Seule exception : une carte qui porte VOLONTAIREMENT un liseré, comme les
+        # cartes d'incident AutoMod (utils/wide_logs.ACCENT_INCIDENT, 22/11/2026),
+        # où la couleur dit ce qui a été fait.
+        if isinstance(item, discord.ui.Container) and not getattr(item, "_sentrix_liseré_voulu", False):
             for attr in ("accent_color", "accent_colour"):
                 try:
                     if hasattr(item, attr):

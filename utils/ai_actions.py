@@ -308,7 +308,7 @@ ACTIONS: dict[str, ActionSpec] = {
         description="rendre une catégorie privée et l'autoriser uniquement à un rôle",
     ),
     "role.create": ActionSpec(
-        "role.create", None, ("name",), (), None, "medium",
+        "role.create", None, ("name",), ("color",), None, "medium",
         description="créer un rôle",
     ),
     "role.color": ActionSpec(
@@ -333,6 +333,12 @@ ACTIONS: dict[str, ActionSpec] = {
             "thumbnail", "footer", "fields", "button_label", "button_url",
         ), None, "medium",
         description="envoyer un embed riche (titre, texte, couleur, image, miniature, footer, champs, bouton, salon et mention)",
+    ),
+    # 22/11/2026 : « mp moi ». Vers soi-même : tout le monde. Vers un autre
+    # membre : le staff seulement (Modérer les membres), voir cogs/ai.py.
+    "member.dm": ActionSpec(
+        "member.dm", None, (), ("target", "text"), "member", "medium",
+        description="envoyer un message privé à l'auteur (« mp moi ») ou, pour le staff, à un membre",
     ),
     "member.nickname": ActionSpec(
         "member.nickname", None, ("target", "nickname"), (), "member", "medium",
@@ -780,6 +786,13 @@ def looks_action_request(text: str) -> bool:
         return False
     if is_bare_action_candidate(normalized):
         return True
+    # 22/11/2026 (revue Codex, PR #712) : « mp moi » et « non je veux que tu crées
+    # le rôle Ping live » étaient reconnus par le parseur, mais cette porte, en
+    # amont, les renvoyait à la conversation : ils n'atteignaient jamais le
+    # parseur. Ces deux reconnaissances sont locales, déterministes et gardées
+    # contre les questions : si elles reconnaissent la phrase, c'est une demande.
+    if _message_prive(text) is not None or _creation(text) is not None:
+        return True
 
     # Une question de connaissance ne doit jamais devenir une action par accident.
     if re.match(
@@ -816,6 +829,149 @@ def looks_action_request(text: str) -> bool:
     ))
     # Une instruction directe ou une formulation polie explicite passe au routeur.
     return direct or (polite and action_verb.start() <= 80)
+
+
+# 22/11/2026 : « je veux que tu crées le rôle Ping live » — SentriX répondait
+# qu'il ne pouvait pas, alors que l'action role.create existe. Les trois motifs
+# de création exigeaient la phrase exacte « crée un rôle X » : « crée LE rôle »,
+# « crée LA catégorie », « crée-MOI un salon », « ajoute un salon » ou une phrase
+# qui ne commence pas par le verbe ne déclenchaient rien. Et le nom était pris
+# dans le texte normalisé : « Ping live » devenait « ping live ».
+_VERBE_CREATION = r"(?:cr[ée]{1,2}[ée]?r?|creer|cree|ajoute[rz]?|fais|fait|fabrique|make|create)"
+_TEMPS_PASSE = re.compile(
+    r"(?:\b(?:as|a|avez|ai|t'?as|j'?ai|deja|déjà|tu\s+avais|il\s+a)\s+)$", re.IGNORECASE,
+)
+_CREATION_RE = re.compile(
+    rf"\b{_VERBE_CREATION}(?:[\s-]+(?:moi|nous|-moi))?\s+"
+    r"(?:(?:un|une|le|la|les|l['’]|des|du|mon|ma|nouveau|nouvelle)\s*)*"
+    r"(?P<genre>r[oô]le|cat[ée]gorie|category|salon|channel|vocal|vocale|voc|voice|textuel|texte|text)\b"
+    r"(?:\s+(?P<sous>vocal|vocale|voc|voice|textuel|texte|text|écrit|ecrit))?"
+    r"(?P<reste>.*)$",
+    re.IGNORECASE,
+)
+_COULEURS_ROLE = (
+    "rouge", "red", "bleu", "blue", "vert", "green", "jaune", "yellow", "orange", "violet", "purple",
+    "rose", "pink", "turquoise", "teal", "gris", "grey", "gray", "noir", "black", "blanc", "white",
+    "marron", "brown", "blurple", "or", "gold", "cyan",
+)
+
+
+def _nom_cree(reste: str) -> str:
+    reste = re.sub(r"^\s*(?:appel[ée]e?|nomm[ée]e?|qui\s+s['’]appelle|intitul[ée]e?|:|=)\s*", "", reste, flags=re.IGNORECASE)
+    # « … Ping live pas give », « … mais pas le donner » : la négation n'est pas le nom.
+    reste = re.split(r"\s+(?:et\s+|mais\s+)?(?:pas|ne\s+le|ne\s+la)\b", reste, maxsplit=1, flags=re.IGNORECASE)[0]
+    reste = re.sub(r"\s+(?:stp|svp|s'?il\s+te\s+pla[iî]t|merci|please|pls)\b.*$", "", reste, flags=re.IGNORECASE)
+    return reste.strip().strip("«»\"'“”‘’`").strip(" .,:;!?-")
+
+
+def _creation(question: str) -> "ParsedAction | None":
+    match = _CREATION_RE.search(question)
+    if match is None or _TEMPS_PASSE.search(question[: match.start()]):
+        return None
+    avant = normalize_text(question[: match.start()])
+    # Une question n'est pas une demande : « comment créer un rôle ? », « c'est
+    # quoi une catégorie », « est-ce que JE peux créer un salon ? ». Une demande
+    # polite (« est-ce que TU peux créer… ») reste une demande.
+    if re.search(
+        r"\b(?:comment|pourquoi|c est quoi|qu est ce|a quoi sert|je peux|on peut|peut on|"
+        r"je pourrais|on pourrait|doit on|faut il|il faut)\b",
+        avant,
+    ):
+        return None
+    verbe = normalize_text(match.group(0).split()[0])
+    verbe_creation = verbe
+    # « fais/fait » est trop courant (« ça fait un salon de trop », « il fait un
+    # role play ») : il ne vaut création qu'en tête de phrase, ou après une
+    # formule de politesse.
+    if verbe.startswith(("fai", "make")) and re.sub(
+        r"\b(?:stp|svp|s il te plait|tu peux|peux tu|je veux que tu|vas y|go|oui|non|et|alors)\b", "", avant,
+    ).strip():
+        return None
+    genre = normalize_text(match.group("genre"))
+    sous = normalize_text(match.group("sous") or "")
+    reste = match.group("reste") or ""
+    slots: dict[str, Any] = {}
+
+    if genre in {"role"}:
+        # « ajoute le rôle VIP à @bob » / « … à tout le monde » : c'est DONNER un
+        # rôle existant (role.give, role.mass), pas en créer un.
+        if re.search(r"\s(?:a|à|au|aux)\s+(?:@|<@|tout|tous|toutes|chaque|everyone)", reste, re.IGNORECASE):
+            return None
+        # Revue Codex (PR #712) : « ajoute le rôle VIP à Bob » ou « … à 1234… »,
+        # sans mention, est aussi un don ; le résolveur de role.give comprend les
+        # noms et les identifiants.
+        if verbe_creation.startswith("ajout") and re.search(r"\s(?:a|à|au|aux)\s+\S", reste, re.IGNORECASE):
+            return None
+        nom = _nom_cree(reste)
+        mots = nom.split()
+        if len(mots) >= 2 and normalize_text(mots[-1]) in _COULEURS_ROLE:
+            slots["color"] = mots[-1]
+            nom = " ".join(mots[:-1])
+        elif re.search(r"\s#?[0-9a-fA-F]{6}$", nom):
+            nom, couleur = nom.rsplit(maxsplit=1)
+            slots["color"] = couleur
+        if nom:
+            slots["name"] = nom[:100]
+        return ParsedAction("role.create", slots, 99, "local")
+
+    if genre in {"categorie", "category"}:
+        nom = _nom_cree(reste)
+        if nom:
+            slots["name"] = nom[:100]
+        return ParsedAction("category.create", slots, 99, "local")
+
+    vocal = genre in {"vocal", "vocale", "voc", "voice"} or sous in {"vocal", "vocale", "voc", "voice"}
+    dans = re.search(
+        r"\s+(?:dans|sous|en)\s+(?:la\s+)?(?:cat[ée]gorie|category)\s+(?P<cat>.+)$", reste, re.IGNORECASE,
+    )
+    if dans:
+        slots["category"] = _nom_cree(dans.group("cat"))[:100]
+        reste = reste[: dans.start()]
+    nom = _nom_cree(reste)
+    if nom:
+        slots["name"] = nom[:100]
+    return ParsedAction("channel.create_voice" if vocal else "channel.create_text", slots, 99, "local")
+
+
+
+# « mp moi », « dm moi », « écris-moi en privé », « viens en mp »…
+_MP_MOI = re.compile(
+    r"^(?:(?:stp|svp|vas[- ]y|allez|oui|ok|go)\s+)*(?:"
+    r"(?:mp|dm|pv)[- ]?moi"
+    r"|(?:envoie|ecris|écris|parle)[- ]?moi\s+(?:un\s+|en\s+)?(?:mp|dm|pv|message\s+priv[ée]|priv[ée])"
+    r"|viens\s+(?:en\s+)?(?:mp|dm|pv|priv[ée])"
+    r"|(?:tu\s+peux|peux[- ]tu|tu\s+pourrais)\s+m(?:e\s+|['’]\s*|\s+)(?:mp|dm|pv|[ée]crire\s+en\s+(?:mp|dm|priv[ée]))"
+    r")\b(?P<reste>.*)$",
+    re.IGNORECASE,
+)
+# « mp @bob : la réunion est à 20 h », « envoie un mp à @bob pour lui dire … »
+_MP_AUTRUI = re.compile(
+    r"^(?:(?:stp|svp)\s+)*(?:mp|dm|(?:envoie|ecris|écris)\s+(?:un\s+)?(?:mp|dm|message\s+priv[ée]|en\s+priv[ée])\s+[àa])\s+"
+    r"(?P<cible><@!?\d{15,22}>|@[^\s:,]+)\s*(?:[:,-]|pour\s+(?:lui\s+)?dire|dis[- ]lui|et\s+dis[- ]lui)?\s*(?P<texte>.*)$",
+    re.IGNORECASE,
+)
+
+
+def _message_prive(question: str) -> "ParsedAction | None":
+    texte = question.strip()
+    moi = _MP_MOI.match(texte)
+    if moi:
+        reste = moi.group("reste").strip(" .,:;!?-")
+        # Cible explicite : sans elle, la résolution prendrait une mention ou le
+        # message auquel on répond, et écrirait à quelqu'un d'autre.
+        slots: dict[str, Any] = {"target": "__self__"}
+        if reste and not re.fullmatch(r"(?:stp|svp|s'?il\s+te\s+pla[iî]t|please|pls|stp\s+merci)", reste, re.IGNORECASE):
+            slots["text"] = reste[:1500]
+        return ParsedAction("member.dm", slots, 99, "local")
+    autrui = _MP_AUTRUI.match(texte)
+    if autrui:
+        slots = {"target": autrui.group("cible").strip()}
+        message = autrui.group("texte").strip()
+        if message:
+            slots["text"] = message[:1500]
+        return ParsedAction("member.dm", slots, 99, "local")
+    return None
+
 
 
 def _gestes_courants(question: str, normalized: str) -> ParsedAction | None:
@@ -892,34 +1048,13 @@ def local_parse(question: str) -> ParsedAction | None:
         if re.search(r"\b(?:rejoint|rejoins|rejoin|regoin|reg|join|viens|connecte(?:[- ]?toi)?)\b", normalized):
             return ParsedAction("voice.join", {}, confidence=99, source="local")
 
-    # « crée une voc » doit être comprise comme une action incomplète : SentriX
-    # demandera simplement le nom au lieu de répondre qu'il ne peut pas agir.
-    create_match = re.search(
-        r"\b(?:cree|crée|creer|créer|ajoute|ajouter)\s+(?:moi\s+)?(?:un(?:e)?\s+)?"
-        r"(?:(?:salon|channel)\s+)?(vocal|vocale|voc|voice|textuel|texte|text)\b(.*)$",
-        question,
-        re.IGNORECASE,
-    )
-    if create_match:
-        kind = normalize_text(create_match.group(1))
-        tail = create_match.group(2).strip(" .,:;!-")
-        tail = re.sub(r"^(?:appele|appelé|nomme|nommé|qui s['’]appelle)\s+", "", tail, flags=re.IGNORECASE).strip()
-        slots: dict[str, Any] = {}
-        if tail:
-            slots["name"] = tail[:100]
-        return ParsedAction(
-            "channel.create_voice" if kind in {"vocal", "vocale", "voc", "voice"} else "channel.create_text",
-            slots,
-            confidence=99,
-            source="local",
-        )
+    prive = _message_prive(question)
+    if prive is not None:
+        return prive
 
-    category_create = re.search(
-        r"\b(?:cree|crée|creer|créer|ajoute|ajouter)\s+(?:moi\s+)?(?:une\s+)?categorie\s+(.+)$",
-        normalized,
-    )
-    if category_create:
-        return ParsedAction("category.create", {"name": category_create.group(1).strip(" .,:;!-")[:100]}, 99, "local")
+    creation = _creation(question)
+    if creation is not None:
+        return creation
 
     role_color = re.search(
         r"\b(?:mets|met|change|modifie)\s+(?:le\s+)?role\s+(.+?)\s+(?:en|couleur)\s+(#[0-9a-fA-F]{6}|[A-Za-zÀ-ÿ]+)\b",
@@ -933,13 +1068,6 @@ def local_parse(question: str) -> ParsedAction | None:
             99,
             "local",
         )
-
-    role_create = re.search(
-        r"\b(?:cree|crée|creer|créer|ajoute|ajouter)\s+(?:moi\s+)?(?:un\s+)?role\s+(.+)$",
-        normalized,
-    )
-    if role_create:
-        return ParsedAction("role.create", {"name": role_create.group(1).strip(" .,:;!-")[:100]}, 99, "local")
 
     role_change = re.search(
         r"\b(donne|ajoute|retire|enleve|enlève)\s+(?:le\s+)?role\s+(.+?)\s+(?:a|à|de)\s+@?([^\s,;]+)",

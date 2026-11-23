@@ -223,8 +223,15 @@ def _install_ai_pipeline_upgrade(bot: commands.Bot) -> None:
 
         if _est_en_prive(destination, reply_to):
             # Tous les chemins IA passent ici (mention, réponse, /sentrix, secours
-            # de ai_api_hotfix). Un seul garde suffit donc à fermer le privé.
-            return await _send(content=REFUS_MESSAGE_PRIVE)
+            # de ai_api_hotfix). Un seul garde suffit donc à fermer le privé —
+            # sauf pour qui a demandé « mp moi » (utils/mp_ouvertes, 24 h).
+            from utils import mp_ouvertes
+
+            serveur_prive = await mp_ouvertes.serveur(self.bot, getattr(author, "id", 0))
+            if serveur_prive is None:
+                return await _send(content=REFUS_MESSAGE_PRIVE)
+        else:
+            serveur_prive = None
 
         if await _is_blacklisted(self.bot, author.id):
             return await _send(embed=embeds.error("Vous n'êtes pas autorisé à utiliser ce bot."))
@@ -242,8 +249,17 @@ def _install_ai_pipeline_upgrade(bot: commands.Bot) -> None:
         guild_id = getattr(guild, "id", None)
         channel = getattr(destination, "channel", destination)
         channel_id = getattr(channel, "id", None)
+        acces_auteur, acces_salon = author, channel_id
+        if guild_id is None and serveur_prive is not None:
+            # Conversation ouverte par « mp moi » : elle compte pour le serveur où
+            # elle a été demandée (limite quotidienne, usage, réglages, rôles).
+            # Le salon privé n'est soumis à aucune liste de salons du serveur.
+            guild_id = serveur_prive
+            serveur_obj = self.bot.get_guild(serveur_prive)
+            membre = serveur_obj.get_member(author.id) if serveur_obj is not None else None
+            acces_auteur, acces_salon = (membre or author), None
 
-        access_error = await _ai_access_error(self, author, guild_id, channel_id)
+        access_error = await _ai_access_error(self, acces_auteur, guild_id, acces_salon)
         if access_error:
             return await _send(embed=embeds.error(access_error))
 
@@ -389,6 +405,22 @@ def _install_reply_and_dm_conversations(bot: commands.Bot) -> None:
                     return
             except Exception:
                 logger.warning("Étape non critique ignorée dans natural_continuation", exc_info=True)
+            # 22/11/2026 : la personne qui a demandé « mp moi » dans un serveur peut
+            # discuter ici pendant 24 h (utils/mp_ouvertes). Le privé reste fermé
+            # pour tous les autres.
+            from utils import mp_ouvertes
+
+            if await mp_ouvertes.est_ouverte(bot, message.author.id):
+                ai_cog = bot.get_cog("Ai")
+                if ai_cog is not None:
+                    try:
+                        async with message.channel.typing():
+                            await ai_cog.send_sentrix_reply(
+                                message.channel, message.author, content, reply_to=message,
+                            )
+                    except Exception:
+                        logger.exception("Conversation privée ouverte : réponse impossible.")
+                    return
             try:
                 await message.channel.send(REFUS_MESSAGE_PRIVE)
             except discord.HTTPException:

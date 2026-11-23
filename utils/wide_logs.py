@@ -944,19 +944,37 @@ def narrative_body(
             valeur = _field_value_exact(embed, *alias.get(nom, (nom,)))
             return f"**{libelle or nom}** · {valeur}" if valeur else None
 
-        lines.append(f"**{_field_value_exact(embed, 'Statut')}**")
-        incident = [ligne(n) for n in ("Compte", "Protection", "Règle", "Motif", "Élément détecté", "Salon", "Date")]
-        if any(incident):
-            lines.append("### Incident\n" + "\n".join(l for l in incident if l))
+        # 22/11/2026 : « les logs d'AutoMod sont moches et ne montrent rien ; des
+        # émojis, comme Raid Protect ». Mesuré sur le bot booté : un mur de texte
+        # sous trois titres (« Incident », « Action », « Récidive »), libellés nus,
+        # et la sanction noyée au milieu. La carte s'ouvre maintenant sur CE QUI A
+        # ÉTÉ FAIT, en titre, puis le motif encadré, puis le détail ligne à ligne.
+        statut = _field_value_exact(embed, "Statut")
+        action_txt = _field_value_exact(embed, *alias["Action"])
+        lines.append(_titre_incident(statut, action_txt, _field_value_exact(embed, "Durée")))
+        motif = _field_value_exact(embed, "Motif") or reason
+        if motif:
+            lines.append("**📝 Motif**\n```\n" + motif.replace("```", "ʼʼʼ")[:900] + "\n```")
+
+        def pastille(emoji: str, nom: str, libelle: str | None = None) -> str | None:
+            valeur = ligne(nom, libelle)
+            return f"{emoji} {valeur}" if valeur else None
+
+        detail = [
+            pastille("🛡️", "Protection"), pastille("📏", "Règle"), pastille("🔎", "Élément détecté"),
+            pastille("👤", "Compte"), pastille("💬", "Salon"), pastille("🕒", "Date"),
+        ]
+        if any(detail):
+            lines.append("\n".join(l for l in detail if l))
         contenu = _field_value_exact(embed, *alias["Contenu"])
         if contenu:
-            lines.append("### Contenu détecté\n" + contenu)
-        action = [ligne(n) for n in ("Action", "Durée", "Messages supprimés", "Niveau anti-spam")]
-        if any(action):
-            lines.append("### Action\n" + "\n".join(l for l in action if l))
-        suivi = [ligne(n) for n in ("Infractions (1 h)", "Récidive")]
-        if any(suivi):
-            lines.append("### Récidive\n" + "\n".join(l for l in suivi if l))
+            lines.append("**🗨️ Message**\n" + contenu)
+        suites = [
+            pastille("⚙️", "Action"), pastille("⏱️", "Durée"), pastille("🗑️", "Messages supprimés"),
+            pastille("📶", "Niveau anti-spam"), pastille("📈", "Infractions (1 h)"), pastille("🔁", "Récidive"),
+        ]
+        if any(suites):
+            lines.append("\n".join(l for l in suites if l))
         # Tout autre champ (Raid Protect : mesure, fin, webhook, créateur…) reste
         # visible : une information fournie n'est jamais perdue à la mise en page.
         connus = {_normalise_field_name(n) for n in (
@@ -966,10 +984,8 @@ def narrative_body(
         )}
         autres = [f"**{nom}** · {valeur}" for nom, valeur in _field_map(embed)
                   if _normalise_field_name(nom) not in connus]
-        if reason and not _field_value_exact(embed, "Motif"):
-            autres.insert(0, f"**Motif** · {reason}")
         if autres:
-            lines.append("### Contexte\n" + "\n".join(autres))
+            lines.append("**📎 Contexte**\n" + "\n".join(autres))
         return "\n\n".join(part for part in lines if part.strip())[:3900]
     elif event_type in {"automod", "antiraid", "spam", "raid"} or event_type.startswith("automod_"):
         base = _strip_identity_prelude(_clean_lines(embed.description), identity_name, identity_id)
@@ -1117,6 +1133,59 @@ def _sep() -> discord.ui.Separator:
         except (TypeError, ValueError):
             pass
     return discord.ui.Separator()
+
+
+#: Couleur du liseré des cartes d'incident AutoMod, selon ce qui a été fait.
+#: 22/11/2026 : « des bannières en rouge comme Raid Protect ». Le liseré avait été
+#: retiré de tous les logs le 31/08 (format neutre) ; il revient sur les cartes
+#: d'incident seulement, là où il dit quelque chose. Les avertissements dans les
+#: salons restent sans liseré (demande du 22/10/2026).
+ACCENT_INCIDENT = {
+    "sanction": 0xED4245,   # rouge : une sanction a été appliquée
+    "bloque": 0xF39C12,     # orange : message retiré, sans sanction
+    "detection": 0xFEE75C,  # jaune : détection seule
+    "echec": 0x992D22,      # rouge sombre : la sanction prévue a échoué
+}
+
+
+def _etat_incident(statut: str) -> str | None:
+    bas = (statut or "").casefold()
+    if not bas:
+        return None
+    if "échec" in bas or "echec" in bas:
+        return "echec"
+    if "sanction appliquée" in bas or "action réussie" in bas:
+        return "sanction"
+    if "bloqué" in bas or "bloque" in bas:
+        return "bloque"
+    if "détection" in bas or "detection" in bas:
+        return "detection"
+    return None
+
+
+def _titre_incident(statut: str, action: str, duree: str) -> str:
+    """Le titre de la carte : ce qui a été fait, en un coup d'œil."""
+    etat = _etat_incident(statut)
+    action = action or ""
+    if etat == "sanction":
+        derniere = action.split(" · ")[-1] if action else "Sanction"
+        icone = {"Exclusion temporaire": "🔇", "Bannissement": "🔨", "Expulsion": "👢",
+                 "Avertissement enregistré": "⚠️", "Rôles à risque retirés": "🛡️"}.get(derniere, "🔨")
+        titre = f"### {icone} Sanction : {derniere}"
+        if duree:
+            titre += f" · {duree.split(' · ')[0]}"
+    elif etat == "bloque":
+        titre = "### 🗑️ Message supprimé"
+        if "Avertissement" in action:
+            titre += " · ⚠️ averti"
+    elif etat == "detection":
+        titre = "### 👁️ Détection seule"
+    elif etat == "echec":
+        titre = "### ❌ Sanction non appliquée"
+    else:
+        titre = "### 🛡️ Incident AutoMod"
+    return titre + (f"\n-# {statut}" if statut else "")
+
 
 
 def _accent_for_kind(kind: str) -> int | None:
@@ -1635,6 +1704,13 @@ class WideLogView(discord.ui.LayoutView):
             embed.title or "",
             embed.description or "",
         )
+        # Liseré des cartes d'incident AutoMod (voir ACCENT_INCIDENT) : la couleur
+        # dit ce qui a été fait avant même de lire.
+        if event_type in {"automod", "antiraid", "spam", "raid"} or event_type.startswith("automod_"):
+            etat = _etat_incident(_field_value_exact(embed, "Statut"))
+            if etat is not None:
+                container.accent_colour = discord.Colour(ACCENT_INCIDENT[etat])
+                container._sentrix_liseré_voulu = True  # épargné par embeds.clean_view
         title = _trace_title(event_type, embed.title or "")
         if language == "en" and event_type.startswith("ticket_"):
             title = {

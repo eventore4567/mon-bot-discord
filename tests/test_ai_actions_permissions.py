@@ -52,7 +52,13 @@ def test_chaque_action_native_verifie_la_permission_de_l_auteur():
 
 def test_les_actions_natives_verifient_aussi_les_permissions_du_bot():
     """Sinon le membre reçoit « c'est fait » alors que Discord a refusé."""
-    exemptes = {"voice.leave"}  # se déconnecter ne demande aucune permission
+    exemptes = {
+        "voice.leave",  # se déconnecter ne demande aucune permission
+        # Un message privé ne dépend d'aucune permission du serveur : Discord ne
+        # regarde que si le destinataire accepte les MP, et _message_prive
+        # traite ce refus (Forbidden) en le disant au membre (22/11/2026).
+        "member.dm",
+    }
     manquantes = []
     for intent, bloc in _corps_des_intentions_natives().items():
         if intent in exemptes:

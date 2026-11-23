@@ -71,6 +71,10 @@ def test_other_automod_incident_logs_keep_existing_renderer():
     embed.add_field(name="Règle", value="Invitation non autorisée", inline=False)
     embed.add_field(name="Action", value="Aucune action", inline=False)
     body = wide_logs.narrative_body(embed, log_type="automod")
-    assert "Incident" in body
+    # 22/11/2026 : la carte d'incident ne se range plus sous un titre
+    # « Incident » ; elle s'ouvre sur ce qui a été fait (« 👁️ Détection
+    # seule »). Ce test vérifie toujours qu'elle garde SON rendu, pas celui
+    # du contrôle d'entrée.
+    assert "### 👁️ Détection seule" in body
     assert "Anti-liens" in body
     assert "Contrôle d'entrée du compte" not in body

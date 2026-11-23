@@ -151,39 +151,18 @@ class WelcomeSetupView(CompleteView):
                     accessory=button(f"Utiliser {propose.name}", adopter),
                 ))
         if self.kind == "welcome":
-            from cogs.control_center_v3 import WelcomeAutoRolesSelect
-            from utils import config_journal, welcome_autoroles
+            # 22/11/2026 : « il y a des doublons ». Le même réglage (rôles donnés
+            # à l'arrivée, utils/welcome_autoroles) avait un sélecteur ici ET dans
+            # /setup → Rôles, qui regroupe toutes les règles de rôles. Il ne vit
+            # plus que là-bas ; on le rappelle ici en lecture seule.
+            from utils import welcome_autoroles
 
             ids = await welcome_autoroles.configured_ids(self.bot, self.guild.id)
-            autoroles = WelcomeAutoRolesSelect(
-                self, "Rôles donnés à l’arrivée (5 max.)", row=None
-            )
-            autoroles.default_values = [
-                discord.SelectDefaultValue(
-                    id=v, type=discord.SelectDefaultValueType.role
-                )
-                for v in ids
-                if self.guild.get_role(v)
-            ]
-
-            async def save_autoroles(i):
-                for role in autoroles.values:
-                    error = welcome_autoroles.role_problem(
-                        self.guild, self.guild.get_role(role.id)
-                    )
-                    if error:
-                        return await i.response.send_message(error, ephemeral=True)
-                await i.response.defer()
-                new_ids = await welcome_autoroles.save(
-                    self.bot, self.guild.id, [v.id for v in autoroles.values]
-                )
-                await config_journal.record(
-                    self.bot.db, self.guild.id, "welcome.autoroles", ids, new_ids
-                )
-                await self.refresh(i)
-
-            autoroles.callback = save_autoroles
-            box.add_item(discord.ui.ActionRow(autoroles))
+            roles = " ".join(f"<@&{v}>" for v in ids if self.guild.get_role(v)) or "Aucun"
+            box.add_item(discord.ui.TextDisplay(
+                f"**Rôles donnés à l’arrivée :** {roles}\n"
+                "-# Se règlent dans /setup → Rôles."
+            ))
 
         async def toggle(i):
             if not enabled and channel is None:

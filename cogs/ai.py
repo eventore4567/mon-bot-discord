@@ -1412,6 +1412,12 @@ class Ai(commands.Cog, name="Ai"):
             "noir": 0x1F1F1F, "black": 0x1F1F1F,
             "blanc": 0xFFFFFF, "white": 0xFFFFFF,
             "gris": 0x95A5A6, "grey": 0x95A5A6, "gray": 0x95A5A6,
+            # Revue Codex (PR #712) : le routeur reconnaissait aussi ces couleurs à
+            # la création d'un rôle ; sans elles ici, la création était refusée.
+            "turquoise": 0x1ABC9C, "teal": 0x1ABC9C, "cyan": 0x00BCD4,
+            "marron": 0x8B4513, "brown": 0x8B4513,
+            "or": 0xF1C40F, "gold": 0xF1C40F,
+            "blurple": 0x5865F2,
         }
         if value in named:
             return discord.Colour(named[value])
@@ -1419,6 +1425,64 @@ class Ai(commands.Cog, name="Ai"):
         if match:
             return discord.Colour(int(match.group(1), 16))
         return None
+
+    async def _message_prive(self, message, action, member, reply) -> bool:
+        """« mp moi » : SentriX écrit en privé, et la conversation y continue 24 h.
+
+        22/11/2026 : « genre ça MP la personne en lui disant "tu voulais me dire
+        quoi" ». Vers soi-même, tout le monde peut le demander. Vers un autre
+        membre, il faut « Modérer les membres » et un texte : le message privé
+        dit qui l'envoie, pour qu'on ne puisse pas faire parler SentriX à sa place.
+        """
+        from utils import mp_ouvertes
+
+        guild, actor = message.guild, message.author
+        texte = str(action.slots.get("text") or "").strip()
+        vers_autrui = member is not None and member.id != actor.id
+        if vers_autrui:
+            # Défense en profondeur : _execute_native_action a déjà vérifié
+            # « Modérer les membres » avant d'arriver ici.
+            perms = getattr(actor, "guild_permissions", None)
+            if actor.id != guild.owner_id and not getattr(perms, "moderate_members", False):
+                await reply("Il faut la permission **Modérer les membres** pour que j'écrive à un autre membre.")
+                return True
+            if getattr(member, "bot", False):
+                await reply("Je n'écris pas en privé à un bot.")
+                return True
+            if not texte:
+                await reply(f"Que voulez-vous que je dise à {member.mention} ?")
+                return True
+            corps = (
+                f"📩 **Message de {actor.display_name}** (serveur **{guild.name}**) :\n"
+                f"> {texte[:1500]}"
+            )
+            destinataire = member
+        else:
+            corps = (
+                f"👋 Bonjour {actor.display_name} ! Vous m'avez demandé de vous écrire depuis "
+                f"**{guild.name}**.\n"
+                + (f"> {texte[:500]}\n" if texte else "")
+                + "Vous vouliez me dire quoi ? Répondez-moi ici, je vous écoute."
+            )
+            destinataire = actor
+        try:
+            await destinataire.send(corps, allowed_mentions=discord.AllowedMentions.none())
+        except discord.Forbidden:
+            qui = "ses" if vers_autrui else "vos"
+            await reply(f"Je ne peux pas écrire en privé : {qui} messages privés sont fermés.")
+            return True
+        except discord.HTTPException:
+            await reply("Discord a refusé l'envoi du message privé. Réessayez dans un instant.")
+            return True
+        if not vers_autrui:
+            try:
+                await mp_ouvertes.ouvrir(self.bot, actor.id, guild.id)
+            except Exception:  # noqa: BLE001 — le MP est parti ; la fenêtre est un plus
+                logger.warning("Fenêtre de conversation privée non ouverte pour %s.", actor.id, exc_info=True)
+            await reply("📩 Je vous ai écrit en message privé.")
+        else:
+            await reply(f"📩 Message privé envoyé à {member.mention}.")
+        return True
 
     async def _execute_native_action(
         self,
@@ -1517,6 +1581,18 @@ class Ai(commands.Cog, name="Ai"):
             except discord.HTTPException:
                 await reply("Je n’ai pas réussi à quitter le salon vocal.")
             return True
+
+        if intent == "member.dm":
+            # Écrire à un AUTRE membre : staff seulement. « mp moi » est ouvert à
+            # tous, puisque l'auteur est le destinataire.
+            if (
+                member is not None and member.id != actor.id
+                and actor.id != guild.owner_id
+                and not actor.guild_permissions.moderate_members
+            ):
+                await reply("Il faut la permission **Modérer les membres** pour que j'écrive à un autre membre.")
+                return True
+            return await self._message_prive(message, action, member, reply)
 
         if intent == "server.rename":
             if actor.id != guild.owner_id and not actor.guild_permissions.manage_guild:
@@ -1679,9 +1755,27 @@ class Ai(commands.Cog, name="Ai"):
                 return True
 
             if intent == "role.create":
+                name = str(action.slots["name"]).strip()[:100]
+                # 22/11/2026 : un deuxième « Ping live » ne sert à rien et embrouille
+                # les sélecteurs de /setup : on signale celui qui existe déjà.
+                existant = next(
+                    (r for r in guild.roles if ai_actions.normalize_text(r.name) == ai_actions.normalize_text(name)),
+                    None,
+                )
+                if existant is not None:
+                    await reply(f"Le rôle {existant.mention} existe déjà.")
+                    return True
+                colour = discord.Colour.default()
+                couleur = str(action.slots.get("color") or "").strip()
+                if couleur:
+                    parsed = self._parse_native_colour(couleur)
+                    if parsed is None:
+                        await reply("Couleur invalide. Utilisez un nom simple comme **rouge** ou un code **#RRGGBB**.")
+                        return True
+                    colour = parsed
                 try:
-                    role = await guild.create_role(name=str(action.slots["name"])[:100], reason=reason)
-                    await reply(f"Rôle créé : **{role.name}**.")
+                    role = await guild.create_role(name=name, colour=colour, reason=reason)
+                    await reply(f"Rôle créé : {role.mention}.")
                 except (discord.Forbidden, discord.HTTPException):
                     await reply("Je n’ai pas pu créer ce rôle.")
                 return True
