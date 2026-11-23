@@ -107,6 +107,22 @@ async def main() -> int:
     check(view.page == "goodbye" and not await core_communaute.module_enabled(bot, guild.id, "goodbye"),
           "sans salon, l'interrupteur ouvre la page pour le choisir au lieu d'activer à vide", str(view.page))
 
+    # Engagement, Outils, Système (23/11/2026) : l'état réel de chaque réglage.
+    textes_sections = {}
+    for cle in ("engagement", "outils", "systeme"):
+        view.page = f"section:{cle}"
+        view.clear_items()
+        await view._build_page(view.page)
+        textes_sections[cle] = "\n".join(
+            i.content for i in view.walk_children() if isinstance(i, discord.ui.TextDisplay)
+        )
+    check(f"annonces : <#{h.CID}>" in textes_sections["engagement"] or "annonces :" in textes_sections["engagement"],
+          "Engagement affiche le vrai salon d'annonces des niveaux", textes_sections["engagement"][:160])
+    check("panneau(x)" in textes_sections["outils"] and "commande(s) créée(s)" in textes_sections["outils"],
+          "Outils affiche les vrais nombres (panneaux, commandes)", textes_sections["outils"][:160])
+    check("préfixe : `" in textes_sections["systeme"] and "demandes par jour" in textes_sections["systeme"],
+          "Système affiche le vrai préfixe et la limite IA", textes_sections["systeme"][:160])
+
     # Section Sécurité tout-en-un (étape 2) : un clic par protection, en base.
     async def antispam_actif() -> bool:
         return (await securite_simple.etats(view))["antispam"]

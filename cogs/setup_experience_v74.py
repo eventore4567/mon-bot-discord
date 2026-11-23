@@ -696,7 +696,10 @@ class SentriXSetupV74(v73.SentriXSetupV73):
                     description = language_runtime.english_ui_text(description, setup=True) or description
             statut = etat(page)
             texte = f"**{self._nom_cle(page, english)}**" + (f" · {statut}" if statut else "")
-            texte += f"\n-# {description}"
+            # 23/11/2026 : l'état RÉEL du réglage (salon, nombres…) quand on sait
+            # le lire ; la description fixe sinon.
+            reel = await self._resume_page(page, english)
+            texte += f"\n-# {reel or description}"
             ouvrir = discord.ui.Button(label="Open" if english else "Ouvrir", style=discord.ButtonStyle.primary)
 
             async def aller(interaction: discord.Interaction, _page=page):
@@ -1211,6 +1214,83 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         container.add_item(discord.ui.Separator())
         container.add_item(discord.ui.ActionRow(retour, fermer))
         self.add_item(container)
+
+    async def _resume_page(self, page: str, english: bool) -> str:
+        """Une ligne sur l'état réel d'un réglage, ou "" si on ne sait pas le lire."""
+        t = (lambda fr, en: en) if english else (lambda fr, en: fr)
+
+        async def nombre(requete: str) -> int | None:
+            try:
+                row = await self.bot.db.fetchone(requete, (self.guild.id,))
+                return int(row[0] if row else 0)
+            except Exception:  # noqa: BLE001 — table absente : on ne sait pas
+                return None
+
+        def salon(identifiant) -> str:
+            canal = self.guild.get_channel(int(identifiant)) if identifiant else None
+            return canal.mention if canal else ""
+
+        try:
+            conf = await self.bot.db.get_guild_config(self.guild.id)
+
+            def valeur(cle):
+                try:
+                    return conf[cle] if conf is not None else None
+                except (KeyError, IndexError, TypeError):
+                    return None
+
+            if page == "levels":
+                recompenses = await nombre("SELECT COUNT(*) FROM level_roles WHERE guild_id=?")
+                canal = salon(valeur("level_channel"))
+                morceaux = [t("annonces : ", "announcements: ") + (canal or t("salon du message", "message channel"))]
+                if recompenses is not None:
+                    morceaux.append(t(f"{recompenses} rôle(s) de récompense", f"{recompenses} reward role(s)"))
+                return " · ".join(morceaux)
+            if page == "economy":
+                row = await self.bot.db.fetchone(
+                    "SELECT currency_plural, currency_symbol FROM economy_settings_v2 WHERE guild_id=?",
+                    (self.guild.id,),
+                )
+                if row:
+                    return t("monnaie : ", "currency: ") + f"{row[1]} {row[0]}"
+                return ""
+            if page == "music":
+                music = self.bot.get_cog("Music")
+                reglages = await music.get_system_settings(self.guild.id) if music else {}
+                canal = salon(reglages.get("voice_channel_id"))
+                return (t("vocal : ", "voice: ") + canal) if canal else t("aucun vocal choisi", "no voice channel")
+            if page == "tickets":
+                from . import setup_ticket_autoconfig_v72 as v72_tickets
+
+                panneaux, _panel, types = await v72_tickets._existing_ticket_rows(self.bot, self.guild.id)
+                return t(f"{len(panneaux)} panneau(x) · {len(types)} type(s) de ticket",
+                         f"{len(panneaux)} panel(s) · {len(types)} ticket type(s)")
+            if page == "custom_commands":
+                n = await nombre("SELECT COUNT(*) FROM platform_custom_commands WHERE guild_id=?")
+                return "" if n is None else t(f"{n} commande(s) créée(s)", f"{n} command(s) created")
+            if page == "snippets":
+                n = await nombre("SELECT COUNT(*) FROM snippets WHERE guild_id=?")
+                return "" if n is None else t(f"{n} message(s) enregistré(s)", f"{n} saved message(s)")
+            if page == "recurring_messages":
+                n = await nombre("SELECT COUNT(*) FROM recurring_messages WHERE guild_id=?")
+                return "" if n is None else t(f"{n} message(s) programmé(s)", f"{n} scheduled message(s)")
+            if page == "automation":
+                n = await nombre("SELECT COUNT(*) FROM automation_rules WHERE guild_id=?")
+                return "" if n is None else t(f"{n} règle(s)", f"{n} rule(s)")
+            if page == "ai":
+                from utils import ai_service
+
+                reglages = await ai_service.get_settings(self.bot, self.guild.id)
+                return t(f"{reglages['daily_limit']} demandes par jour et par membre",
+                         f"{reglages['daily_limit']} requests per day per member")
+            if page == "prefixes":
+                return t("préfixe : ", "prefix: ") + f"`{valeur('prefix') or '+'}`"
+            if page == "language":
+                langue = await language_runtime.get_language(self.bot, self.guild.id)
+                return "English" if langue == language_runtime.LANG_EN else "Français"
+        except Exception:  # noqa: BLE001 — un résumé ne doit jamais casser la section
+            logger.debug("Résumé indisponible pour la page %s.", page, exc_info=True)
+        return ""
 
     async def _ouvrir_page(self, interaction: discord.Interaction, selected: str, english: bool) -> None:
         """Ouvre un réglage, avec les deux cas particuliers de l'ancien menu."""
