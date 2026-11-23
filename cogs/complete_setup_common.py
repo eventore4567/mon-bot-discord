@@ -45,12 +45,24 @@ class CompleteView(AdminView):
             return False
         return True
 
+    def page_setup(self) -> str | None:
+        """La page du /setup que ce panneau représente (pour revenir à sa section)."""
+        return getattr(self, "kind", None)
+
     def finish(self, box):
         async def home(i):
-            from cogs.setup_experience_v74 import SentriXSetupV74
+            from cogs.setup_experience_v74 import SECTIONS, SentriXSetupV74
 
             await i.response.defer()
             root = SentriXSetupV74(self.bot, self.guild, self.owner_id)
+            # 22/11/2026 : on revient à la SECTION de cette page (Sécurité,
+            # Communauté…), pas à l'accueil — même règle que les autres pages.
+            page = self.page_setup()
+            section = next((s[0] for s in SECTIONS if page in s[6]), None)
+            if section is not None:
+                root._section = section
+                root.page = f"section:{section}"
+                root.backend = root._new_backend(None)
             await root.prepare()
             await i.edit_original_response(view=root, attachments=root.fichiers())
 

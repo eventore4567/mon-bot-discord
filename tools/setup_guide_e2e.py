@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Navigation de /setup sur le bot booté : l'accueil à menu unique.
+"""Navigation de /setup sur le bot booté : accueil en six sections (22/11/2026 ; avant, menu unique).
 
 31/10/2026 : l'assistant guidé (Sécurité → Logs → Tickets → Bienvenue → Rôles)
 doublonnait les pages ; il est remplacé par UN menu sur l'accueil. On vérifie :
@@ -66,20 +66,26 @@ async def main() -> int:
 
     pages = ("security", "logs", "tickets", "welcome", "roles")
     avant = {m: await core.module_state(bot, h.GID, m) for m in pages}
-    view = await build(bot, guild, None)
-    menu = next((it for top in view.children for it in walk(top) if isinstance(it, discord.ui.Select)), None)
-    valeurs = {o.value for o in getattr(menu, "options", [])}
-    check(menu is not None and set(pages) <= valeurs, "l'accueil propose un menu avec les pages principales",
-          str(sorted(valeurs)))
+    # 22/11/2026 : plus de menu unique. Accueil → section → « Ouvrir » ; « Retour »
+    # revient à la section, puis à l'accueil.
+    from cogs import setup_experience_v74 as v74
 
+    view = await build(bot, guild, None)
+    check(not any(isinstance(it, discord.ui.Select) for top in view.children for it in walk(top)),
+          "l'accueil n'a plus de menu de 22 entrées")
     for page in pages:
-        menu = next(it for top in view.children for it in walk(top) if isinstance(it, discord.ui.Select))
-        menu._values = [page]
-        await menu.callback(interaction(bot))
+        section = next(s for s in v74.SECTIONS if page in s[6])
+        view = await cliquer(view, section[1])
+        check(view.page == f"section:{section[0]}", f"la section {section[1]} s'ouvre", str(view.page))
+        ouvrir = [it for top in view.children for it in walk(top)
+                  if isinstance(it, discord.ui.Button) and it.label == "Ouvrir"]
+        await ouvrir[section[6].index(page)].callback(interaction(bot))
         await h.settle(idle=0.2, maximum=2)
-        check(view.page == page and bouton(view, "Retour") is not None, f"le menu ouvre la page {page}")
+        check(view.page == page and bouton(view, "Retour") is not None, f"la section ouvre la page {page}")
         view = await cliquer(view, "Retour")
-        check(view.page is None, f"« Retour » ramène à l'accueil depuis {page}")
+        check(view.page == f"section:{section[0]}", f"« Retour » ramène à la section depuis {page}")
+        view = await cliquer(view, "Retour")
+        check(view.page is None, f"« Retour » de la section ramène à l'accueil ({page})")
 
     apres = {m: await core.module_state(bot, h.GID, m) for m in avant}
     check(apres == avant, "parcourir les pages n'a activé ni coupé aucun module", f"{avant} → {apres}")

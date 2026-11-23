@@ -81,13 +81,14 @@ async def test_gif_analyse_une_image_pas_le_fichier_anime():
 def test_rendu_setup_et_ai_sont_statiques_et_sans_doublons():
     home = (ROOT / "cogs/setup_experience_v74.py").read_text()
     marker = home.index("    async def _build_home(self)")
-    end = home.index("    async def _build_home_complet", marker)
+    end = home.index("    def _nom_cle", marker)
     region = home[marker:end]
+    # 22/11/2026 : « refais tout le setup, plus simple ». L'accueil n'a plus le menu
+    # unique de 22 entrées : six sections (SECTIONS) mènent aux mêmes pages.
     assert "Logs Soundboard" not in region
     assert "Assistant guidé" not in region
     assert "accent_colour=0x6C57CC" in region
-    assert "Actives" in region and "Désactivées" in region
-    assert region.count("discord.ui.Select(") == 1
+    assert "discord.ui.Select(" not in region and "SECTIONS" in region
     assert "v73.poser_banniere(container)" in region
 
     ai = (ROOT / "cogs/ai.py").read_text()
@@ -96,3 +97,5 @@ def test_rendu_setup_et_ai_sont_statiques_et_sans_doublons():
     assert "sentrix_emojis.emoji" in ai
     ast.parse(ai)
     ast.parse((ROOT / "utils/ai_service.py").read_text())
+
+

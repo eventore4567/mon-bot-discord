@@ -49,15 +49,17 @@ async def test_slash_setup_indisponible_est_ephemere():
 def test_setup_inclut_les_etats_et_la_banniere():
     src = (ROOT / "cogs/setup_experience_v74.py").read_text()
     a = src.index("    async def _build_home(self)")
-    b = src.index("    async def _build_home_complet", a)
+    b = src.index("    def _nom_cle", a)
     accueil = src[a:b]
+    # 22/11/2026 : « refais tout le setup, plus simple ». L'accueil n'a plus le menu
+    # unique de 22 entrées : six sections (SECTIONS) mènent aux mêmes pages.
+    # L'état reste visible : modules actifs, à terminer, et protections.
     assert "actifs =" in accueil
-    assert "inactifs =" in accueil
-    assert "incomplets =" in accueil
-    for status in ("Actives", "Désactivées", "À terminer"):
-        assert status in accueil
+    assert "a_terminer =" in accueil
+    assert "protegees =" in accueil
+    assert "À terminer" in accueil
     assert "v73.poser_banniere(container)" in accueil
-    assert "icons.partiel(icons_par_module.get(key" in accueil
+    assert "icons.partiel(icone)" in accueil
     assert len({e.path for e in slash_catalog.CATALOG}) == len(slash_catalog.CATALOG)
 
 
@@ -88,7 +90,13 @@ def test_derniere_couche_invitations_separe_prefix_public_et_slash_prive():
 
 
 def test_les_categories_ajoutees_nont_pas_de_keyerror_emoji():
+    # 22/11/2026 : chaque SECTION porte son icône ; les invitations sont rangées
+    # dans « Modération » et l'état détaillé est toujours lu.
+    from cogs import setup_experience_v74 as v74
+
     source = (ROOT / "cogs/setup_experience_v74.py").read_text()
-    assert 'icons_par_module.get(key, "")' in source
-    assert '"invitations": "tracking"' in source
-    assert "etats = await self._effective_states()" in source
+    assert all(section[3] for section in v74.SECTIONS)
+    assert any("invitations" in section[6] for section in v74.SECTIONS)
+    assert "etats_detail = await self._effective_states()" in source
+
+
