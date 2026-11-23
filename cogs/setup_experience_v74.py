@@ -471,9 +471,24 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         ))
         container.add_item(discord.ui.Separator())
 
+        # Revue Codex (PR #714) : une protection cochée n'agit pas forcément.
+        # Sans « Voir le journal d'audit », l'anti-nuke ne sait pas qui agit ;
+        # sans « Expulser », l'anti-bot ne peut rien. Même diagnostic que la
+        # page Sécurité : on ne dit « protégé » que si tout est opérationnel.
+        from utils.protection_requirements import diagnostic
+
+        permissions = self.guild.me.guild_permissions if self.guild.me else discord.Permissions.none()
+        inertes, degradees = diagnostic(permissions, {cle for cle, actif in protections.items() if actif})
+        bridees = len(inertes) + len(degradees)
+
         pleins = round(10 * protegees / total)
         barre = "🟩" * pleins + "⬜" * (10 - pleins)
-        if protegees == total:
+        if protegees == total and bridees:
+            verdict = (
+                f"⚠️ {bridees} limited by SentriX's missing permissions (see Security)." if english
+                else f"⚠️ {bridees} bridée(s) par des permissions manquantes de SentriX (voir Sécurité)."
+            )
+        elif protegees == total:
             verdict = "Server protected." if english else "Serveur protégé."
         else:
             verdict = (

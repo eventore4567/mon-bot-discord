@@ -70,6 +70,20 @@ async def main() -> int:
     check(bouton(view, "Toutes les protections sont actives") is not None,
           "l'accueil indique ensuite que tout est actif")
 
+    # Revue Codex (PR #714) : tout coché, mais SentriX sans « Voir le journal
+    # d'audit » ni « Expulser » — l'accueil ne doit pas annoncer « protégé ».
+    from unittest.mock import PropertyMock, patch
+
+    bridees = discord.Permissions(manage_guild=True, manage_roles=True, manage_channels=True,
+                                  manage_messages=True, moderate_members=True, ban_members=True)
+    with patch.object(discord.Member, "guild_permissions", new_callable=PropertyMock, return_value=bridees):
+        view.clear_items()
+        await view._build_home()
+    texte = "\n".join(i.content for i in view.walk_children() if isinstance(i, discord.ui.TextDisplay))
+    check("bridée" in texte and "Serveur protégé" not in texte,
+          "permissions manquantes : l'accueil signale les protections bridées au lieu de « protégé »",
+          texte[-200:])
+
     failed = [r for r in RESULTS if not r[0]]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} étapes réussies.")
     sys.stdout.flush()
