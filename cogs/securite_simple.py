@@ -127,6 +127,31 @@ async def activer_recommandees(view) -> list[str]:
 COULEUR = 0x5865F2
 
 
+async def basculer_protection(view, cle: str, actif: bool, *, actor_id: int | None = None) -> None:
+    """Allume ou coupe UNE protection (section Sécurité de /setup, 22/11/2026).
+
+    Même écriture que l'écran « Personnaliser », plus la purge du cache d'AutoMod,
+    qu'il oubliait : sans elle, le changement n'agissait qu'après une trentaine
+    de secondes.
+    """
+    if cle not in toutes_les_protections():
+        raise ValueError(f"protection inconnue : {cle}")
+    await view.bot.db.execute(
+        "INSERT INTO automod_settings(guild_id) VALUES(?) ON CONFLICT(guild_id) DO NOTHING",
+        (view.guild.id,),
+    )
+    await view.bot.db.set_automod(view.guild.id, cle, 1 if actif else 0)
+    await config_journal.record(view.bot.db, view.guild.id, "automod." + cle, int(not actif), int(actif))
+    if actif and not await _module_securite_actif(view):
+        # Allumer une protection n'a de sens que module allumé.
+        from cogs import setup_v2_core as core
+
+        await core.set_module_enabled(view.bot, view.guild.id, "security", True, actor_id=actor_id)
+    cog = view.bot.get_cog("Automod")
+    if cog is not None and hasattr(cog, "automod_cache"):
+        cog.automod_cache.pop(view.guild.id, None)
+
+
 def conteneur(view, titre: str, texte: str) -> discord.ui.Container:
     from cogs import setup_components_v73 as v73
 
@@ -265,5 +290,5 @@ async def ecran_simple(view) -> discord.ui.Container:
     return box
 
 
-__all__ = ["PROTECTION_RECOMMANDEE", "RECOMMANDEES", "activer_recommandees", "conteneur",
+__all__ = ["PROTECTION_RECOMMANDEE", "RECOMMANDEES", "activer_recommandees", "basculer_protection", "conteneur",
            "ecran_simple", "etats", "toutes_les_protections"]
