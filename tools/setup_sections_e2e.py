@@ -107,6 +107,22 @@ async def main() -> int:
     check(view.page == "goodbye" and not await core_communaute.module_enabled(bot, guild.id, "goodbye"),
           "sans salon, l'interrupteur ouvre la page pour le choisir au lieu d'activer à vide", str(view.page))
 
+    # Revue Codex (PR #718) : tous les panneaux de tickets comptent, et le rôle
+    # de vérification enregistré sous verification_role s'affiche.
+    tickets = bot.get_cog("Tickets")
+    for nom in ("Support", "Partenariats"):
+        panel_id = await tickets.create_panel(guild.id, nom)
+        for type_nom in ("A", "B", "C"):
+            await tickets.add_type(guild.id, panel_id, f"{nom} {type_nom}")
+    await bot.db.set_guild_config(guild.id, "verify_role", None)
+    await bot.db.set_guild_config(guild.id, "verification_role", h.MEMBER_ROLE_ID)
+    view.page = "section:communaute"
+    view.clear_items()
+    await view._build_page(view.page)
+    texte_verif = "\n".join(i.content for i in view.walk_children() if isinstance(i, discord.ui.TextDisplay))
+    check(f"Vérification : <@&{h.MEMBER_ROLE_ID}>" in texte_verif,
+          "le rôle de vérification enregistré sous verification_role est affiché", texte_verif[-200:])
+
     # Engagement, Outils, Système (23/11/2026) : l'état réel de chaque réglage.
     textes_sections = {}
     for cle in ("engagement", "outils", "systeme"):
@@ -118,8 +134,9 @@ async def main() -> int:
         )
     check(f"annonces : <#{h.CID}>" in textes_sections["engagement"] or "annonces :" in textes_sections["engagement"],
           "Engagement affiche le vrai salon d'annonces des niveaux", textes_sections["engagement"][:160])
-    check("panneau(x)" in textes_sections["outils"] and "commande(s) créée(s)" in textes_sections["outils"],
-          "Outils affiche les vrais nombres (panneaux, commandes)", textes_sections["outils"][:160])
+    check("2 panneau(x) · 6 type(s) de ticket" in textes_sections["outils"]
+          and "commande(s) créée(s)" in textes_sections["outils"],
+          "Outils compte les types de TOUS les panneaux de tickets (2 × 3 = 6)", textes_sections["outils"][:200])
     check("préfixe : `" in textes_sections["systeme"] and "demandes par jour" in textes_sections["systeme"],
           "Système affiche le vrai préfixe et la limite IA", textes_sections["systeme"][:160])
 

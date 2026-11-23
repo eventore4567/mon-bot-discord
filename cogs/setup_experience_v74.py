@@ -1160,7 +1160,10 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         fiche(
             f"🎭 {t('Rôles', 'Roles')}",
             t("Arrivée : ", "Arrival: ") + (" ".join(role(i) for i in arrivee) or t("aucun", "none"))
-            + " · " + t("Vérification : ", "Verification: ") + role(valeur("verify_role"))
+            # Revue Codex (PR #718) : même repli que la page Rôles et la
+            # vérification — server_builder écrit verification_role.
+            + " · " + t("Vérification : ", "Verification: ")
+            + role(valeur("verify_role") or valeur("verification_role"))
             + "\n-# " + t("Avertissement : ", "Warning: ") + role(valeur("warn_role"))
             + " · " + t("Mute : ", "Mute: ") + role(valeur("mute_role")),
             "roles",
@@ -1260,11 +1263,17 @@ class SentriXSetupV74(v73.SentriXSetupV73):
                 canal = salon(reglages.get("voice_channel_id"))
                 return (t("vocal : ", "voice: ") + canal) if canal else t("aucun vocal choisi", "no voice channel")
             if page == "tickets":
-                from . import setup_ticket_autoconfig_v72 as v72_tickets
-
-                panneaux, _panel, types = await v72_tickets._existing_ticket_rows(self.bot, self.guild.id)
-                return t(f"{len(panneaux)} panneau(x) · {len(types)} type(s) de ticket",
-                         f"{len(panneaux)} panel(s) · {len(types)} ticket type(s)")
+                # Revue Codex (PR #718) : _existing_ticket_rows ne lit les types que
+                # du PREMIER panneau ; on compte ceux de tous les panneaux.
+                panneaux = await nombre("SELECT COUNT(*) FROM ticket_panels_v2 WHERE guild_id=?")
+                types = await nombre(
+                    "SELECT COUNT(*) FROM ticket_types WHERE panel_id IN "
+                    "(SELECT id FROM ticket_panels_v2 WHERE guild_id=?)"
+                )
+                if panneaux is None or types is None:
+                    return ""
+                return t(f"{panneaux} panneau(x) · {types} type(s) de ticket",
+                         f"{panneaux} panel(s) · {types} ticket type(s)")
             if page == "custom_commands":
                 n = await nombre("SELECT COUNT(*) FROM platform_custom_commands WHERE guild_id=?")
                 return "" if n is None else t(f"{n} commande(s) créée(s)", f"{n} command(s) created")
