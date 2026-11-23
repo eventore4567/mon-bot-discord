@@ -40,3 +40,24 @@ def test_chaque_section_a_ses_textes_dans_les_deux_langues():
 def test_chaque_fonction_hors_module_a_ses_textes():
     for cle, (nom, desc, nom_en, desc_en) in v74.EXTRAS.items():
         assert nom and desc and nom_en and desc_en, cle
+
+
+def test_les_fiches_prennent_l_emoji_anime_du_pack(monkeypatch):
+    """23/11/2026 : « mets les émojis animés ». Pack synchronisé : l'émoji animé
+    SentriX ; pas encore synchronisé : l'Unicode, jamais un marqueur cassé."""
+    from utils import sentrix_emojis
+
+    monkeypatch.setattr(sentrix_emojis, "emoji", lambda nom: f"<a:{nom}:123>")
+    assert v74.icone_section("securite") == "<a:sentrix_live_security:123>"
+    monkeypatch.setattr(sentrix_emojis, "emoji", lambda nom: "")
+    assert v74.icone_section("securite") == "🛡️"
+    monkeypatch.setattr(sentrix_emojis, "emoji", lambda nom: "◆")  # repli typographique
+    assert v74.icone_section("moderation") == "⚖️"
+
+
+def test_chaque_icone_animee_existe_dans_le_pack():
+    from pathlib import Path
+
+    dossier = Path(v74.__file__).resolve().parents[1] / "assets" / "sentrix_emojis"
+    for cle, (nom, _repli) in v74.ICONES_SECTIONS.items():
+        assert (dossier / f"{nom}.gif").exists(), (cle, nom)

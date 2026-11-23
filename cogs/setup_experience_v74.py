@@ -299,11 +299,28 @@ SECTIONS = (
      ("ai", "prefixes", "language")),
 )
 
-#: Icônes des fiches de l'accueil (Unicode : elles s'affichent partout).
+#: Icônes des fiches de l'accueil : l'émoji ANIMÉ du pack SentriX (« mets les
+#: émojis animés », 23/11/2026), et un repli Unicode tant que le pack n'est
+#: pas synchronisé sur l'application.
 ICONES_SECTIONS = {
-    "securite": "🛡️", "moderation": "⚖️", "communaute": "👥",
-    "engagement": "🏆", "outils": "🧰", "systeme": "⚙️",
+    "securite": ("sentrix_live_security", "🛡️"),
+    "moderation": ("sentrix_live_mod", "⚖️"),
+    "communaute": ("sentrix_live_member_join", "👥"),
+    "engagement": ("sentrix_live_level", "🏆"),
+    "outils": ("sentrix_live_ticket", "🧰"),
+    "systeme": ("sentrix_ai", "⚙️"),
 }
+
+
+def icone_section(cle: str) -> str:
+    from utils import sentrix_emojis
+
+    nom, repli = ICONES_SECTIONS.get(cle, ("", "•"))
+    marque = sentrix_emojis.emoji(nom) if nom else ""
+    # emoji() rend le repli typographique (ou rien) tant que le pack n'est pas
+    # chargé : seul un vrai émoji personnalisé remplace l'Unicode.
+    return marque if marque.startswith("<") else repli
+
 
 #: Réglages hors modules : nom, description, nom anglais, description anglaise.
 EXTRAS = {
@@ -480,8 +497,10 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         # comme Raid Protect ». Plus de barre de carrés ni de rangées de boutons
         # gris : une fiche par section — icône, nom, résumé en une ligne — et un
         # bouton « Ouvrir » aligné à droite.
+        bouclier = icons.emoji("sentrix_bouclier")
         etat = (
-            f"🛡️ **{protegees}/{total}** " + ("protections on" if english else "protections actives")
+            f"{bouclier if bouclier.startswith('<') else '🛡️'} **{protegees}/{total}** "
+            + ("protections on" if english else "protections actives")
             + " · " + resume["verdict"]
         )
         if a_terminer:
@@ -492,7 +511,10 @@ class SentriXSetupV74(v73.SentriXSetupV73):
 
         resumes = await self._resumes_sections(english, states, resume)
         for cle, nom_fr, nom_en, _icone, _desc_fr, _desc_en, _pages in SECTIONS:
-            ouvrir = discord.ui.Button(label="Open" if english else "Ouvrir", style=discord.ButtonStyle.secondary)
+            ouvrir = discord.ui.Button(
+                label="Open" if english else "Ouvrir", style=discord.ButtonStyle.secondary,
+                emoji=icons.partiel("sentrix_fleche") or None,
+            )
 
             async def ouvrir_section(interaction: discord.Interaction, _cle=cle):
                 self._section = _cle
@@ -503,7 +525,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             ouvrir.callback = ouvrir_section
             container.add_item(discord.ui.Section(
                 discord.ui.TextDisplay(
-                    f"{ICONES_SECTIONS.get(cle, '•')} **{nom_en if english else nom_fr}**\n-# {resumes.get(cle, '')}"
+                    f"{icone_section(cle)} **{nom_en if english else nom_fr}**\n-# {resumes.get(cle, '')}"
                 ),
                 accessory=ouvrir,
             ))

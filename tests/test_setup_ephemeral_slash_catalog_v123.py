@@ -60,7 +60,7 @@ def test_setup_inclut_les_etats_et_la_banniere():
     assert "À terminer" in accueil
     assert "v73.poser_banniere(container)" in accueil
     # 23/11/2026 : chaque fiche de section porte son icône (ICONES_SECTIONS).
-    assert "ICONES_SECTIONS.get(cle" in accueil
+    assert "icone_section(cle)" in accueil
     assert len({e.path for e in slash_catalog.CATALOG}) == len(slash_catalog.CATALOG)
 
 
