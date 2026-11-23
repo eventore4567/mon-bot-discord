@@ -270,6 +270,65 @@ async def guide_save_step(bot, guild_id: int, step: int | None) -> None:
     )
 
 
+#: 22/11/2026 : les 22 réglages de l'ancien menu, rangés en six sections.
+#: (clé, nom, nom anglais, icône SentriX, description, description anglaise, pages)
+SECTIONS = (
+    ("securite", "Sécurité", "Security", "security",
+     "Anti-raid, anti-nuke, AutoMod et vérification des arrivants.",
+     "Anti-raid, anti-nuke, AutoMod and member verification.",
+     ("security", "rules_access")),
+    ("moderation", "Modération", "Moderation", "mod",
+     "Sanctions, journaux et suivi des invitations.",
+     "Sanctions, logs and invite tracking.",
+     ("moderation", "logs", "invitations")),
+    ("communaute", "Communauté", "Community", "member_join",
+     "Accueil, départs, rôles, suggestions et notifications.",
+     "Welcome, goodbye, roles, suggestions and notifications.",
+     ("welcome", "goodbye", "roles", "suggestions", "notifications")),
+    ("engagement", "Engagement", "Engagement", "level",
+     "Niveaux, économie et musique.",
+     "Levels, economy and music.",
+     ("levels", "economy", "music")),
+    ("outils", "Outils", "Tools", "tools",
+     "Tickets, embeds, commandes et messages automatiques.",
+     "Tickets, embeds, commands and automatic messages.",
+     ("tickets", "embeds", "custom_commands", "snippets", "recurring_messages", "automation")),
+    ("systeme", "Système", "System", "settings",
+     "Intelligence artificielle, préfixes et langue.",
+     "Artificial intelligence, prefixes and language.",
+     ("ai", "prefixes", "language")),
+)
+
+#: Réglages hors modules : nom, description, nom anglais, description anglaise.
+EXTRAS = {
+    "rules_access": ("Règlement et vérification", "Règles, CAPTCHA, rôles et accès aux salons",
+                     "Rules & verification", "Rules, CAPTCHA, roles and channel access"),
+    "suggestions": ("Suggestions", "Salon, votes et modération des idées",
+                    "Suggestions", "Channel, voting and moderation"),
+    "embeds": ("Créer un embed", "Texte, images, couleurs et boutons",
+               "Embed builder", "Text, images, colours and buttons"),
+    "custom_commands": ("Commandes personnalisées", "Créer ses propres commandes",
+                        "Custom commands", "Create your own commands"),
+    "prefixes": ("Préfixes", "Préfixes officiels et personnalisés, séparés",
+                 "Prefixes", "Separate official and custom prefixes"),
+    "snippets": ("Messages enregistrés", "Préparer des messages à réutiliser",
+                 "Saved messages", "Prepare reusable messages"),
+    "recurring_messages": ("Messages programmés", "Réglages des publications automatiques",
+                           "Scheduled messages", "Automatic posts"),
+    "automation": ("Automatisations", "Règles et actions automatiques",
+                   "Automations", "Automation rules and actions"),
+    "language": ("Langue du serveur", "Français ou English",
+                 "Server language", "French or English"),
+}
+
+NOMS_EN = {
+    "security": "Security", "moderation": "Moderation", "roles": "Roles", "ai": "AI",
+    "levels": "Levels", "economy": "Economy", "welcome": "Welcome", "goodbye": "Goodbye",
+    "antispam": "Anti-spam", "tickets": "Tickets", "logs": "Logs",
+    "notifications": "Notifications", "music": "Music", "invitations": "Invites",
+}
+
+
 class SentriXSetupV74(v73.SentriXSetupV73):
     """Dernière façade du Setup : simple pour la sécurité, complète pour les tickets."""
 
@@ -370,208 +429,216 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         await cog.open_builder_from_interaction(interaction)
 
     async def _build_home(self) -> None:
-        """Accueil compact dans la langue canonique du serveur."""
+        """Accueil : l'état du serveur, six sections, et un bouton pour tout protéger.
+
+        22/11/2026 : « refais tout le setup, plus simple, plus beau ». L'accueil
+        alignait un menu de 22 entrées sans ordre. Les mêmes pages sont rangées
+        en six sections ; chaque section liste ses réglages avec leur état.
+        Aucun réglage n'a changé de place : seul le chemin pour y arriver.
+        """
         from utils import sentrix_emojis as icons
+        from . import securite_simple
 
         english = (
             await language_runtime.get_language(self.bot, self.guild.id)
             == language_runtime.LANG_EN
         )
-        name_en = {
-            "security": "Security", "moderation": "Moderation",
-            "roles": "Roles", "ai": "AI", "levels": "Levels",
-            "economy": "Economy", "welcome": "Welcome",
-            "goodbye": "Goodbye", "antispam": "Anti-spam",
-            "tickets": "Tickets", "logs": "Logs",
-            "notifications": "Notifications",
-        }
-
         self.backend.category = None
         self.avance = False
+        self._section = None
+
         states = await setup_ui.module_switch_states(self.bot, self.guild.id)
         labels = dict(setup_ui.MODULE_SWITCHES)
-        def module_name(key: str) -> str:
-            return name_en.get(key, labels[key]) if english else labels[key]
-
-        actifs = [module_name(key) for key in labels if states.get(key) == "enabled"]
-        inactifs = [module_name(key) for key in labels if states.get(key) == "disabled"]
-        incomplets = [module_name(key) for key in labels if states.get(key) in {"empty", "not_configured"}]
-
-        def label_liste(items: list[str]) -> str:
-            return ", ".join(items) if items else ("None" if english else "Aucun")
+        actifs = [key for key in labels if states.get(key) == "enabled"]
+        a_terminer = [key for key in labels if states.get(key) in {"empty", "not_configured"}]
+        protections = await securite_simple.etats(self)
+        protegees = sum(1 for actif in protections.values() if actif)
+        total = len(protections) or 1
 
         container = discord.ui.Container(accent_colour=0x6C57CC)
         v73.poser_banniere(container)
         container.add_item(discord.ui.Section(
             discord.ui.TextDisplay(
                 (
-                    "# SentriX Configuration\n"
-                    f"**{self.guild.name}** · **{len(actifs)}/{len(labels)} modules enabled**\n"
-                    "Choose a module to view its settings. Changes require confirmation."
+                    "# SentriX setup\n"
+                    f"**{self.guild.name}** · {len(actifs)} of {len(labels)} modules enabled"
                 ) if english else (
                     "# Configuration SentriX\n"
-                    f"**{self.guild.name}** · **{len(actifs)}/{len(labels)} modules actifs**\n"
-                    "Choisissez un module pour afficher ses paramètres. "
-                    "Aucun changement sans confirmation."
+                    f"**{self.guild.name}** · {len(actifs)} modules actifs sur {len(labels)}"
                 )
             ),
             accessory=v73._thumbnail(self.bot),
         ))
         container.add_item(discord.ui.Separator())
-        from utils import sentrix_emojis as _status_icons
-        actif_icon = _status_icons.emoji("success") or "✅"
-        off_icon = _status_icons.emoji("lock") or "🔒"
-        waiting_icon = _status_icons.emoji("clock") or "⏳"
-        container.add_item(discord.ui.TextDisplay(
-            (
-                "### Feature status\n\n"
-                f"{actif_icon} **Enabled ({len(actifs)})**\n{label_liste(actifs)}\n\n"
-                f"{off_icon} **Disabled ({len(inactifs)})**\n{label_liste(inactifs)}\n\n"
-                f"{waiting_icon} **Needs setup ({len(incomplets)})**\n{label_liste(incomplets)}"
-            ) if english else (
-                "### État des fonctionnalités\n\n"
-                f"{actif_icon} **Actives ({len(actifs)})**\n{label_liste(actifs)}\n\n"
-                f"{off_icon} **Désactivées ({len(inactifs)})**\n{label_liste(inactifs)}\n\n"
-                f"{waiting_icon} **À terminer ({len(incomplets)})**\n{label_liste(incomplets)}"
+
+        pleins = round(10 * protegees / total)
+        barre = "🟩" * pleins + "⬜" * (10 - pleins)
+        if protegees == total:
+            verdict = "Server protected." if english else "Serveur protégé."
+        else:
+            verdict = (
+                f"{total - protegees} protection(s) off." if english
+                else f"{total - protegees} protection(s) coupée(s)."
             )
-        ))
-        container.add_item(discord.ui.Separator())
-        container.add_item(discord.ui.TextDisplay(
-            "### What would you like to configure?"
-            if english else "### Que souhaitez-vous configurer ?"
-        ))
-
-        # Même bibliothèque partout ; chaque sujet a SON icône et non un
-        # emoji copié sur des catégories différentes. Les codes existants du
-        # portail développeur restent valables en cas de redéploiement.
-        icons_par_module = {
-            "security": "bouclier", "moderation": "mod",
-            "tickets": "ticket", "welcome": "member_join",
-            "goodbye": "member_leave", "roles": "role",
-            "logs": "logs", "levels": "level",
-            "notifications": "notification", "music": "musique",
-            "ai": "ai", "invitations": "tracking",
-            "economy": "coin",
-        }
-        etats = await self._effective_states()
-
-        def etat(key: str) -> str:
-            value = states.get(key)
-            if value not in {"enabled", "disabled", "empty", "not_configured"}:
-                detail = str(etats.get(key, "")).upper()
-                value = "disabled" if "INACTIF" in detail else (
-                    "enabled" if "ACTIF" in detail else "not_configured"
-                )
-            text = {
-                "enabled": ("Enabled", "Actif"),
-                "disabled": ("Disabled", "Désactivé"),
-                "empty": ("Needs setup", "À configurer"),
-                "not_configured": ("Needs setup", "À configurer"),
-            }[value]
-            return text[0] if english else text[1]
-
-        options = [
-            discord.SelectOption(
-                label=(
-                    name_en.get(key, CATEGORY_META[key][1]) if english
-                    else CATEGORY_META[key][1]
-                )[:100],
-                value=key,
-                description=(
-                    etat(key) + " · " +
-                    (language_runtime.english_ui_text(
-                        CATEGORY_META[key][2], setup=True,
-                    ) or CATEGORY_META[key][2] if english else CATEGORY_META[key][2])
-                )[:100],
-                emoji=icons.partiel(icons_par_module.get(key, ""))
-                      or CATEGORY_META[key][0],
-            )
-            for key in CATEGORY_ORDER if key in CATEGORY_META
+        lignes = [
+            ("### 🛡️ Protection" if english else "### 🛡️ Protection du serveur"),
+            f"{barre}  **{protegees}/{total}** · {verdict}",
         ]
+        if a_terminer:
+            noms = ", ".join(self._nom_cle(key, english) for key in a_terminer)
+            lignes.append(("-# To finish: " if english else "-# À terminer : ") + noms)
+        container.add_item(discord.ui.TextDisplay("\n".join(lignes)))
+        container.add_item(discord.ui.Separator())
 
-        # Les logs Soundboard se configurent depuis Logs. L'ancien assistant
-        # guidé doublonnait les pages et les écrans déjà configurés.
-        # Les options secondaires deviennent des fonctions explicites.
-        extras = (
-            ("rules_access", "Règlement et vérification", "note",
-             "Règles, CAPTCHA, rôles et accès aux salons"),
-            ("suggestions", "Suggestions", "info",
-             "Salon, votes et modération des idées"),
-            ("embeds", "Créer un embed", "image",
-             "Texte, images, couleurs et boutons"),
-            ("custom_commands", "Commandes personnalisées", "tools",
-             "Créer ses propres commandes"),
-            ("prefixes", "Préfixes", "settings",
-             "Préfixes officiels et personnalisés, séparés"),
-            ("snippets", "Messages enregistrés", "message",
-             "Préparer des messages à réutiliser"),
-            ("recurring_messages", "Messages programmés", "calendar",
-             "Réglages des publications automatiques"),
-            ("automation", "Automatisations", "sync",
-             "Règles et actions automatiques"),
-            ("language", "Langue du serveur", "settings",
-             "Français ou English"),
-        )
-        extras_en = {
-            "rules_access": ("Rules & verification", "Rules, CAPTCHA, roles and channel access"),
-            "suggestions": ("Suggestions", "Channel, voting and moderation"),
-            "embeds": ("Embed builder", "Text, images, colours and buttons"),
-            "custom_commands": ("Custom commands", "Create your own commands"),
-            "prefixes": ("Prefixes", "Separate official and custom prefixes"),
-            "snippets": ("Saved messages", "Prepare reusable messages"),
-            "recurring_messages": ("Scheduled messages", "Automatic posts"),
-            "automation": ("Automations", "Automation rules and actions"),
-            "language": ("Server language", "French or English"),
-        }
-        options.extend(
-            discord.SelectOption(
-                label=(extras_en[key][0] if english else label),
-                value=key,
-                description=(extras_en[key][1] if english else description),
-                emoji=icons.partiel(icone),
+        boutons = []
+        for cle, nom_fr, nom_en, icone, _desc_fr, _desc_en, _pages in SECTIONS:
+            bouton = discord.ui.Button(
+                label=nom_en if english else nom_fr,
+                style=discord.ButtonStyle.secondary,
+                emoji=icons.partiel(icone) or None,
             )
-            for key, label, icone, description in extras
-        )
-        assert len(options) <= 25, "Discord limite les menus à 25 choix."
-        choice = discord.ui.Select(
-            placeholder=("Choose a module or feature…" if english else "Choisir un module ou une fonction…"),
-            options=options,
+
+            async def ouvrir_section(interaction: discord.Interaction, _cle=cle):
+                self._section = _cle
+                self.page = f"section:{_cle}"
+                self.backend = self._new_backend(None)
+                await self.refresh(interaction)
+
+            bouton.callback = ouvrir_section
+            boutons.append(bouton)
+        container.add_item(discord.ui.ActionRow(*boutons[:3]))
+        container.add_item(discord.ui.ActionRow(*boutons[3:]))
+        container.add_item(discord.ui.Separator())
+
+        tout = discord.ui.Button(
+            label=(
+                ("All protections on" if english else "Toutes les protections sont actives")
+                if protegees == total
+                else ("Turn on every protection" if english else "Activer toutes les protections")
+            ),
+            style=discord.ButtonStyle.success,
+            emoji=icons.partiel("security") or None,
+            disabled=protegees == total,
         )
 
-        async def ouvrir(interaction: discord.Interaction):
-            selected = choice.values[0]
-            if selected == "embeds":
-                return await self._open_embed_builder(interaction)
-            if selected == "language":
-                from .language_official_bridge import OfficialLanguageSelect
-                panneau = discord.ui.LayoutView(timeout=180)
-                bloc = discord.ui.Container(accent_colour=0x6C57CC)
-                v73.poser_banniere(bloc)
-                bloc.add_item(discord.ui.TextDisplay(
-                    "## Server language" if english else "## Langue du serveur"
-                ))
-                bloc.add_item(discord.ui.Separator())
-                bloc.add_item(discord.ui.ActionRow(OfficialLanguageSelect(self.backend)))
-                panneau.add_item(bloc)
-                return await interaction.response.send_message(
-                    **v73.joindre_banniere({"view": panneau}), ephemeral=True,
-                )
-            self.page = selected
-            self.backend = self._new_backend(self.page)
-            await self.refresh(interaction)
+        async def tout_activer(interaction: discord.Interaction):
+            await securite_simple._activer(self, interaction)
 
-        choice.callback = ouvrir
-        container.add_item(discord.ui.ActionRow(choice))
+        tout.callback = tout_activer
         close = discord.ui.Button(
             label="Close" if english else "Fermer",
             style=discord.ButtonStyle.secondary,
             emoji=icons.partiel("close"),
         )
+
         async def fermer(interaction: discord.Interaction):
             await self._close(interaction)
+
         close.callback = fermer
-        container.add_item(discord.ui.ActionRow(close))
+        container.add_item(discord.ui.ActionRow(tout, close))
         self.add_item(container)
+
+    def _nom_cle(self, cle: str, english: bool) -> str:
+        if cle in EXTRAS:
+            return EXTRAS[cle][2] if english else EXTRAS[cle][0]
+        nom = CATEGORY_META.get(cle, ("", cle))[1]
+        return NOMS_EN.get(cle, nom) if english else nom
+
+    async def _build_section(self, cle: str) -> None:
+        """Une section : ses réglages, chacun avec son état et un bouton Ouvrir."""
+        from utils import sentrix_emojis as icons
+
+        section = next((s for s in SECTIONS if s[0] == cle), None)
+        if section is None:
+            self.page = None
+            return await self._build_home()
+        _cle, nom_fr, nom_en, icone, desc_fr, desc_en, pages = section
+        english = (
+            await language_runtime.get_language(self.bot, self.guild.id)
+            == language_runtime.LANG_EN
+        )
+        states = await setup_ui.module_switch_states(self.bot, self.guild.id)
+        etats_detail = await self._effective_states()
+
+        def etat(page: str) -> str:
+            value = states.get(page)
+            if value is None and page in etats_detail:
+                detail = str(etats_detail.get(page, "")).upper()
+                value = "disabled" if "INACTIF" in detail else ("enabled" if "ACTIF" in detail else "not_configured")
+            if value is None:
+                return ""
+            return {
+                "enabled": ("🟢 Enabled", "🟢 Actif"),
+                "disabled": ("⚪ Disabled", "⚪ Désactivé"),
+                "empty": ("🟠 To set up", "🟠 À configurer"),
+                "not_configured": ("🟠 To set up", "🟠 À configurer"),
+            }[value][0 if english else 1]
+
+        container = discord.ui.Container(accent_colour=0x6C57CC)
+        v73.poser_banniere(container)
+        container.add_item(discord.ui.TextDisplay(
+            f"# {icons.titre(icone, nom_en if english else nom_fr)}\n"
+            + (desc_en if english else desc_fr)
+        ))
+        container.add_item(discord.ui.Separator())
+        for page in pages:
+            if page in EXTRAS:
+                description = EXTRAS[page][3] if english else EXTRAS[page][1]
+            else:
+                description = CATEGORY_META.get(page, ("", page, ""))[2]
+                if english:
+                    description = language_runtime.english_ui_text(description, setup=True) or description
+            statut = etat(page)
+            texte = f"**{self._nom_cle(page, english)}**" + (f" · {statut}" if statut else "")
+            texte += f"\n-# {description}"
+            ouvrir = discord.ui.Button(label="Open" if english else "Ouvrir", style=discord.ButtonStyle.primary)
+
+            async def aller(interaction: discord.Interaction, _page=page):
+                await self._ouvrir_page(interaction, _page, english)
+
+            ouvrir.callback = aller
+            container.add_item(discord.ui.Section(discord.ui.TextDisplay(texte), accessory=ouvrir))
+
+        retour = discord.ui.Button(label="Back" if english else "Retour", style=discord.ButtonStyle.secondary, emoji="↩️")
+
+        async def accueil(interaction: discord.Interaction):
+            self._section = None
+            self.page = None
+            self.backend = self._new_backend(None)
+            await self.refresh(interaction)
+
+        retour.callback = accueil
+        fermer = discord.ui.Button(label="Close" if english else "Fermer", style=discord.ButtonStyle.secondary)
+
+        async def clore(interaction: discord.Interaction):
+            await self._close(interaction)
+
+        fermer.callback = clore
+        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.ActionRow(retour, fermer))
+        self.add_item(container)
+
+    async def _ouvrir_page(self, interaction: discord.Interaction, selected: str, english: bool) -> None:
+        """Ouvre un réglage, avec les deux cas particuliers de l'ancien menu."""
+        if selected == "embeds":
+            return await self._open_embed_builder(interaction)
+        if selected == "language":
+            from .language_official_bridge import OfficialLanguageSelect
+            panneau = discord.ui.LayoutView(timeout=180)
+            bloc = discord.ui.Container(accent_colour=0x6C57CC)
+            v73.poser_banniere(bloc)
+            bloc.add_item(discord.ui.TextDisplay(
+                "## Server language" if english else "## Langue du serveur"
+            ))
+            bloc.add_item(discord.ui.Separator())
+            bloc.add_item(discord.ui.ActionRow(OfficialLanguageSelect(self.backend)))
+            panneau.add_item(bloc)
+            return await interaction.response.send_message(
+                **v73.joindre_banniere({"view": panneau}), ephemeral=True,
+            )
+        self.page = selected
+        self.backend = self._new_backend(self.page)
+        await self.refresh(interaction)
 
     async def _build_home_complet(self) -> None:
         """Ancienne vue d'ensemble (toutes les catégories) — derrière « Paramètres avancés »."""
@@ -647,6 +714,8 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         self.add_item(container)
 
     async def _build_page(self, page: str) -> None:
+        if page.startswith("section:"):
+            return await self._build_section(page.split(":", 1)[1])
         if page in {"welcome", "goodbye"}:
             from .complete_welcome_setup import build_welcome_page
             return await build_welcome_page(self, page)
@@ -1346,7 +1415,9 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         close = discord.ui.Button(label="Fermer", style=discord.ButtonStyle.danger)
 
         async def go_back(interaction: discord.Interaction):
-            self.page = None
+            # Ouverte depuis une section : on y revient, pas à l'accueil.
+            section = getattr(self, "_section", None)
+            self.page = f"section:{section}" if section else None
             self.backend = self._new_backend(None)
             await self.refresh(interaction)
 

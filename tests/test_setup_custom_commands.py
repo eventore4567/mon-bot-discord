@@ -18,8 +18,9 @@ def test_custom_commands_are_no_longer_published_as_slash():
 
 def test_custom_setup_page_registered():
     text = (ROOT / "cogs/setup_experience_v74.py").read_text(encoding="utf-8")
-    # Option de l'unique menu de l'accueil (liste des fonctions secondaires).
-    assert '("custom_commands", "Commandes personnalisées"' in text
+    # 22/11/2026 : les fonctions secondaires sont décrites dans EXTRAS et rangées
+    # dans la section « Outils », au lieu d'une option du menu unique.
+    assert '"custom_commands": ("Commandes personnalisées"' in text
     assert 'if page == "custom_commands":' in text
     assert "setup_custom_commands.build_page(self)" in text
 

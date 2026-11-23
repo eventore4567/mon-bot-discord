@@ -53,12 +53,11 @@ async def main() -> int:
     bot = await h.boot(quiet=True)
     guild = await h.setup_world(bot)
 
-    # 1 — L'accueil du /setup ouvre la page Suggestions.
-    home = v74.SentriXSetupV74(bot, guild, h.ADMIN_ID)
-    await home.prepare()
-    menu = control(home, lambda i: isinstance(i, discord.ui.Select)
-                   and any(o.value == "suggestions" for o in getattr(i, "options", [])))
-    check(menu is not None, "l'accueil du /setup propose « Suggestions »")
+    # 1 — Le /setup mène à la page Suggestions. 22/11/2026 : plus de menu unique
+    # sur l'accueil ; Suggestions est rangée dans la section « Communauté ».
+    section = next((s for s in v74.SECTIONS if "suggestions" in s[6]), None)
+    check(section is not None and section[0] == "communaute",
+          "le /setup propose « Suggestions » (section Communauté)", str(section and section[0]))
 
     # 2 — Page vierge : non configurée, publication refusée avec une raison.
     view = await setup_page(bot, guild, "suggestions")

@@ -20,9 +20,11 @@ def test_setup_private_interactions_and_short_prefix_notice():
 def test_one_select_setup_home_does_not_toggle_modules():
     s = source("cogs/setup_experience_v74.py")
     a = s.index("    async def _build_home(self)")
-    b = s.index("    async def _build_home_complet(self)", a)
+    b = s.index("    def _nom_cle(self", a)
     home = s[a:b]
-    assert home.count("discord.ui.Select(") == 1
+    # 22/11/2026 : « refais tout le setup, plus simple ». L'accueil n'a plus le menu
+    # unique de 22 entrées : six sections (SECTIONS) mènent aux mêmes pages.
+    assert "discord.ui.Select(" not in home
     assert "ModuleSwitchSelect" not in home
     assert "toggle_module_switch" not in home
     # Bouton bilingue : « Fermer » en français, « Close » en anglais.

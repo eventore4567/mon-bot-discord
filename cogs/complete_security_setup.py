@@ -113,6 +113,9 @@ class SecurityLimitsModal(discord.ui.Modal):
 
 
 class SecurityCenterView(CompleteView):
+    def page_setup(self) -> str | None:
+        return "security"
+
     def __init__(self, bot, guild, owner_id, feature=None):
         super().__init__(bot, guild, owner_id)
         self.feature = feature

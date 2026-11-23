@@ -15,12 +15,16 @@ def _method(name):
 
 
 def test_single_menu_covers_essential_setup_and_advanced_options():
+    from cogs import setup_experience_v74 as v74
+
     home = _method("_build_home")
+    # 22/11/2026 : « refais tout le setup, plus simple ». L'accueil n'a plus le menu
+    # unique de 22 entrées : six sections (SECTIONS) mènent aux mêmes pages.
+    pages = {page for section in v74.SECTIONS for page in section[6]}
     for word in ("security", "logs", "tickets", "welcome", "rules_access",
                  "custom_commands", "recurring_messages", "automation", "embeds"):
-        assert word in home
-    assert home.count("discord.ui.Select(") == 1
-    assert "assert len(options) <= 25" in home
+        assert word in pages
+    assert "discord.ui.Select(" not in home
     assert "self.refresh(interaction)" in home
 
 
@@ -32,10 +36,14 @@ def test_opening_a_page_never_activates_module():
 
 
 def test_language_reachable_without_duplicate_guide():
+    from cogs import setup_experience_v74 as v74
+
     home = _method("_build_home")
     assert "Assistant guidé" not in home
-    assert "language" in home
-    assert "OfficialLanguageSelect" in home
+    # 22/11/2026 : la langue est dans la section « Système » ; son sélecteur
+    # s'ouvre depuis _ouvrir_page, commun à toutes les sections.
+    assert any("language" in section[6] for section in v74.SECTIONS)
+    assert "OfficialLanguageSelect" in _method("_ouvrir_page")
 
 
 def test_setup_is_private_and_prefix_does_not_expose_controls():
