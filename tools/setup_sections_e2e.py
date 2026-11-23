@@ -85,6 +85,28 @@ async def main() -> int:
     check(bouton(view, "Toutes les protections sont actives") is not None,
           "l'accueil indique ensuite que tout est actif")
 
+    # Section Communauté (étape 4) : fiches réelles + interrupteurs rapides.
+    from cogs import setup_v2_core as core_communaute
+
+    view.page = "section:communaute"
+    view.clear_items()
+    await view._build_page(view.page)
+    texte_communaute = "\n".join(i.content for i in view.walk_children() if isinstance(i, discord.ui.TextDisplay))
+    check(f"<#{h.CID}>" in texte_communaute and "Arrivée" in texte_communaute,
+          "la section Communauté affiche les vrais salons et rôles", texte_communaute[:160])
+    await cliquer(bot, bouton(view, "Bienvenue : activé"))
+    check(not await core_communaute.module_enabled(bot, guild.id, "welcome") and view.page == "section:communaute",
+          "l'interrupteur coupe l'accueil, en base, sans quitter la section")
+    await cliquer(bot, bouton(view, "Bienvenue : désactivé"))
+    check(await core_communaute.module_enabled(bot, guild.id, "welcome"), "un second clic le rallume")
+    await bot.db.set_guild_config(guild.id, "goodbye_channel", None)
+    await core_communaute.set_module_enabled(bot, guild.id, "goodbye", False, actor_id=h.ADMIN_ID)
+    view.clear_items()
+    await view._build_page(view.page)
+    await cliquer(bot, bouton(view, "Départs : désactivé"))
+    check(view.page == "goodbye" and not await core_communaute.module_enabled(bot, guild.id, "goodbye"),
+          "sans salon, l'interrupteur ouvre la page pour le choisir au lieu d'activer à vide", str(view.page))
+
     # Section Sécurité tout-en-un (étape 2) : un clic par protection, en base.
     async def antispam_actif() -> bool:
         return (await securite_simple.etats(view))["antispam"]

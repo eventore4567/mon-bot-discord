@@ -661,6 +661,8 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             return await self._build_section_securite(english)
         if cle == "moderation":
             return await self._build_section_moderation(english)
+        if cle == "communaute":
+            return await self._build_section_communaute(english)
         states = await setup_ui.module_switch_states(self.bot, self.guild.id)
         etats_detail = await self._effective_states()
 
@@ -1065,6 +1067,150 @@ class SentriXSetupV74(v73.SentriXSetupV73):
                 await interaction.followup.send(message, ephemeral=True)
             except discord.HTTPException:
                 pass
+
+    async def _build_section_communaute(self, english: bool) -> None:
+        """Section Communauté (22/11/2026, étape 4 de la refonte).
+
+        Une fiche par réglage avec ses VRAIES informations (salon, format, rôles,
+        sources suivies) au lieu d'un simple « Actif », et un interrupteur rapide
+        pour l'accueil et les départs. Aucun sélecteur n'est recopié ici : chaque
+        réglage ne se change qu'à un endroit (« il y a des doublons »).
+        """
+        from services import suggestions as suggestions_service
+        from utils import sentrix_emojis as icons, welcome_autoroles
+        from . import setup_v2_completion as engine
+
+        t = (lambda fr, en: en) if english else (lambda fr, en: fr)
+        conf = await self.bot.db.get_guild_config(self.guild.id)
+
+        def valeur(cle: str):
+            try:
+                return conf[cle] if conf is not None else None
+            except (KeyError, IndexError, TypeError):
+                return None
+
+        def salon(identifiant) -> str:
+            canal = self.guild.get_channel(int(identifiant)) if identifiant else None
+            return canal.mention if canal else t("aucun salon", "no channel")
+
+        def role(identifiant) -> str:
+            objet = self.guild.get_role(int(identifiant)) if identifiant else None
+            return objet.mention if objet else t("aucun", "none")
+
+        container = discord.ui.Container(accent_colour=0x6C57CC)
+        v73.poser_banniere(container)
+        container.add_item(discord.ui.TextDisplay(
+            f"# {icons.titre('member_join', t('Communauté', 'Community'))}\n"
+            + t("Accueil, départs, rôles, suggestions et notifications.",
+                "Welcome, goodbye, roles, suggestions and notifications.")
+        ))
+        container.add_item(discord.ui.Separator())
+
+        def fiche(titre: str, texte: str, page: str) -> None:
+            ouvrir = discord.ui.Button(label=t("Ouvrir", "Open"), style=discord.ButtonStyle.secondary)
+
+            async def aller(interaction: discord.Interaction, _page=page):
+                await self._ouvrir_page(interaction, _page, english)
+
+            ouvrir.callback = aller
+            container.add_item(discord.ui.Section(discord.ui.TextDisplay(f"**{titre}**\n{texte}"), accessory=ouvrir))
+
+        try:
+            presentation = await engine._welcome_presentation(self.bot, self.guild.id)
+        except Exception:  # noqa: BLE001 — une fiche ne doit jamais casser la section
+            presentation = {}
+        interrupteurs = []
+        for kind, nom_fr, nom_en, modekey in (
+            ("welcome", "Bienvenue", "Welcome", "mode"),
+            ("goodbye", "Départs", "Goodbye", "goodbye_mode"),
+        ):
+            actif = await core.module_enabled(self.bot, self.guild.id, kind)
+            canal_id = valeur(kind + "_channel")
+            canal = self.guild.get_channel(int(canal_id)) if canal_id else None
+            format_ = t("texte simple", "plain text") if presentation.get(modekey) == "text" else t("carte SentriX", "SentriX card")
+            fiche(
+                f"{'👋' if kind == 'welcome' else '🚪'} {t(nom_fr, nom_en)}",
+                ("🟢 " + t("Actif", "On") if actif else "⚪ " + t("Désactivé", "Off"))
+                + f" · {salon(canal_id)} · {format_}",
+                kind,
+            )
+            bouton = discord.ui.Button(
+                label=f"{t(nom_fr, nom_en)} : {t('activé', 'on') if actif else t('désactivé', 'off')}",
+                style=discord.ButtonStyle.success if actif else discord.ButtonStyle.secondary,
+            )
+
+            async def basculer(interaction: discord.Interaction, _kind=kind, _actif=actif, _canal=canal):
+                if not _actif and _canal is None:
+                    # Pas de salon : on ouvre la page pour le choisir, au lieu d'un refus.
+                    return await self._ouvrir_page(interaction, _kind, english)
+                if not interaction.response.is_done():
+                    await interaction.response.defer()
+                await core.set_module_enabled(
+                    self.bot, self.guild.id, _kind, not _actif, actor_id=interaction.user.id,
+                )
+                await self.refresh(interaction)
+
+            bouton.callback = basculer
+            interrupteurs.append(bouton)
+
+        arrivee = await welcome_autoroles.configured_ids(self.bot, self.guild.id)
+        fiche(
+            f"🎭 {t('Rôles', 'Roles')}",
+            t("Arrivée : ", "Arrival: ") + (" ".join(role(i) for i in arrivee) or t("aucun", "none"))
+            + " · " + t("Vérification : ", "Verification: ") + role(valeur("verify_role"))
+            + "\n-# " + t("Avertissement : ", "Warning: ") + role(valeur("warn_role"))
+            + " · " + t("Mute : ", "Mute: ") + role(valeur("mute_role")),
+            "roles",
+        )
+        try:
+            reglages = await suggestions_service.get_settings(self.bot.db, self.guild.id)
+            texte_suggestions = (
+                "🟢 " + salon(reglages.channel_id)
+                + (" · " + t("anonymes", "anonymous") if reglages.anonymous else "")
+                + (" · " + t("fils de discussion", "threads") if reglages.threads else "")
+            ) if reglages.configured else "🟠 " + t("aucun salon choisi", "no channel chosen")
+        except Exception:  # noqa: BLE001
+            texte_suggestions = "🟠 " + t("à configurer", "to set up")
+        fiche(f"💡 {t('Suggestions', 'Suggestions')}", texte_suggestions, "suggestions")
+        try:
+            row = await self.bot.db.fetchone(
+                "SELECT COUNT(*) AS n FROM social_notifications WHERE guild_id=? AND enabled=1",
+                (self.guild.id,),
+            )
+            sources = int(row["n"] if row else 0)
+        except Exception:  # noqa: BLE001 — table absente : aucune source
+            sources = 0
+        fiche(
+            f"🔔 {t('Notifications', 'Notifications')}",
+            (
+                t(f"🟢 {sources} source(s) suivie(s) (YouTube, Twitch, TikTok…)",
+                  f"🟢 {sources} source(s) followed (YouTube, Twitch, TikTok…)")
+                if sources else "⚪ " + t("aucune source suivie", "no source followed")
+            ),
+            "notifications",
+        )
+
+        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.ActionRow(*interrupteurs))
+
+        retour = discord.ui.Button(label=t("Retour", "Back"), style=discord.ButtonStyle.secondary, emoji="↩️")
+
+        async def accueil(interaction: discord.Interaction):
+            self._section = None
+            self.page = None
+            self.backend = self._new_backend(None)
+            await self.refresh(interaction)
+
+        retour.callback = accueil
+        fermer = discord.ui.Button(label=t("Fermer", "Close"), style=discord.ButtonStyle.secondary)
+
+        async def clore(interaction: discord.Interaction):
+            await self._close(interaction)
+
+        fermer.callback = clore
+        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.ActionRow(retour, fermer))
+        self.add_item(container)
 
     async def _ouvrir_page(self, interaction: discord.Interaction, selected: str, english: bool) -> None:
         """Ouvre un réglage, avec les deux cas particuliers de l'ancien menu."""
