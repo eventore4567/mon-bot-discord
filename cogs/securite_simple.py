@@ -40,12 +40,28 @@ PROTECTION_COURTE = (
 )
 
 
+async def _module_securite_actif(view) -> bool:
+    from cogs import setup_v2_core as core
+
+    try:
+        return bool(await core.module_enabled(view.bot, view.guild.id, "security"))
+    except Exception:  # noqa: BLE001 — illisible : on ne prétend pas protéger
+        return False
+
+
 async def etats(view) -> dict[str, bool]:
-    """État réel de chaque protection recommandée (même lecture que l'écran complet)."""
+    """État EFFECTIF de chaque protection recommandée.
+
+    Revue Codex (PR #714) : module Sécurité coupé, setup_v2_core neutralise toutes
+    les protections (get_automod_cached les met à 0), mais cette lecture ne
+    regardait que leurs interrupteurs : l'accueil affichait « 8/8, serveur
+    protégé » sur un serveur sans aucune protection.
+    """
     from cogs import setup_v2_ui as policy
 
+    module = await _module_securite_actif(view)
     return {
-        cle: (await policy._security_center_state(view.bot, view.guild.id, cle))[0]
+        cle: module and (await policy._security_center_state(view.bot, view.guild.id, cle))[0]
         for cle in RECOMMANDEES
     }
 
@@ -83,6 +99,12 @@ async def activer_recommandees(view) -> list[str]:
         except Exception:  # noqa: BLE001 — une protection illisible est traitée comme coupée
             actuels[cle] = False
     a_activer = [cle for cle in cibles if not actuels[cle]]
+    if not await _module_securite_actif(view):
+        # Module coupé : sans lui, aucun interrupteur n'a d'effet.
+        from cogs import setup_v2_core as core
+
+        auteur = getattr(view, "author_id", None) or getattr(view, "owner_id", None)
+        await core.set_module_enabled(view.bot, view.guild.id, "security", True, actor_id=auteur)
     if not a_activer:
         return []
     await view.bot.db.execute(

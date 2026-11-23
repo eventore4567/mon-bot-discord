@@ -36,6 +36,19 @@ class _Db:
             self.valeurs["antilink_strict"] = int(valeur)
 
 
+@pytest.fixture(autouse=True)
+def _module_securite_actif(monkeypatch):
+    """Ces tests portent sur les interrupteurs, module Sécurité allumé.
+
+    22/11/2026 (revue Codex, PR #714) : l'état lu est désormais l'état EFFECTIF,
+    module compris ; module coupé, voir les deux derniers tests de ce fichier.
+    """
+    async def actif(view):
+        return True
+
+    monkeypatch.setattr(securite_simple, "_module_securite_actif", actif)
+
+
 def _view(db, actifs=()):
     cog = SimpleNamespace(automod_cache={1: {}})
     return SimpleNamespace(
@@ -143,3 +156,36 @@ def test_plus_aucune_commande_pour_ca():
         contenu = io.open(registre, encoding="utf-8").read()
         assert "tout-securiser" not in contenu, registre
         assert "admin-epargne" not in contenu, registre
+
+
+def test_module_securite_coupe_aucune_protection_n_est_annoncee(monkeypatch, _etat_lu):
+    """Revue Codex (PR #714) : module coupé, setup_v2_core neutralise tout ;
+    l'accueil ne doit pas annoncer « serveur protégé »."""
+    import asyncio
+
+    async def coupe(view):
+        return False
+
+    monkeypatch.setattr(securite_simple, "_module_securite_actif", coupe)
+    _etat_lu.actifs = set(securite_simple.RECOMMANDEES)  # tous les interrupteurs allumés
+    etats = asyncio.run(securite_simple.etats(_view(_Db(), actifs=securite_simple.RECOMMANDEES)))
+    assert not any(etats.values())
+
+
+def test_activer_rallume_le_module_securite_coupe(monkeypatch, _etat_lu):
+    import asyncio
+
+    from cogs import setup_v2_core as core
+
+    async def coupe(view):
+        return False
+
+    appels = []
+
+    async def rallumer(bot, guild_id, module, enabled, *, actor_id=None):
+        appels.append((module, enabled))
+
+    monkeypatch.setattr(securite_simple, "_module_securite_actif", coupe)
+    monkeypatch.setattr(core, "set_module_enabled", rallumer)
+    asyncio.run(securite_simple.activer_recommandees(_view(_Db(), actifs=securite_simple.RECOMMANDEES)))
+    assert appels == [("security", True)]
