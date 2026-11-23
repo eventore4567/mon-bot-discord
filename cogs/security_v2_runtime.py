@@ -684,28 +684,8 @@ async def _write_incident(bot: commands.Bot, guild: discord.Guild, actor_id: int
     return incident_id
 
 
-def _patch_incidents(bot: commands.Bot) -> None:
-    automod = bot.get_cog("Automod")
-    if automod is None:
-        return
-    current = automod.punish_nuker
-    func = getattr(current, "__func__", current)
-    if getattr(func, "_sentrix_v2_incident_wrapper", False):
-        return
-
-    async def punish_with_incident(_self, guild: discord.Guild, actor_id: int, reason: str):
-        try:
-            result = await current(guild, actor_id, reason)
-        finally:
-            try:
-                await _write_incident(bot, guild, actor_id, reason)
-            except Exception:
-                logger.exception("Security V2 : impossible d'enregistrer l'incident.")
-        return result
-
-    punish_with_incident._sentrix_v2_incident_wrapper = True
-    automod.punish_nuker = MethodType(punish_with_incident, automod)
-    logger.info("Security V2 : journal d'incidents branché.")
+# 22/11/2026 : _patch_incidents enveloppait AutoMod.punish_nuker pour écrire
+# l'incident. punish_nuker appelle désormais _write_incident lui-même.
 
 
 async def _is_security_staff(ctx: commands.Context) -> bool:
@@ -844,7 +824,6 @@ async def _late_repatch(bot: commands.Bot) -> None:
         try:
             _patch_dynamic_counter(bot)
             _patch_rollback(bot)
-            _patch_incidents(bot)
             _install_commands(bot)
         except Exception:
             logger.exception("Security V2 : repatch différé incomplet.")
@@ -857,7 +836,6 @@ async def install(bot: commands.Bot) -> None:
         logger.info("Security V2 Runtime chargé.")
     _patch_dynamic_counter(bot)
     _patch_rollback(bot)
-    _patch_incidents(bot)
     _install_commands(bot)
     if not getattr(bot, "_sentrix_security_v2_repatch_task", False):
         bot._sentrix_security_v2_repatch_task = True

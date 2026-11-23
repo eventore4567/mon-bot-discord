@@ -561,33 +561,9 @@ class AntiNukeRollback(commands.Cog, name=_COG_NAME):
             return result
 
 
-def _patch_punishment(bot: commands.Bot) -> None:
-    """Fait exécuter le rollback juste avant la sanction anti-nuke déjà existante."""
-    automod = bot.get_cog("Automod")
-    if automod is None or getattr(automod, "_sentrix_rollback_patched", False):
-        return
-
-    original_punish = automod.punish_nuker
-
-    async def punish_with_rollback(_self, guild: discord.Guild, actor_id: int, reason: str):
-        rollback = bot.get_cog(_COG_NAME)
-        # 04/11/2026 : quand l'anti-nuke V55 est chargé, c'est LUI qui restaure
-        # (sanction d'abord, puis rôles, catégories, salons, positions et permissions).
-        # Restaurer ici aussi recréait chaque salon une seconde fois : V55 ne
-        # retrouve pas l'ancien identifiant d'un salon déjà recréé par ce module.
-        if bot.get_cog("AntiNukeEmergencyV55") is not None:
-            rollback = None
-        if rollback is not None:
-            try:
-                await rollback.rollback_actor(guild, actor_id, reason)
-            except Exception:
-                # Une restauration partielle ne doit JAMAIS empêcher la sanction du nuker.
-                logger.exception("Rollback anti-nuke incomplet sur %s ; sanction maintenue.", guild.id)
-        return await original_punish(guild, actor_id, reason)
-
-    automod.punish_nuker = MethodType(punish_with_rollback, automod)
-    automod._sentrix_rollback_patched = True
-    logger.info("Rollback anti-nuke branché avant punish_nuker().")
+# 22/11/2026 : _patch_punishment remplaçait AutoMod.punish_nuker pour restaurer
+# avant de sanctionner. La restauration est désormais appelée par punish_nuker
+# lui-même (cogs/automod.py), après la sanction, et seulement si V55 est absent.
 
 
 async def install(bot: commands.Bot) -> None:
@@ -595,4 +571,3 @@ async def install(bot: commands.Bot) -> None:
     if bot.get_cog(_COG_NAME) is None:
         await bot.add_cog(AntiNukeRollback(bot))
         logger.info("Journal et restauration anti-nuke chargés.")
-    _patch_punishment(bot)

@@ -566,6 +566,9 @@ CREATE TABLE IF NOT EXISTS sentrix_contenu_escalade (
 # l'escalade « 1 avertissement puis mute » ; le seuil garde sa valeur, il ne
 # change pas de sens : six infractions sans une heure de calme.
 ABUS_PRIVILEGIE_SEUIL = 6
+#: Une rafale de suppressions déclenche l'anti-nuke depuis plusieurs écouteurs :
+#: une seule réponse par auteur dans cet intervalle (venait du module V55).
+NUKE_PUNISH_COOLDOWN_SECONDS = 20.0
 #: Une fois l'une de ces issues atteinte, un incident n'escalade plus message par message.
 SANCTIONS_D_INCIDENT = frozenset({"mute", "mute_failed", "derank"})
 
@@ -6459,6 +6462,91 @@ class AutoMod(commands.Cog, name="Automod"):
             logger.info("Alerte admin non sanctionné : MP du propriétaire fermé guild=%s", guild.id)
 
     async def punish_nuker(self, guild: discord.Guild, actor_id: int, reason: str):
+        """Réponse anti-nuke : UNE implémentation, en cinq temps.
+
+        22/11/2026. Cinq modules remplaçaient cette méthode. Observé sur le bot
+        booté, la chaîne réelle était :
+
+            security_v2 (journal) → rollback → v55 (verrou, ban par ID,
+            restauration) → AutoMod.punish_nuker   ← l'ORIGINAL
+
+        La protection d'owner_sanction_immunity (propriétaire du bot, liste
+        blanche revérifiée, refus de sanctionner si elle est illisible)
+        enveloppait la CLASSE après que les couches d'instance avaient capturé
+        la méthode : elle n'était jamais exécutée. Le garde « service primaire
+        seulement » de production_alert_noise_fix n'était pas installé — et
+        c'est heureux : la HA fonctionne par bail Redis, seul le leader est
+        connecté à Discord, et un standby devenu leader n'aurait plus sanctionné.
+
+        1. protection  2. une seule sanction par attaque  3. sanction
+        4. restauration du serveur  5. journal d'incident (toujours).
+        """
+        from utils.owner_access import is_bot_owner_id
+
+        actor_id = int(actor_id)
+        # 1 — Protection : revérifiée juste avant d'agir, quel que soit l'appelant.
+        if is_bot_owner_id(actor_id):
+            logger.warning("Anti-nuke ignoré pour le propriétaire vérifié de SentriX sur %s.", guild.id)
+            return None
+        cible = guild.get_member(actor_id) or discord.Object(id=actor_id)
+        try:
+            if await self.is_antinuke_exempt(guild, cible):
+                logger.warning("Anti-nuke ignoré pour un compte exempté guild=%s actor=%s.", guild.id, actor_id)
+                return None
+        except Exception:
+            # Une liste blanche illisible ne doit jamais mener à un ban irréversible.
+            logger.exception(
+                "Liste blanche anti-nuke illisible guild=%s actor=%s : sanction bloquée par sécurité.",
+                guild.id, actor_id,
+            )
+            return None
+
+        try:
+            # 2 — Une seule réponse par attaque : une rafale déclenche ce chemin
+            # depuis plusieurs écouteurs à la fois.
+            cle = (int(guild.id), actor_id)
+            verrous = self.__dict__.setdefault("_verrous_nuke", {})
+            verrou = verrous.setdefault(cle, asyncio.Lock())
+            async with verrou:
+                derniers = self.__dict__.setdefault("_derniere_sanction_nuke", {})
+                maintenant = time.monotonic()
+                if maintenant - derniers.get(cle, -1e9) < NUKE_PUNISH_COOLDOWN_SECONDS:
+                    return None
+                derniers[cle] = maintenant
+
+                # 3 — Sanction.
+                await self._sanctionner_nuker(guild, actor_id, reason)
+                try:
+                    self.nuke_tracker.reinitialiser(cle)
+                except Exception:
+                    logger.warning("Compteur anti-nuke non remis à zéro guild=%s.", guild.id, exc_info=True)
+
+                # 4 — Restauration, APRÈS le confinement. Le module V55 sait
+                # restaurer rôles, catégories, salons, positions et permissions ;
+                # le rollback historique ne sert qu'en son absence (les deux
+                # ensemble recréaient chaque salon deux fois, 04/11/2026).
+                restaurateur = self.bot.get_cog("AntiNukeEmergencyV55")
+                try:
+                    if restaurateur is not None:
+                        await restaurateur.restore_burst(guild, actor_id, reason)
+                    else:
+                        rollback = self.bot.get_cog("AntiNukeRollback")
+                        if rollback is not None:
+                            await rollback.rollback_actor(guild, actor_id, reason)
+                except Exception:
+                    # Une restauration partielle n'annule jamais la sanction.
+                    logger.exception("Restauration anti-nuke incomplète guild=%s actor=%s.", guild.id, actor_id)
+        finally:
+            # 5 — Journal d'incident de la sécurité V2, même si la sanction a échoué.
+            try:
+                from cogs import security_v2_runtime
+
+                await security_v2_runtime._write_incident(self.bot, guild, actor_id, reason)
+            except Exception:
+                logger.exception("Journal d'incident anti-nuke impossible guild=%s.", guild.id)
+
+    async def _sanctionner_nuker(self, guild: discord.Guild, actor_id: int, reason: str):
+        """La sanction elle-même : rôles à risque retirés, ban (même absent), replis."""
         member = guild.get_member(actor_id)
         action_taken = "aucune action possible (permissions insuffisantes)"
         if member:
@@ -6492,6 +6580,15 @@ class AutoMod(commands.Cog, name="Automod"):
                         else "rôles à risque retirés, mais impossible de le sanctionner davantage (permissions insuffisantes)"
                     )
                     await self._alerter_permission_manquante(guild, "hierarchie", membre=member)
+        else:
+            # L'auteur est déjà parti (ou n'a jamais été en cache) : un ban par
+            # identifiant l'empêche de revenir. Venait du module V55.
+            try:
+                await guild.ban(discord.Object(id=actor_id), reason=f"AutoMod anti-nuke : {reason}",
+                                delete_message_seconds=3600)
+                action_taken = "banni par identifiant (déjà parti du serveur)"
+            except (discord.Forbidden, discord.HTTPException):
+                logger.warning("Anti-nuke : ban par identifiant impossible guild=%s actor=%s.", guild.id, actor_id)
         echec = "impossible de le sanctionner" in str(action_taken)
         regle = f"Plus de {NUKE_ACTION_THRESHOLD - 1} actions destructrices en peu de temps"
         await self._journal_securite(

@@ -59,29 +59,10 @@ def _patch_primary_mutations(bot: commands.Bot) -> None:
     Cet installateur est rappelé après chaque extension. Si le rollback anti-nuke enveloppe
     ``punish_nuker`` plus tard pendant le boot, ce garde repasse donc au-dessus.
     """
-    automod = bot.get_cog("Automod")
-    if automod is not None:
-        current_punish = getattr(automod, "punish_nuker", None)
-        current_func = getattr(current_punish, "__func__", current_punish)
-        if current_punish is not None and not getattr(
-            current_func, "_sentrix_primary_mutation_guard", False
-        ):
-            async def primary_punish(_self, guild, actor_id, reason):
-                if not _is_primary_service():
-                    logger.warning(
-                        "Anti-nuke observé mais mutation ignorée sur le service secondaire %s "
-                        "(guild=%s, actor=%s).",
-                        os.getenv("RAILWAY_SERVICE_NAME") or "inconnu",
-                        getattr(guild, "id", "?"),
-                        actor_id,
-                    )
-                    return None
-                return await current_punish(guild, actor_id, reason)
-
-            primary_punish._sentrix_primary_mutation_guard = True
-            primary_punish._sentrix_original = current_punish
-            automod.punish_nuker = MethodType(primary_punish, automod)
-
+    # 22/11/2026 : ce garde enveloppait aussi AutoMod.punish_nuker. Il est retiré :
+    # la HA fonctionne par bail Redis (railway_ha_boot), seul le leader est
+    # connecté à Discord, et un standby devenu leader — qui ne porte pas le nom
+    # du service primaire — n'aurait plus sanctionné aucun nuke.
     rollback = bot.get_cog("AntiNukeRollback")
     if rollback is not None:
         current_context = getattr(rollback, "_antinuke_context", None)
