@@ -75,14 +75,18 @@ async def main():
 
     setup = SentriXSetupV74(bot, guild, h.ADMIN_ID)
     await setup.prepare()
-    await setup._build_home()
-    select = next(
-        item for item in setup.walk_children() if isinstance(item, discord.ui.Select)
+    # 22/11/2026 : l'accueil n'a plus de menu ; Niveaux et Économie sont dans la
+    # section « Engagement ». Même vérification : pas de doublon, pas d'ancienne
+    # entrée « Niveaux & économie ».
+    setup.clear_items()
+    setup.page = "section:engagement"
+    await setup._build_page(setup.page)
+    texte_section = "\n".join(
+        i.content for i in setup.walk_children() if isinstance(i, discord.ui.TextDisplay)
     )
-    labels = [opt.label for opt in select.options]
-    assert "Niveaux & économie" not in labels
-    assert labels.count("Économie") == 1
-    assert "Niveaux & réputation" in labels
+    assert "Niveaux & économie" not in texte_section
+    assert texte_section.count("**Économie**") == 1
+    assert "**Niveaux & réputation**" in texte_section
     for page in ("levels", "roles"):
         setup.clear_items()
         setup.page = page
