@@ -131,9 +131,29 @@ async def main() -> int:
     # Renfort anti-raid : trois spammeurs en même temps, puis un quatrième plus discret.
     since = len(h.CALLS)
     calm()
-    for _ in range(3):
-        await burst(5, isolated=False)
-    cards = h.visible_text([c for c in h.CALLS[since:] if c[1] == f"/channels/{h.LOGCID}/messages"])
+    # Les trois rafales sont entrelacées (vraiment simultanées) : avant, trois burst()
+    # successifs, chacun suivi de son settle (jusqu'à 6 s), étiraient la vague vers la
+    # fenêtre de RENFORT_FENETRE (30 s, horloge réelle).
+    spammeurs = [BASE_ID + next(counter) for _ in range(3)]
+    for i in range(5):
+        for author in spammeurs:
+            bot.dispatch("message", h.build_message(
+                bot, guild, f"message rapide numéro {i}", author_id=author,
+                author_name="m", author_roles=(h.MEMBER_ROLE_ID,)))
+        await asyncio.sleep(0.05)
+
+    def renfort_cards() -> str:
+        return h.visible_text([c for c in h.CALLS[since:] if c[1] == f"/channels/{h.LOGCID}/messages"])
+
+    # La carte part d'une tâche de fond qui lit la config des journaux en base AVANT
+    # tout appel HTTP : sous charge, ce silence dépassait l'« idle » de settle() et la
+    # carte était cherchée trop tôt (échec intermittent). On attend la carte elle-même,
+    # avec une échéance : si le renfort ne s'active pas, l'étape échoue toujours.
+    echeance = asyncio.get_running_loop().time() + 20
+    while "Renfort anti-raid activé" not in renfort_cards() and asyncio.get_running_loop().time() < echeance:
+        await asyncio.sleep(0.1)
+    await h.settle(idle=0.6, maximum=6)  # une éventuelle 2e annonce aurait le temps d'arriver
+    cards = renfort_cards()
     check("Renfort anti-raid activé" in cards and "4 messages en 5 s" in cards and "10 min" in cards,
           "trois spammeurs simultanés : carte « Renfort anti-raid activé » (stricte, 10 min)", cards[-400:])
     check(cards.count("Renfort anti-raid activé") == 1, "une seule annonce de renfort pour la vague")
