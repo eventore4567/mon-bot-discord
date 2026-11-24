@@ -201,11 +201,42 @@ def _message_quote(value: object, *, limit: int = 1500) -> str:
     """
     text = safe_text(_clean_lines(value) or "Contenu vide")
     text = discord.utils.escape_markdown(text)
-    text = text[:limit]
-    return "\n".join(
-        f"> {line}" if line else ">"
-        for line in text.splitlines()
-    )
+    text = couper_a_la_phrase(text, limit)
+    # 24/11/2026 : une ligne vide devenait « > » tout seul, que Discord affiche
+    # tel quel (une citation demande un contenu) : des « > » en trop entre
+    # chaque ligne du message. Les lignes vides consécutives n'en font qu'une.
+    lignes: list[str] = []
+    for line in text.splitlines():
+        if not line.strip():
+            if lignes and lignes[-1] == "> \u200b":
+                continue
+            lignes.append("> \u200b")
+        else:
+            lignes.append(f"> {line}")
+    while lignes and lignes[-1] == "> \u200b":
+        lignes.pop()
+    return "\n".join(lignes)
+
+
+def couper_a_la_phrase(text: str, limit: int) -> str:
+    """Coupe un texte trop long à la fin d'une phrase, jamais au milieu d'un mot.
+
+    24/11/2026 Jayden : « fais qu'il finisse sa phrase ». On remonte jusqu'à
+    la dernière fin de phrase (. ! ? ou retour à la ligne) dans la seconde
+    moitié de la limite ; à défaut, au dernier espace. « … » marque la coupure.
+    """
+    if len(text) <= limit:
+        return text
+    morceau = text[:limit]
+    plancher = limit // 2
+    fins = [morceau.rfind(p) + 1 for p in (". ", "! ", "? ", ".\n", "!\n", "?\n")]
+    fins.append(morceau.rfind("\n"))
+    fin = max(fins)
+    if fin < plancher:
+        fin = morceau.rfind(" ")
+    if fin < plancher:
+        fin = limit
+    return morceau[:fin].rstrip() + " …"
 
 
 def _strip_identity_prelude(description: str, identity_name: str | None, identity_id: int | None) -> str:

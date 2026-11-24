@@ -638,6 +638,8 @@ ADMIN_EVERYONE_SEUIL = 3
 #: le monde va retirer SentriX ». Même avec « Sanctionner aussi les admins », seuls
 #: ces filtres les visent ; majuscules, émojis, liens, invitations, insultes et pings
 #: répétés ne les concernent pas. Le spam d'un admin est supprimé avec un simple rappel.
+#: Fautes légères : le message est retiré, sans aucune sanction (24/11/2026).
+FILTRES_SANS_SANCTION = frozenset({"anticaps", "antiemoji"})
 FILTRES_POUR_ADMINS = frozenset({"antispam", "antimention", "antiscam", "antiinvite"})
 #: Nombre d'incidents en 10 minutes avant de sanctionner un admin (rôles à risque
 #: retirés : Discord interdit de le muter). Un membre, lui, est averti puis muté.
@@ -5417,6 +5419,10 @@ class AutoMod(commands.Cog, name="Automod"):
         # content_filter_policy) qui remplaçaient cette méthode ; elles sont ici.
         if message.guild is not None and await self._proprietaire_protege(message.guild, message.author):
             return None
+        # 24/11/2026 Jayden : « pour les majuscules et les trucs pas graves, ça
+        # supprime sans sanction ». Ni avertissement compté, ni mute, ni points.
+        if filter_name in FILTRES_SANS_SANCTION:
+            allow_escalation = False
         # 06/11/2026 : un admin a plus de marge qu'un membre (seuls spam, arnaque et
         # pub d'invitations le visent, avec des seuils plus hauts).
         try:

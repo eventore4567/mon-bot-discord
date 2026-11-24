@@ -56,6 +56,8 @@ ACTIONS = {
 SANCTIONS = frozenset({"mute", "warn", "kick", "ban", "derank"})
 
 #: Au-delà, le contenu complet part en fichier joint.
+# Champ d'embed : 1 024 caractères au plus. 24/11/2026 : la coupure tombe en
+# fin de phrase (utils/wide_logs.couper_a_la_phrase), plus au milieu d'un mot.
 LIMITE_CONTENU = 900
 
 _URL_RE = re.compile(r"\b((?:https?|hxxps?)://)([^\s/<>()]+)([^\s<>()]*)", re.IGNORECASE)
@@ -171,7 +173,9 @@ def champs(*, filter_name: str, reason: str, guild_id: int, channel_id: int, mes
     propre = neutraliser(contenu).strip()
     if propre:
         if len(propre) > LIMITE_CONTENU:
-            out["Contenu"] = (f"```\n{propre[:LIMITE_CONTENU].rstrip()}…\n```\n"
+            from utils.wide_logs import couper_a_la_phrase
+
+            out["Contenu"] = (f"```\n{couper_a_la_phrase(propre, LIMITE_CONTENU)}\n```\n"
                               f"-# Contenu complet ({len(propre)} caractères) dans le fichier joint.")
             nom = f"automod-{ref or message_id or ts}.txt"
             corps = (f"Incident AutoMod {ref}\nProtection : {protection}\nRègle : {regle}\n"
