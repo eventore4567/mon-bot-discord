@@ -169,7 +169,9 @@ def test_un_ping_en_masse_ne_prend_pas_deux_sanctions():
 
     assert "antimention" in SPAM_FILTERS, "le piège n'existe plus, le garde non plus"
     corps = SOURCE.split("async def _delete_and_warn", 1)[1].split("\n    def ", 1)[0]
-    assert "if filter_name in SPAM_FILTERS and not mute_immediat:" in corps
+    # 24/11/2026 : la condition a reçu une garde de plus (filtres sans
+    # sanction, revue Codex PR #723) ; l'exclusivité avec mute_immediat reste.
+    assert "if filter_name in SPAM_FILTERS and not mute_immediat" in corps
 
 
 @pytest.mark.asyncio
