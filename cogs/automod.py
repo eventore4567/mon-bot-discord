@@ -5334,14 +5334,18 @@ class AutoMod(commands.Cog, name="Automod"):
         # 06/11/2026 : un admin a plus de marge qu'un membre (seuls spam, arnaque et
         # pub d'invitations le visent, avec des seuils plus hauts).
         try:
-            auteur_admin = _is_discord_administrator(_as_member(message.author, message.guild))
+            auteur = _as_member(message.author, message.guild)
+        except Exception:  # noqa: BLE001 — serveur illisible : l'auteur brut fait foi
+            auteur = message.author
+        try:
+            auteur_admin = _is_discord_administrator(auteur)
         except Exception:  # noqa: BLE001 — auteur illisible : traité comme un membre
             auteur_admin = False
         # Protection de dernier recours pour les autres listeners AutoMod qui
         # appelleraient cette méthode directement, sans passer par le filtre.
         # Vérifiée AVANT la branche admin : un admin épargné du mode strict
         # n'entre jamais dans _incident_admin (retrait de rôles au 3e incident).
-        if await self._admin_exempte(_as_member(message.author, message.guild), message.guild.id):
+        if await self._admin_exempte(auteur, message.guild.id):
             return None
         if auteur_admin:
             return await self._incident_admin(message, reason, filter_name)
