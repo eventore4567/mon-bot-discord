@@ -70,6 +70,33 @@ _TERMES_ORDINAIRES_SAUF_SI_CIBLE = frozenset({"balle", "folle", "pelle", "pele"}
 _MIN_STANDALONE_LENGTH = 3
 
 
+# Contexte explicatif ou cité (« ça veut dire quoi le mot … »). Venait de la
+# couche sentrix_ops_features_v112, qui enveloppait match() au démarrage ;
+# réintégré ici le 24/11/2026 (refactorisation, étape 1).
+_CONTEXT_MARKERS = (
+    "ça veut dire", "ca veut dire", "signifie", "définition", "definition",
+    "exemple", "citation", "je cite", "le mot", "la phrase", "comment dire",
+    "comment écrire", "comment ecrire", "traduction", "translate", "quote",
+)
+
+
+def should_downgrade_dataset_match(text: str, kind: str) -> bool:
+    """Un mot isolé dans un contexte manifestement explicatif ou cité.
+
+    Les phrases et groupes précis ne sont jamais rétrogradés. La détection
+    devient « mot_contextuel » à 0,30 de confiance : sous le seuil d'action.
+    """
+    if kind != "mot":
+        return False
+    raw = str(text or "").casefold()
+    tokens = normalize_message(text).split()
+    if not tokens:
+        return False
+    quoted = any(marker in raw for marker in _CONTEXT_MARKERS)
+    code_like = "```" in raw or ("`" in raw and len(tokens) >= 4)
+    return (quoted or code_like) and len(tokens) >= 3
+
+
 @dataclass(frozen=True)
 class ModerationMatch:
     kind: str
@@ -446,5 +473,10 @@ class MultilingualModerationDataset:
             confidence, targeted, reason = _context_confidence(normalized, "mot")
             if token in _TERMES_ORDINAIRES_SAUF_SI_CIBLE and not _attribue_a_quelquun(normalized):
                 continue
+            if should_downgrade_dataset_match(text, "mot"):
+                return ModerationMatch(
+                    "mot_contextuel", min(confidence, 0.30), targeted,
+                    "contexte explicatif ou citation probable",
+                )
             return ModerationMatch("mot", confidence, targeted, reason)
         return None

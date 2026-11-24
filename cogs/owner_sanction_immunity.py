@@ -176,21 +176,8 @@ def install(bot: commands.Bot) -> None:
     if _INSTALLED:
         return
 
-    try:
-        from . import moderation
-        original_targetable = moderation.Moderation.check_targetable
-
-        async def check_targetable_protected(self, ctx, membre):
-            if is_bot_owner_id(getattr(membre, "id", None)):
-                await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Ce compte est protégé : SentriX ne peut pas le sanctionner.')))
-                return False
-            return await original_targetable(self, ctx, membre)
-
-        if not getattr(original_targetable, "_sentrix_owner_protection", False):
-            check_targetable_protected._sentrix_owner_protection = True
-            moderation.Moderation.check_targetable = check_targetable_protected
-    except Exception:
-        logger.exception("Protection propriétaire impossible sur le module de modération.")
+    # 24/11/2026 : la protection des propriétaires dans check_targetable vit
+    # désormais dans cogs/moderation.py (refactorisation, étape 1).
 
     try:
         from . import automod

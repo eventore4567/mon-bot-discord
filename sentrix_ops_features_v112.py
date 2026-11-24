@@ -16,36 +16,12 @@ from discord.ext import commands
 
 from utils import embeds
 from utils import sentrix_panels as panels
-from utils.moderation_dataset import ModerationMatch, normalize_message
+# Réintégré dans utils/moderation_dataset (refactorisation 24/11/2026) ;
+# ré-exporté pour les anciens imports.
+from utils.moderation_dataset import should_downgrade_dataset_match  # noqa: F401
 
 logger = logging.getLogger("bot.ops-v112")
-_CONTEXT_MARKERS = (
-    "ça veut dire", "ca veut dire", "signifie", "définition", "definition",
-    "exemple", "citation", "je cite", "le mot", "la phrase", "comment dire",
-    "comment écrire", "comment ecrire", "traduction", "translate", "quote",
-)
 _CRITICAL_COGS = ("Automod", "Security", "Configuration")
-
-
-def should_downgrade_dataset_match(text: str, kind: str) -> bool:
-    """Réduit seulement la SANCTION des détections ambiguës ; ne les ignore jamais.
-
-    Les phrases/groupes précis restent inchangés. Un mot isolé utilisé dans un contexte
-    manifestement explicatif/cité est supprimé mais n'entraîne plus automatiquement un
-    timeout de 10 minutes. Cela réduit les faux positifs sans transformer le filtre en
-    passoire.
-    """
-    if kind != "mot":
-        return False
-    raw = str(text or "").casefold()
-    normalized = normalize_message(text)
-    tokens = normalized.split()
-    if not tokens:
-        return False
-    quoted = any(marker in raw for marker in _CONTEXT_MARKERS)
-    code_like = "```" in raw or ("`" in raw and len(tokens) >= 4)
-    explanatory = quoted or code_like
-    return explanatory and len(tokens) >= 3
 
 
 async def build_preview(ops, guild: discord.Guild, kind: str) -> tuple[str, list[tuple[str, str]]]:
@@ -142,44 +118,6 @@ async def _watchdog(bot, ops) -> None:
         logger.exception("Watchdog V112 interrompu.")
 
 
-def _patch_contextual_automod(bot, ops) -> None:
-    automod = bot.get_cog("Automod")
-    if automod is None:
-        return
-    dataset = getattr(automod, "moderation_dataset", None)
-    current_match = getattr(dataset, "match", None)
-    if callable(current_match) and not getattr(current_match, "_sentrix_v112", False):
-        def match_v112(text: str, _original=current_match):
-            result = _original(text)
-            if result is not None and should_downgrade_dataset_match(text, result.kind):
-                return ModerationMatch(
-                    "mot_contextuel",
-                    min(result.confidence, 0.30),
-                    result.targeted,
-                    "contexte explicatif ou citation probable",
-                )
-            return result
-        match_v112._sentrix_v112 = True
-        dataset.match = match_v112
-
-    current_timeout = getattr(automod, "_delete_and_timeout", None)
-    if callable(current_timeout) and not getattr(current_timeout, "_sentrix_v112", False):
-        async def delete_timeout_v112(message, reason, *, detection_kind, _original=current_timeout):
-            if detection_kind == "mot_contextuel":
-                await ops.bot.db.log_automod_action(
-                    message.guild.id, message.author.id, "multilingual_contextual",
-                    "downgrade", "Contexte explicatif détecté : timeout évité",
-                )
-                return await automod._delete_and_warn(
-                    message,
-                    "Contenu sensible détecté dans un contexte explicatif : message retiré sans timeout automatique.",
-                    "multilingual_contextual",
-                )
-            return await _original(message, reason, detection_kind=detection_kind)
-        delete_timeout_v112._sentrix_v112 = True
-        automod._delete_and_timeout = delete_timeout_v112
-
-
 def _add_manage_commands(bot, ops) -> None:
     manage = bot.get_command("manage")
     if not isinstance(manage, commands.Group):
@@ -269,7 +207,6 @@ async def _install_features(bot) -> None:
     ops = getattr(bot, "sentrix_ops", None)
     if ops is None:
         return
-    _patch_contextual_automod(bot, ops)
     _instrument_log_changes(bot, ops)
     _add_manage_commands(bot, ops)
     try:

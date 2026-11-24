@@ -36,7 +36,7 @@ def main() -> int:
         if re.search(r"(?m)^\s*@commands\.(?:command|hybrid_command|group)\b", text):
             errors.append("V2.2 déclare une nouvelle commande alors que cette phase doit uniquement améliorer l'existant")
         markers = (
-            "asyncio.wait_for", "AI_SETTINGS_TTL", "GAME_SETTINGS_TTL",
+            "AI_SETTINGS_TTL", "GAME_SETTINGS_TTL",
             "TICKET_BUTTON_SETTINGS_TTL", "PRAGMA busy_timeout=5000", '"new_commands": 0',
             "_ticket_create_locks", "await conn.commit()",
         )
@@ -64,6 +64,10 @@ def main() -> int:
         moderation = (ROOT / "cogs/moderation.py").read_text(encoding="utf-8")
         if "check_targetable" not in moderation:
             errors.append("invariant V2.2 absent: check_targetable (cogs/moderation.py)")
+        # 24/11/2026 : le MP de sanction borné (asyncio.wait_for, 2,5 s) a quitté
+        # sentrix_v22 pour Moderation._send_sanction_dm (refactorisation, étape 1).
+        if "asyncio.wait_for" not in moderation or "MP_SANCTION_DELAI_MAX" not in moderation:
+            errors.append("invariant V2.2 absent: MP de sanction borné (cogs/moderation.py)")
         for marker in ("guarded_unmute", "serial_warn", "reason_duration_wrapper"):
             if marker in text:
                 errors.append(f"V2.2 réintroduit un remplacement de callback de sanction: {marker}")

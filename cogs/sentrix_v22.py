@@ -133,19 +133,9 @@ class SentriXV22(commands.Cog):
         if moderation is None:
             return
 
-        original_dm = getattr(moderation, "_send_sanction_dm", None)
-        if original_dm is not None and not getattr(original_dm, "_sentrix_v22", False):
-            async def bounded_dm(this, ctx, target, action, reason, duration_seconds=None):
-                try:
-                    return await asyncio.wait_for(
-                        original_dm(ctx, target, action, clean_reason(reason), duration_seconds),
-                        timeout=2.5,
-                    )
-                except asyncio.TimeoutError:
-                    logger.info("V2.2 : MP de sanction expiré après 2.5 s (action=%s).", action)
-                    return False
-            bounded_dm._sentrix_v22 = True
-            moderation._send_sanction_dm = types.MethodType(bounded_dm, moderation)
+        # 24/11/2026 : le délai de 2,5 s et clean_reason vivent désormais dans
+        # Moderation._send_sanction_dm (refactorisation, étape 1).
+        return
 
     def _install_ticket_hardening(self):
         from . import tickets as tickets_module

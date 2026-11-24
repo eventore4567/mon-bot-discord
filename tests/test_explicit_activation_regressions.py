@@ -8,23 +8,38 @@ from cogs import setup_v2_core as core
 
 
 def test_security_off_masks_all_filters_and_preserves_saved_settings(monkeypatch):
+    # 24/11/2026 (refactorisation, étape 1) : la règle vivait dans un enrobage
+    # posé par core._patch_security ; AutoMod.get_automod_cached l'applique
+    # maintenant lui-même. Même vérification, sur la vraie méthode.
+    from cogs.automod import AutoMod
+
     async def scenario():
         saved = {key: 1 for key in ('antispam', 'antiinsult', 'antinuke', 'security_permissions', 'security_prune', 'security_vanity', 'join_gate', 'risk_engine')}
-        automod = SimpleNamespace(
-            is_automod_exempt=AsyncMock(return_value=False),
-            is_antinuke_exempt=AsyncMock(return_value=False),
-            get_automod_cached=AsyncMock(return_value=saved),
-        )
-        bot = SimpleNamespace(get_cog=lambda _: automod)
+        automod = AutoMod.__new__(AutoMod)
+        automod.bot = SimpleNamespace()
+        automod.automod_cache = {42: saved}
         enabled = AsyncMock(return_value=False)
         monkeypatch.setattr(core, 'module_enabled', enabled)
-        core._patch_security(bot)
         muted = await automod.get_automod_cached(42)
         assert muted['security_module_disabled'] is True
         assert all(muted[key] == 0 for key in saved)
         assert all(saved[key] == 1 for key in saved)
         enabled.return_value = True
         assert await automod.get_automod_cached(42) == saved
+    asyncio.run(scenario())
+
+
+def test_un_membre_de_confiance_est_exempte_sans_enrobage(monkeypatch):
+    from cogs.automod import AutoMod
+    import discord
+
+    async def scenario():
+        automod = AutoMod.__new__(AutoMod)
+        automod.bot = SimpleNamespace(user=SimpleNamespace(id=1))
+        monkeypatch.setattr(core, 'is_trusted', AsyncMock(return_value=True))
+        guild = SimpleNamespace(id=42, owner_id=9)
+        membre = discord.Object(id=77)
+        assert await automod.is_antinuke_exempt(guild, membre) is True
     asyncio.run(scenario())
 
 
@@ -89,4 +104,37 @@ def test_ai_requires_explicit_switch_and_can_be_enabled(tmp_path):
         finally:
             core.invalidate_module_cache()
             await db.close()
+    asyncio.run(scenario())
+
+
+def test_mp_de_sanction_borne_et_proprietaire_protege_sans_couche():
+    # 24/11/2026 (refactorisation, étape 1) : ces deux règles vivaient dans
+    # cogs/sentrix_v22 et cogs/owner_sanction_immunity ; Moderation les porte.
+    from cogs import moderation as mod
+
+    async def scenario():
+        cog = mod.Moderation.__new__(mod.Moderation)
+
+        async def lent(*_a, **_k):
+            await asyncio.sleep(10)
+            return True
+
+        cog._envoyer_mp_de_sanction = lent
+        mod.MP_SANCTION_DELAI_MAX, avant = 0.05, mod.MP_SANCTION_DELAI_MAX
+        try:
+            assert await cog._send_sanction_dm(SimpleNamespace(), SimpleNamespace(), "warn", "x") is False
+        finally:
+            mod.MP_SANCTION_DELAI_MAX = avant
+
+        from utils import owner_access
+        import utils.sentrix_panels as panels
+        envoye = AsyncMock()
+        orig_envoyer, orig_owner = panels.envoyer, owner_access.is_bot_owner_id
+        panels.envoyer = envoye
+        owner_access.is_bot_owner_id = lambda uid: uid == 4242
+        try:
+            assert await cog.check_targetable(SimpleNamespace(), SimpleNamespace(id=4242)) is False
+            envoye.assert_awaited_once()
+        finally:
+            panels.envoyer, owner_access.is_bot_owner_id = orig_envoyer, orig_owner
     asyncio.run(scenario())
