@@ -38,6 +38,10 @@ PROTECTION_MODULES = frozenset({"moderation", "security"})
 #: chaque réponse consomme la clé payante du bot.
 MEMBER_FEATURE_MODULES = frozenset({"economy", "levels"})
 DEFAULT_ON_MODULES = PROTECTION_MODULES | MEMBER_FEATURE_MODULES
+#: Toujours actifs, quel que soit le réglage enregistré. 24/11/2026 Jayden :
+#: « fait que on peut pas désactiver la modération ». Une ancienne ligne
+#: enabled=0 est ignorée : les serveurs où elle avait été coupée la retrouvent.
+ALWAYS_ON_MODULES = frozenset({"moderation"})
 CONFIGURABLE_MODULES = frozenset(MODULES) - DEFAULT_ON_MODULES
 
 #: Un module qui demande une ressource est actif dès qu'elle EXISTE : un panel de
@@ -58,6 +62,14 @@ MODULE_STATE_NOT_CONFIGURED = "not_configured"
 
 class ModuleSetupRequired(ValueError):
     """Activation refusée tant que les ressources obligatoires ne sont pas configurées."""
+
+
+class ModuleAlwaysOn(ModuleSetupRequired):
+    """Désactivation refusée : le module fait partie de ``ALWAYS_ON_MODULES``.
+
+    Hérite de ModuleSetupRequired pour que chaque appelant qui affiche déjà ce
+    refus (dashboard, /setup) montre le message au lieu d'une erreur 500.
+    """
 
 
 MODERATION_COMMANDS = frozenset({
@@ -259,7 +271,7 @@ async def module_row_value(bot: commands.Bot, guild_id: int, module: str) -> int
 
 
 async def module_enabled(bot: commands.Bot, guild_id: int, module: str) -> bool:
-    if module not in MODULES:
+    if module not in MODULES or module in ALWAYS_ON_MODULES:
         return True
     await ensure_schema(bot)
     value = await module_row_value(bot, guild_id, module)
@@ -294,7 +306,7 @@ async def module_state(bot: commands.Bot, guild_id: int, module: str) -> str:
     Une configuration absente n'est jamais présentée comme « activée » : c'est la
     différence entre « personne n'y a touché » et « quelqu'un l'a coupé ».
     """
-    if module not in MODULES:
+    if module not in MODULES or module in ALWAYS_ON_MODULES:
         return MODULE_STATE_ENABLED
     await ensure_schema(bot)
     value = await module_row_value(bot, guild_id, module)
@@ -519,6 +531,10 @@ async def set_module_enabled(
 ) -> None:
     if module not in MODULES:
         raise ValueError(f"module inconnu: {module}")
+    if module in ALWAYS_ON_MODULES and not enabled:
+        raise ModuleAlwaysOn(
+            "La modération ne peut pas être désactivée : elle reste toujours active pour protéger le serveur."
+        )
     await ensure_schema(bot)
     if enabled:
         issue = await module_activation_issue(bot, guild_id, module)

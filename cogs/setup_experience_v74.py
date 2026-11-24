@@ -2356,25 +2356,6 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         )
         container.add_item(discord.ui.Section(discord.ui.TextDisplay(badge_text), accessory=status))
 
-        toggle = discord.ui.Button(
-            label="Désactiver la modération" if enabled else "Activer la modération",
-            style=discord.ButtonStyle.danger if enabled else discord.ButtonStyle.success,
-        )
-
-        async def toggle_moderation(interaction: discord.Interaction):
-            if not interaction.response.is_done():
-                await interaction.response.defer()
-            await core.set_module_enabled(
-                self.bot,
-                self.guild.id,
-                "moderation",
-                not enabled,
-                actor_id=interaction.user.id,
-            )
-            await self.refresh(interaction)
-
-        toggle.callback = toggle_moderation
-        container.add_item(discord.ui.ActionRow(toggle))
         container.add_item(discord.ui.Separator())
         container.add_item(discord.ui.TextDisplay("### Configurer un rôle de modération existant"))
 
