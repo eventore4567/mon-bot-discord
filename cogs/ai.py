@@ -1624,8 +1624,17 @@ class Ai(commands.Cog, name="Ai"):
             if getattr(member, "bot", False):
                 await reply("Je ne mentionne pas un bot.")
                 return True
-            if not me.guild_permissions.send_messages:
-                await reply("Il me manque la permission **Envoyer des messages**.")
+            # Revue Codex (PR #719) : la permission EFFECTIVE du salon, pas celle du
+            # serveur — SentriX peut n'avoir le droit d'écrire que par une
+            # permission propre au salon (utils/channel_profiles en pose).
+            droits = message.channel.permissions_for(me)
+            peut_ecrire = (
+                droits.send_messages_in_threads
+                if isinstance(message.channel, discord.Thread)
+                else droits.send_messages
+            )
+            if not peut_ecrire:
+                await reply("Il me manque la permission **Envoyer des messages** dans ce salon.")
                 return True
             attente = self._attente_ping(guild.id, actor.id)
             if attente:

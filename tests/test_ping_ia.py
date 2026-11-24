@@ -51,11 +51,16 @@ def _cog():
     return cog
 
 
-def _message(envois):
-    canal = SimpleNamespace(send=AsyncMock(side_effect=lambda *a, **k: envois.append((a, k))))
+def _message(envois, *, ecrire_dans_le_salon=True, ecrire_sur_le_serveur=True):
+    canal = SimpleNamespace(
+        send=AsyncMock(side_effect=lambda *a, **k: envois.append((a, k))),
+        permissions_for=lambda membre: SimpleNamespace(
+            send_messages=ecrire_dans_le_salon, send_messages_in_threads=ecrire_dans_le_salon,
+        ),
+    )
     return SimpleNamespace(
         guild=SimpleNamespace(id=1, name="S", owner_id=9, me=SimpleNamespace(
-            guild_permissions=SimpleNamespace(send_messages=True))),
+            guild_permissions=SimpleNamespace(send_messages=ecrire_sur_le_serveur))),
         author=SimpleNamespace(id=42, display_name="Jay"),
         channel=canal,
         reply=AsyncMock(side_effect=lambda texte, **_: envois.append(((texte,), {}))),
@@ -119,3 +124,28 @@ def test_le_vrai_point_d_entree_atteint_le_ping(phrase):
     message = SimpleNamespace(guild=SimpleNamespace(id=1), channel=SimpleNamespace(id=2), author=SimpleNamespace(id=42))
     assert asyncio.run(cog._invoke_natural_command(message, phrase, "+")) is True
     assert cog._handle_parsed_action.await_args.args[1].intent == "member.ping"
+
+
+def test_la_permission_du_salon_compte_pas_seulement_celle_du_serveur():
+    """Revue Codex (PR #719) : droit d'écrire accordé par le salon seulement."""
+    envois = []
+    cog = _cog()
+    message = _message(envois, ecrire_dans_le_salon=True, ecrire_sur_le_serveur=False)
+    vortex = discord.Object(id=7)
+    vortex.mention, vortex.bot = "<@7>", False
+    asyncio.run(cog._execute_native_action(
+        message, ai_actions.ParsedAction("member.ping", {"target": "vortex"}, 99, "local"), member=vortex,
+    ))
+    assert str(envois[0][0][0]).startswith("<@7>")
+
+
+def test_salon_interdit_le_ping_est_refuse_avec_la_raison():
+    envois = []
+    cog = _cog()
+    message = _message(envois, ecrire_dans_le_salon=False, ecrire_sur_le_serveur=True)
+    vortex = discord.Object(id=7)
+    vortex.mention, vortex.bot = "<@7>", False
+    asyncio.run(cog._execute_native_action(
+        message, ai_actions.ParsedAction("member.ping", {"target": "vortex"}, 99, "local"), member=vortex,
+    ))
+    assert "dans ce salon" in envois[0][0][0]
