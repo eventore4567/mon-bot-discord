@@ -41,6 +41,11 @@ _AMBIGUOUS_STANDALONE_TERMS = frozenset({
     "fan", "guro", "meuf", "milf", "mama", "nsfw", "nude", "orgy", "pipi",
     "porn", "porno", "pot", "scat", "sex", "sexo", "sexy", "sm", "smut",
     "trio", "xx", "xxx", "yaoi", "zizi",
+    # 24/11/2026 : « ami » a fait supprimer une candidature staff (« si un ami
+    # à toi enfreint une règle ? »). Mots courants mesurés le même jour sur une
+    # liste de tchat français/espagnol/anglais : ami(e)(s), hard, del (« el
+    # coche del amigo »), got.
+    "ami", "amie", "amis", "amies", "hard", "del", "got",
 })
 
 # Mots parfaitement ordinaires en français que le dataset multilingue contient
