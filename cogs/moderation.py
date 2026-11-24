@@ -244,6 +244,10 @@ def _hierarchy_refusal_panel(message: str) -> discord.ui.LayoutView | None:
     return build_hierarchy_refusal(message)
 
 
+#: Un MP de sanction lent ne retarde jamais la sanction elle-même.
+MP_SANCTION_DELAI_MAX = 2.5
+
+
 class Moderation(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -737,7 +741,29 @@ class Moderation(commands.Cog):
         reason: str,
         duration_seconds: int | None = None,
     ) -> bool:
-        """Envoyer le MP configuré. Un MP fermé ne bloque jamais la sanction."""
+        """Envoyer le MP configuré. Un MP fermé ne bloque jamais la sanction.
+
+        Jamais plus de 2,5 s : un MP lent ne retarde pas la sanction. Le délai et
+        le nettoyage du motif venaient de la couche cogs/sentrix_v22 ; réintégrés
+        le 24/11/2026 (refactorisation, étape 1).
+        """
+        try:
+            return await asyncio.wait_for(
+                self._envoyer_mp_de_sanction(ctx, target, action, clean_reason(reason), duration_seconds),
+                timeout=MP_SANCTION_DELAI_MAX,
+            )
+        except asyncio.TimeoutError:
+            logger.info("MP de sanction expiré après %.1f s (action=%s).", MP_SANCTION_DELAI_MAX, action)
+            return False
+
+    async def _envoyer_mp_de_sanction(
+        self,
+        ctx: commands.Context,
+        target: discord.abc.User,
+        action: str,
+        reason: str,
+        duration_seconds: int | None = None,
+    ) -> bool:
         template = await self._get_sanction_dm_template(ctx.guild.id, action)
         if template is None:
             return False
@@ -841,6 +867,15 @@ class Moderation(commands.Cog):
         await self._show_sanction_dm_status(ctx)
 
     async def check_targetable(self, ctx: commands.Context, membre: discord.Member) -> bool:
+        # Les propriétaires de SentriX ne sont jamais sanctionnés par lui
+        # (venait de cogs/owner_sanction_immunity, réintégré le 24/11/2026).
+        from utils.owner_access import is_bot_owner_id
+
+        if is_bot_owner_id(getattr(membre, "id", None)):
+            await panels.envoyer(ctx, panels.depuis_embed(
+                embeds.error("Ce compte est protégé : SentriX ne peut pas le sanctionner.")
+            ))
+            return False
         err = checks.check_hierarchy(ctx.author, membre)
         if err:
             await self._reply(ctx, err, ephemere=True)

@@ -814,46 +814,10 @@ def _patch_local_checks(bot: commands.Bot) -> None:
 
 
 def _patch_security(bot: commands.Bot) -> None:
-    automod = bot.get_cog("Automod")
-    if automod is None or getattr(automod, "_sentrix_setup_v2_security", False):
-        return
-
-    original_exempt = automod.is_automod_exempt
-
-    async def automod_exempt_v2(_self, member):
-        if isinstance(member, discord.Member) and await is_trusted(bot, member.guild.id, member.id):
-            return True
-        return await original_exempt(member)
-
-    automod.is_automod_exempt = MethodType(automod_exempt_v2, automod)
-
-    original_nuke_exempt = automod.is_antinuke_exempt
-
-    async def nuke_exempt_v2(_self, guild, actor):
-        if actor is not None and await is_trusted(bot, guild.id, actor.id):
-            return True
-        return await original_nuke_exempt(guild, actor)
-
-    automod.is_antinuke_exempt = MethodType(nuke_exempt_v2, automod)
-
-    original_cached = automod.get_automod_cached
-
-    async def automod_cached_v2(_self, guild_id):
-        conf = await original_cached(guild_id)
-        if await module_enabled(bot, guild_id, "security"):
-            return conf
-        muted = dict(conf or {})
-        muted["security_module_disabled"] = True
-        for key in (
-            "antispam", "antilink", "antiinvite", "antimention", "anticaps", "antiemoji",
-            "antiraid", "antibot", "antiaccount", "antiscam", "antinuke", "escalation",
-            "antiinsult", "join_gate", "risk_engine", "security_vanity", "security_prune", "security_permissions",
-        ):
-            muted[key] = 0
-        return muted
-
-    automod.get_automod_cached = MethodType(automod_cached_v2, automod)
-    automod._sentrix_setup_v2_security = True
+    """Conservé pour les anciens appels : la liste de confiance et le module
+    Sécurité coupé sont désormais lus par AutoMod lui-même (cogs/automod.py,
+    refactorisation du 24/11/2026). Plus aucun enrobage n'est posé."""
+    return None
 
 
 async def _cache_message_images(bot: commands.Bot, message: discord.Message) -> None:

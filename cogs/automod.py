@@ -639,6 +639,12 @@ ADMIN_EVERYONE_SEUIL = 3
 #: ces filtres les visent ; majuscules, émojis, liens, invitations, insultes et pings
 #: répétés ne les concernent pas. Le spam d'un admin est supprimé avec un simple rappel.
 #: Fautes légères : le message est retiré, sans aucune sanction (24/11/2026).
+#: Ce que le module Sécurité coupé éteint (cogs/setup_v2_core, réintégré le 24/11/2026).
+PROTECTIONS_DU_MODULE_SECURITE = (
+    "antispam", "antilink", "antiinvite", "antimention", "anticaps", "antiemoji",
+    "antiraid", "antibot", "antiaccount", "antiscam", "antinuke", "escalation",
+    "antiinsult", "join_gate", "risk_engine", "security_vanity", "security_prune", "security_permissions",
+)
 FILTRES_SANS_SANCTION = frozenset({"anticaps", "antiemoji"})
 FILTRES_POUR_ADMINS = frozenset({"antispam", "antimention", "antiscam", "antiinvite"})
 #: Nombre d'incidents en 10 minutes avant de sanctionner un admin (rôles à risque
@@ -2381,7 +2387,36 @@ class AutoMod(commands.Cog, name="Automod"):
         if guild_id not in self.automod_cache:
             conf = await self.bot.db.get_automod(guild_id)
             self.automod_cache[guild_id] = dict(conf) if conf else _reglages_par_defaut()
-        return self.automod_cache[guild_id]
+        conf = self.automod_cache[guild_id]
+        # Module Sécurité coupé dans /setup : toutes les protections s'éteignent.
+        # Venait d'un enrobage posé au démarrage par cogs/setup_v2_core
+        # (_patch_security) ; réintégré le 24/11/2026 (refactorisation, étape 1).
+        if await self._module_securite_actif(guild_id):
+            return conf
+        coupe = dict(conf or {})
+        coupe["security_module_disabled"] = True
+        for cle in PROTECTIONS_DU_MODULE_SECURITE:
+            coupe[cle] = 0
+        return coupe
+
+    async def _module_securite_actif(self, guild_id: int) -> bool:
+        try:
+            from cogs import setup_v2_core
+
+            return await setup_v2_core.module_enabled(self.bot, guild_id, "security")
+        except Exception:  # noqa: BLE001 — base illisible : les protections restent actives
+            logger.debug("État du module Sécurité illisible guild=%s", guild_id, exc_info=True)
+            return True
+
+    async def _membre_de_confiance(self, guild_id: int, user_id: int) -> bool:
+        """Membre ajouté à la liste de confiance (/setup) : exempté d'AutoMod et de l'anti-nuke."""
+        try:
+            from cogs import setup_v2_core
+
+            return await setup_v2_core.is_trusted(self.bot, guild_id, user_id)
+        except Exception:  # noqa: BLE001 — liste illisible : personne n'est exempté par elle
+            logger.debug("Liste de confiance illisible guild=%s", guild_id, exc_info=True)
+            return False
 
     async def get_blacklist_words_cached(self, guild_id: int) -> list[str]:
         if guild_id not in self.blacklist_words_cache:
@@ -2683,8 +2718,16 @@ class AutoMod(commands.Cog, name="Automod"):
 
     async def is_automod_exempt(self, member: discord.abc.User) -> bool:
         """Détermine l'immunité AutoMod avec un override personnel explicite."""
+        # Propriétaire de SentriX : jamais visé (venait de la surcharge de classe
+        # de cogs/owner_sanction_immunity, réintégrée le 24/11/2026).
+        from utils.owner_access import is_bot_owner_id
+
+        if is_bot_owner_id(getattr(member, "id", None)):
+            return True
         if not isinstance(member, discord.Member):
             return False
+        if await self._membre_de_confiance(member.guild.id, member.id):
+            return True
         if _is_discord_administrator(member) and not await self.admins_soumis(member.guild.id):
             return True
 
@@ -6484,6 +6527,12 @@ class AutoMod(commands.Cog, name="Automod"):
     async def is_antinuke_exempt(self, guild: discord.Guild, actor: discord.abc.User) -> bool:
         # Sans auteur fiable dans l'audit log, ne sanctionne personne au hasard.
         if actor is None:
+            return True
+        from utils.owner_access import is_bot_owner_id
+
+        if is_bot_owner_id(getattr(actor, "id", None)):
+            return True
+        if await self._membre_de_confiance(guild.id, actor.id):
             return True
         # Le bot SentriX peut effectuer des actions légitimes. En revanche, les autres
         # bots ne sont plus exemptés automatiquement : un bot malveillant peut nuker.
