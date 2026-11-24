@@ -2654,6 +2654,13 @@ class Ai(commands.Cog, name="Ai"):
             return None
 
         command = allowed[name]
+        # Défense en profondeur : le choix du modèle doit lui aussi être ancré.
+        if not ai_command_router.command_grounded_in_question(command, question):
+            logger.warning(
+                "Routeur naturel : commande sans lien avec la demande refusée command=%s user=%s",
+                name, message.author.id,
+            )
+            return None
         qualified = str(command.qualified_name).strip()
         line = f"{prefix}{qualified}" + (f" {arguments}" if arguments else "")
         return line
