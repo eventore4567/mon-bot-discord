@@ -19,6 +19,9 @@ from utils import game_rewards, log_categories, sentrix_panels, wide_logs
 
 
 def test_refus_hierarchie_saffiche_dans_un_vrai_panneau():
+    # 24/11/2026 Jayden : « enlève ce gros panneau dans mute ban warn…, un truc
+    # simple, petite phrase ». Ce test exigeait l'ancienne carte (titre, sections,
+    # « Comment corriger ») ; il vérifie maintenant la phrase unique.
     from utils.checks import check_bot_hierarchy
 
     message = (
@@ -28,19 +31,14 @@ def test_refus_hierarchie_saffiche_dans_un_vrai_panneau():
     )
     panel = _hierarchy_refusal_panel(message)
 
-    assert isinstance(panel, sentrix_panels.Panneau)
-    assert panel.kind == "warning"
-    rendu = sentrix_panels.texte_complet(panel)
-    assert "Action impossible" in rendu
-    assert "Comment corriger" in rendu
-    assert "Paramètres du serveur" in rendu
-    assert "SentriX" in rendu
-    # La couche de présentation ne doit PAS aplatir cette carte en texte brut.
+    assert isinstance(panel, discord.ui.LayoutView)
+    rendu = panel.children[0].children[0].content
+    assert rendu.startswith("❌ Impossible") and "SentriX" in rendu
+    # Une petite carte native, jamais aplatie en panneau d'erreur générique.
     with patch.object(sentrix_panels, "_commande_en_cours", return_value=("ban", "Moderation")):
         assert sentrix_panels._panneau_est_erreur_simple(panel) is False
     # La validation de permission n'est pas modifiée par la présentation.
     assert callable(check_bot_hierarchy)
-
 
 def test_seules_les_hierarchies_compliquees_deviennent_des_panneaux():
     assert _hierarchy_refusal_panel("15 messages supprimés.") is None

@@ -1299,7 +1299,14 @@ async def _completer_par_la_memoire(destination: Any, panneau: Any) -> None:
     parent = getattr(destination, "_parent", None)
     guild = getattr(destination, "guild", None) or getattr(parent, "guild", None)
     bot = getattr(destination, "bot", None) or getattr(destination, "client", None) or getattr(parent, "client", None)
-    await _ajouter_suites(panneau, bot, guild, reference)
+    # 24/11/2026 : les réponses de sanction tiennent en une phrase
+    # (utils/moderation_feedback). Un refus n'a pas de suite (« Lever
+    # l'exclusion » sous un mute refusé n'avait aucun sens), et aucune des deux
+    # ne reçoit la ligne de mémoire du membre.
+    if not getattr(panneau, "_sentrix_sans_suites", False):
+        await _ajouter_suites(panneau, bot, guild, reference)
+    if getattr(panneau, "_sentrix_phrase_seule", False):
+        return
     try:
         ligne = await sentrix_trace.memory_line(bot, guild)
     except Exception:  # noqa: BLE001 — la mémoire ne doit jamais bloquer une réponse

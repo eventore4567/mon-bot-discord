@@ -39,6 +39,9 @@ def _texts(root):
 
 
 def test_kick_card_displays_native_discord_mention_small_id_and_reason():
+    # 24/11/2026 Jayden : « enlève ce gros panneau dans mute ban warn…, un truc
+    # simple, petite phrase ». Ce test exigeait l'ancienne carte (titre, sections,
+    # « Comment corriger ») ; il vérifie maintenant la phrase unique.
     view = build_sanction_confirmation(
         action="kick",
         target=_target(),
@@ -51,18 +54,13 @@ def test_kick_card_displays_native_discord_mention_small_id_and_reason():
     assert len(view.children) == 1
     card = view.children[0]
     assert isinstance(card, discord.ui.Container)
-    assert any(isinstance(x, discord.ui.Section) for x in card.children)
+    assert [type(x) for x in card.children] == [discord.ui.TextDisplay]  # ni bannière ni vignette
     body = _texts(view)
-    assert "Expulsion effectuée" in body
-    assert "<@123456789012345678>" in body
-    assert "ID : " + chr(96) + "123456789012345678" + chr(96) in body
-    assert "Dossier #23" in body
+    assert body.startswith("🚪 <@123456789012345678> a été expulsé.")
     assert "**répété**" not in body  # untrusted reason escaped
-    assert "Spam" in body
-    # 04/11/2026 : plus de bouton « Historique » sous la carte de sanction.
-    row = [x for x in card.children if isinstance(x, discord.ui.ActionRow)]
-    assert row == []
-
+    assert "Motif : Spam" in body
+    # La sanction réussie garde ses suites et la mémoire du membre (ajoutées à l'envoi).
+    assert view._sentrix_sans_suites is False
 
 def test_kick_card_when_case_db_fails_never_claims_case_persisted():
     view = build_sanction_confirmation(
@@ -70,24 +68,25 @@ def test_kick_card_when_case_db_fails_never_claims_case_persisted():
         reason="Spam", case_number=None,
     )
     body = _texts(view)
-    assert "Expulsion effectuée" in body
+    assert "a été expulsé" in body
     assert "Dossier non enregistré" in body
     assert "Dossier #None" not in body
 
-
 def test_hierarchy_refusal_is_compact_and_actionable_without_big_banner():
+    # 24/11/2026 Jayden : « enlève ce gros panneau dans mute ban warn…, un truc
+    # simple, petite phrase ». Ce test exigeait l'ancienne carte (titre, sections,
+    # « Comment corriger ») ; il vérifie maintenant la phrase unique.
     view = build_hierarchy_refusal("SentriX ne peut pas sanctionner ce membre.")
     assert isinstance(view, discord.ui.LayoutView)
     assert len(view.children) == 1
     card = view.children[0]
     assert isinstance(card, discord.ui.Container)
+    assert [type(x) for x in card.children] == [discord.ui.TextDisplay]
     content = _texts(view)
-    assert "Action refusée" in content
-    assert "Paramètres du serveur" in content
-    assert "Aucune sanction appliquée" in content
-    assert len(card.children) <= 4
+    assert content.startswith("❌ Impossible") and "SentriX" in content and "\n" not in content
+    # Un refus n'a pas de suite : plus de « Lever l'exclusion » sous un mute refusé.
+    assert view._sentrix_sans_suites is True
     assert build_hierarchy_refusal("Raison invalide") is None
-
 
 @pytest.mark.asyncio
 async def test_moderation_shared_confirmation_uses_one_native_panel_and_no_ping():
