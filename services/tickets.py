@@ -55,6 +55,7 @@ from types import SimpleNamespace
 
 import discord
 
+from services import ticket_transcript_html
 from utils import log_service
 
 logger = logging.getLogger("bot.tickets")
@@ -65,7 +66,8 @@ async def fetch_transcript_text(channel: discord.TextChannel) -> str:
     lines: list[str] = []
     async for msg in channel.history(limit=2000, oldest_first=True):
         lines.append(
-            f"[{msg.created_at:%Y-%m-%d %H:%M}] {msg.author} ({msg.author.id}): {msg.content}"
+            f"[{msg.created_at:%Y-%m-%d %H:%M}] {msg.author} ({msg.author.id}): "
+            f"{ticket_transcript_html.continuation_lines(msg.content)}"
         )
         for attachment in msg.attachments:
             lines.append(f"  [Pièce jointe] {attachment.url}")

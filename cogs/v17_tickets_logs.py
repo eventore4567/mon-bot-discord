@@ -12,6 +12,8 @@ from types import MethodType
 import discord
 from discord.ext import commands
 
+from services import ticket_transcript_html
+
 from database.db import now
 from utils import audit_entries
 from utils import checks, embeds, helpers, log_service
@@ -298,7 +300,7 @@ def install_ticket_patches(bot: commands.Bot) -> None:
                 reply = ""
                 if msg.reference and msg.reference.message_id:
                     reply = f" • répond à {msg.reference.message_id}"
-                content = msg.content or "[aucun texte]"
+                content = ticket_transcript_html.continuation_lines(msg.content or "[aucun texte]")
                 lines.append(f"[{msg.created_at:%Y-%m-%d %H:%M}] {msg.author} ({msg.author.id}){edited}{reply}: {content}")
                 for attachment in msg.attachments:
                     lines.append(f"    [fichier] {attachment.filename} — {attachment.url}")
@@ -308,9 +310,9 @@ def install_ticket_patches(bot: commands.Bot) -> None:
                     if embed.title:
                         lines.append(f"    [embed titre] {embed.title}")
                     if embed.description:
-                        lines.append(f"    [embed description] {embed.description}")
+                        lines.append(f"    [embed description] {ticket_transcript_html.continuation_lines(embed.description)}")
                     for field in embed.fields:
-                        lines.append(f"    [embed champ] {field.name}: {field.value}")
+                        lines.append(f"    [embed champ] {field.name}: {ticket_transcript_html.continuation_lines(field.value)}")
             return "\n".join(lines) or "Aucun message."
 
         rich_transcript._sentrix_v17_rich_transcript = True
