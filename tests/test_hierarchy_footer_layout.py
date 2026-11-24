@@ -24,6 +24,20 @@ def test_memoire_et_reference_sur_des_lignes_distinctes():
     assert "j · Réf." not in rendu
 
 
+
+def _tout_le_texte(vue) -> str:
+    morceaux = []
+
+    def parcourir(item):
+        if isinstance(getattr(item, "content", None), str):
+            morceaux.append(item.content)
+        for enfant in list(getattr(item, "children", ()) or ()):
+            parcourir(enfant)
+
+    parcourir(vue)
+    return "\n".join(morceaux)
+
+
 @pytest.mark.asyncio
 async def test_nickname_refus_hierarchie_en_panneau():
     cog = Moderation.__new__(Moderation)
@@ -46,5 +60,6 @@ async def test_nickname_refus_hierarchie_en_panneau():
     target.edit.assert_not_awaited()
     envoyer.assert_awaited_once()
     assert envoyer.await_args.kwargs["ephemere"] is True
-    assert "Comment corriger" in panels.texte_complet(envoyer.await_args.args[1])
+    # 24/11/2026 : une phrase au lieu de la carte « Comment corriger ».
+    assert _tout_le_texte(envoyer.await_args.args[1]).startswith("❌ Impossible")
     texte_court.assert_not_awaited()

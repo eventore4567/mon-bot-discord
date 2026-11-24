@@ -11,20 +11,19 @@ import re
 import discord
 
 
-# 04/11/2026 (« une bonne carte avec des emojis rouges, comme Raid Protect ») :
-# bord coloré selon la gravité et pastille de couleur devant le membre.
-_ROUGE, _ORANGE, _JAUNE, _VERT = 0xED4245, 0xE67E22, 0xF1C40F, 0x57F287
-_ACTIONS: dict[str, tuple[str, int]] = {
-    "ban": ("🔨 Bannissement effectué", _ROUGE),
-    "tempban": ("⏳ Bannissement temporaire effectué", _ROUGE),
-    "hackban": ("🔨 Bannissement par identifiant", _ROUGE),
-    "kick": ("🚪 Expulsion effectuée", _ORANGE),
-    "mute": ("🔇 Timeout appliqué", _JAUNE),
-    "unmute": ("🔊 Timeout retiré", _VERT),
-    "warn": ("⚠️ Avertissement enregistré", _ORANGE),
-    "unban": ("🔓 Bannissement levé", _VERT),
+# 24/11/2026 Jayden : « enlève ce gros panneau dans mute ban warn unmute unban,
+# un truc simple, petite phrase ». Une phrase, sans bannière ni sections ; le
+# dossier complet reste dans les logs.
+_PHRASES: dict[str, tuple[str, str]] = {
+    "ban": ("🔨", "{m} a été banni."),
+    "tempban": ("⏳", "{m} a été banni{d}."),
+    "hackban": ("🔨", "{m} a été banni par identifiant."),
+    "kick": ("🚪", "{m} a été expulsé."),
+    "mute": ("🔇", "{m} est réduit au silence{d}."),
+    "unmute": ("🔊", "{m} peut de nouveau parler."),
+    "warn": ("⚠️", "{m} a reçu un avertissement."),
+    "unban": ("🔓", "{m} a été débanni."),
 }
-_PASTILLES = {_ROUGE: "🔴", _ORANGE: "🟠", _JAUNE: "🟡", _VERT: "🟢"}
 
 _SNOWFLAKE = re.compile(r"^[0-9]{17,22}$")
 
@@ -39,6 +38,21 @@ def _valid_id(value: object) -> bool:
     return bool(_SNOWFLAKE.fullmatch(str(value or "")))
 
 
+def _phrase_seule(texte: str, *, refus: bool) -> discord.ui.LayoutView:
+    """Une petite carte d'une phrase, sans bannière.
+
+    Une sanction réussie garde ses boutons de suite (« Lever l'exclusion »…)
+    et la ligne de mémoire du membre ; un refus n'a ni l'un ni l'autre.
+    """
+    view = discord.ui.LayoutView(timeout=None)
+    card = discord.ui.Container()
+    card.add_item(discord.ui.TextDisplay(texte))
+    view.add_item(card)
+    view._sentrix_phrase_seule = refus
+    view._sentrix_sans_suites = refus
+    return view
+
+
 def build_sanction_confirmation(
     *, action: str, target: discord.abc.User,
     actor: discord.abc.User | None = None,
@@ -48,100 +62,41 @@ def build_sanction_confirmation(
     suffix: str = "",
     duration: str | None = None,
 ) -> discord.ui.LayoutView:
-    """Return a view even when case persistence was unavailable.
+    """Une phrase : qui, quoi, combien de temps, et le motif s'il y en a un.
 
-    A failed DB write must NEVER turn a real Discord sanction into a false
-    error. The response says so and still links to any available history.
+    Une écriture du dossier en base qui échoue ne transforme JAMAIS une vraie
+    sanction en fausse erreur : la phrase le signale discrètement.
     """
-    title, colour = _ACTIONS.get(action, ("🛡️ Action de modération effectuée", 0x5865F2))
-    pastille = _PASTILLES.get(colour, "🔵")
-    view = discord.ui.LayoutView(timeout=None)
-    card = discord.ui.Container(accent_colour=discord.Colour(colour))
-    from utils import sentrix_panels as _panels
-
-    if _panels.poser_bandeau(card, "moderation"):
-        # Le fichier de la galerie DOIT partir avec le message : panels.envoyer
-        # joint ce que rend fichiers() (sinon Discord refuse tout le message).
-        view.fichiers = lambda: _panels.pieces_jointes_de_famille("moderation")
+    emoji, modele = _PHRASES.get(action, ("🛡️", "Action effectuée sur {m}."))
     target_id = getattr(target, "id", None)
     mention = (
         f"<@{int(target_id)}>" if target_id is not None
-        else str(getattr(target, "mention", target))
+        else _mark_safe(getattr(target, "name", None) or "ce compte", max_length=60)
     )
-    display_name = _mark_safe(
-        getattr(target, "display_name", None)
-        or getattr(target, "global_name", None)
-        or getattr(target, "name", None)
-        or "Compte Discord", max_length=60,
-    )
-    id_info = (
-        "-# ID : " + chr(96) + str(target_id) + chr(96)
-        if target_id is not None else "-# Compte Discord"
-    )
-    top = f"### {title}\n{pastille} {display_name} · {mention}\n{id_info}"
-    avatar_url = getattr(getattr(target, "display_avatar", None), "url", None)
-    if avatar_url:
-        card.add_item(discord.ui.Section(
-            discord.ui.TextDisplay(top),
-            accessory=discord.ui.Thumbnail(str(avatar_url)),
-        ))
-    else:
-        card.add_item(discord.ui.TextDisplay(top))
-    card.add_item(discord.ui.Separator())
-    reason_label = _mark_safe(reason or "Aucune raison fournie", max_length=260)
-    extra = []
-    if duration:
-        extra.append(f"**⏱️ Durée** · {_mark_safe(duration, max_length=70)}")
+    d = f" pour {_mark_safe(duration, max_length=70)}" if duration else ""
+    texte = f"{emoji} " + modele.format(m=mention, d=d)
+    motif = str(reason or "").strip()
+    if motif and motif.casefold() not in {"aucune raison fournie", "aucune raison"}:
+        texte += f" Motif : {_mark_safe(motif, max_length=200)}"
     if suffix:
-        extra.append(f"-# {_mark_safe(suffix, max_length=200)}")
-    card.add_item(discord.ui.TextDisplay(
-        f"**📝 Motif**\n> {reason_label}"
-        + ("\n" + "\n".join(extra) if extra else "")
-    ))
-    note_parts = []
-    if actor is not None and getattr(actor, "id", None):
-        note_parts.append(f"🛡️ Par <@{actor.id}>")
-    note_parts.append(
-        f"📁 Dossier #{case_number}" if case_number is not None
-        else "📁 Dossier non enregistré"
-    )
-    card.add_item(discord.ui.TextDisplay("-# " + " · ".join(note_parts)))
-    # 04/11/2026 : plus de bouton « Historique » sous la carte de sanction
-    # (demande répétée) ; le dossier reste consultable avec /moderation sanctions.
-    view.add_item(card)
-    return view
+        texte += f" {_mark_safe(suffix, max_length=120)}"
+    if case_number is None:
+        texte += "\n-# Dossier non enregistré."
+    return _phrase_seule(texte, refus=False)
 
 
 def build_hierarchy_refusal(message: str) -> discord.ui.LayoutView | None:
-    """Small, actionable diagnostic; no decorative full-page banner."""
+    """Refus de hiérarchie : une phrase, sans bouton de suite."""
     text = str(message or "").casefold()
     if "ne peut pas sanctionner ce membre" in text:
-        heading = "🛑 Action refusée : hiérarchie de SentriX"
-        explanation = "Le rôle du membre est égal ou supérieur à celui de SentriX."
-        solution = (
-            "Dans **Paramètres du serveur → Rôles**, place le rôle **SentriX** "
-            "au-dessus du rôle du membre."
-        )
+        phrase = "❌ Impossible : ce membre a un rôle au-dessus de celui de SentriX."
     elif "ne peut pas gérer ce rôle" in text:
-        heading = "🛑 Rôle inaccessible"
-        explanation = "SentriX ne peut pas gérer un rôle égal ou supérieur au sien."
-        solution = "Remonte le rôle **SentriX** au-dessus de ce rôle dans les paramètres."
+        phrase = "❌ Impossible : ce rôle est au-dessus de celui de SentriX."
     elif "vous ne pouvez pas sanctionner un membre ayant un rôle supérieur ou égal" in text:
-        heading = "🛑 Action refusée : hiérarchie du staff"
-        explanation = "Tu ne peux pas modérer un membre dont le rôle est égal ou supérieur au tien."
-        solution = "Demande à un responsable disposant d'un rôle plus élevé."
+        phrase = "❌ Impossible : ce membre a un rôle égal ou supérieur au vôtre."
     else:
         return None
-    # Conserver une véritable carte SentriX structurée : les refus de hiérarchie
-    # doivent être explicites et ne jamais être aplatis en erreur texte.
-    from utils import sentrix_panels as panels
-    return panels.Panneau(
-        titre=heading.replace("🛑 ", "").replace("Action refusée", "Action refusée · Action impossible"),
-        sous_titre=explanation,
-        sections=(panels.Section("Comment corriger", texte=solution),),
-        kind="warning",
-        pied="Aucune sanction appliquée · Respect de la hiérarchie Discord",
-    )
+    return _phrase_seule(phrase, refus=True)
 
 
 __all__ = [

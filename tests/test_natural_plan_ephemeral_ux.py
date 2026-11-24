@@ -166,18 +166,18 @@ async def test_natural_action_confirm_deletes_prompt_and_uses_real_command_path(
 
 
 def test_actor_hierarchy_refusal_is_explained_in_structured_panel():
+    # 24/11/2026 Jayden : « enlève ce gros panneau dans mute ban warn…, un truc
+    # simple, petite phrase ». Ce test exigeait l'ancienne carte (titre, sections,
+    # « Comment corriger ») ; il vérifie maintenant la phrase unique.
     content = (
         "Vous ne pouvez pas sanctionner un membre ayant un rôle "
         "supérieur ou égal au vôtre."
     )
     panel = _hierarchy_refusal_panel(content)
-    assert isinstance(panel, panels.Panneau)
-    rendered = panels.texte_complet(panel)
-    assert "Action impossible" in rendered
-    assert "Comment corriger" in rendered
-    assert "responsable" in rendered.casefold()
+    assert isinstance(panel, discord.ui.LayoutView)
+    rendered = panel.children[0].children[0].content
+    assert rendered == "❌ Impossible : ce membre a un rôle égal ou supérieur au vôtre."
     assert "placez le rôle SentriX" not in rendered
-
 
 @pytest.mark.asyncio
 async def test_actor_hierarchy_refusal_uses_panel_not_bare_text():

@@ -107,12 +107,11 @@ def test_la_confirmation_part_sans_notifier_personne():
 
 
 def test_les_mentions_restent_cliquables():
-    # Couper la notification ne doit pas transformer les mentions en texte brut :
-    # cliquer sur le membre visé reste le geste le plus utile de la carte.
+    # Couper la notification ne doit pas transformer la mention en texte brut :
+    # cliquer sur le membre visé reste le geste le plus utile.
+    # 24/11/2026 : la phrase ne nomme plus le modérateur (dossier dans les logs).
     texte = _textes(_carte())
     assert "<@886391809939484722>" in texte
-    assert "<@111>" in texte
-
 
 # ------------------------------------------------------------- le retrait
 
@@ -164,15 +163,14 @@ def test_le_retrait_laisse_le_temps_de_lire():
 # ------------------------------------------------------------- les langues
 
 def test_une_carte_anglaise_ne_garde_aucun_mot_francais():
-    view = lr.translate_view_in_place(_carte())
+    # 24/11/2026 : la confirmation tient en une phrase, coupée par la mention.
+    view = lr.translate_view_in_place(_carte(reason="Spam"))
     texte = _textes(view)
 
-    for reste in ("Motif", "Aucune raison fournie", "Dossier", "Expulsion", "Par <@"):
+    for reste in ("Motif", "Expulsion", "a été", "expulsé"):
         assert reste not in texte, f"{reste!r} est resté français : {texte!r}"
-    assert "Member kicked" in texte
-    assert "Reason" in texte and "No reason given" in texte
-    assert "Case #2" in texte and "By <@111>" in texte
-
+    assert "<@886391809939484722> was kicked." in texte
+    assert "Reason: Spam" in texte
 
 def test_le_bouton_persistant_est_traduit_lui_aussi():
     # Un DynamicItem enveloppe son bouton dans `.item` : son propre `label` vaut
@@ -184,26 +182,25 @@ def test_le_bouton_persistant_est_traduit_lui_aussi():
 
 
 def test_chaque_type_de_sanction_se_traduit_entierement():
-    # La traduction est une substitution de sous-chaînes : la règle courte
-    # ("Bannissement", "Ban") gagnait et produisait « Ban effectué ».
+    # La traduction est une substitution de sous-chaînes : les fragments longs
+    # (« a été banni par identifiant. ») doivent passer avant les courts.
     attendus = {
-        "ban": "Member banned",
-        "tempban": "Member temporarily banned",
-        "hackban": "Banned by ID",
-        "kick": "Member kicked",
-        "mute": "Timeout applied",
-        "unmute": "Timeout removed",
-        "warn": "Warning recorded",
-        "unban": "Ban lifted",
-        "inconnue": "Moderation action completed",
+        "ban": " was banned.",
+        "tempban": " was banned.",
+        "hackban": " was banned by ID.",
+        "kick": " was kicked.",
+        "mute": " is muted.",
+        "unmute": " can speak again.",
+        "warn": " received a warning.",
+        "unban": " was unbanned.",
+        "inconnue": "Action completed on ",
     }
     for action, attendu in attendus.items():
         texte = _textes(lr.translate_view_in_place(_carte(action=action)))
         assert attendu in texte, f"{action} → {texte.splitlines()[0]!r}"
         premiere = texte.splitlines()[0]
-        for mot in ("effectué", "appliqué", "retiré", "enregistré", "levé", "Bannissement"):
+        for mot in ("été", "banni", "expulsé", "silence", "avertissement", "effectuée"):
             assert mot not in premiere, f"{action} laisse du français : {premiere!r}"
-
 
 def test_la_traduction_ne_mord_pas_dans_les_donnees_des_membres():
     # Les ancres courtes ne doivent pas réécrire un nom de membre ou un motif.
@@ -212,10 +209,9 @@ def test_la_traduction_ne_mord_pas_dans_les_donnees_des_membres():
 
 
 def test_un_serveur_francais_garde_sa_carte_francaise():
-    texte = _textes(_carte())
-    assert "Expulsion effectuée" in texte
-    assert "Motif" in texte and "Dossier #2" in texte
-
+    texte = _textes(_carte(reason="Spam"))
+    assert "<@886391809939484722> a été expulsé." in texte
+    assert "Motif : Spam" in texte
 
 # ------------------------------------------- le bouton d'historique en double
 

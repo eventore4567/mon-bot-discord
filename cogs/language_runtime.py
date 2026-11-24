@@ -361,6 +361,25 @@ SURFACE_EN_REPLACEMENTS = (
     # Les marqueurs gras font partie de l'ancre : ils rendent ces fragments
     # impossibles à confondre avec le texte d'un membre, ce qui autorise des
     # ancres courtes comme « Motif » sans mordre dans une donnée utilisateur.
+    # 24/11/2026 : la confirmation tient en une phrase, coupée par la mention
+    # du membre ; les fragments longs passent avant les courts.
+    (" a été banni par identifiant.", " was banned by ID."),
+    (" a été banni pour ", " was banned for "),
+    (" a été banni.", " was banned."),
+    (" a été débanni.", " was unbanned."),
+    (" a été expulsé.", " was kicked."),
+    (" est réduit au silence pour ", " is muted for "),
+    (" est réduit au silence.", " is muted."),
+    (" peut de nouveau parler.", " can speak again."),
+    (" a reçu un avertissement.", " received a warning."),
+    (" Motif : ", " Reason: "),
+    ("Action effectuée sur ", "Action completed on "),
+    ("❌ Impossible : ce membre a un rôle au-dessus de celui de SentriX.",
+     "❌ Not possible: this member's role is above SentriX's."),
+    ("❌ Impossible : ce rôle est au-dessus de celui de SentriX.",
+     "❌ Not possible: this role is above SentriX's."),
+    ("❌ Impossible : ce membre a un rôle égal ou supérieur au vôtre.",
+     "❌ Not possible: this member's role is equal to or above yours."),
     ("**🚪 Expulsion effectuée**", "**🚪 Member kicked**"),
     ("**🔨 Bannissement effectué**", "**🔨 Member banned**"),
     ("**⏳ Bannissement temporaire effectué**", "**⏳ Member temporarily banned**"),
