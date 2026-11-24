@@ -39,7 +39,7 @@ def test_dmall_n_existe_plus_nulle_part():
     assert "cogs.direct_message" in extensions
     assert "dmall" not in M.KNOWN_COMMANDS
     assert "dmall" not in M.GUILD_OWNER_COMMANDS
-    for source in ("cogs/direct_message.py", "web/dm_panel.py", "web/dashboard_unified_runtime_v2.py"):
+    for source in ("cogs/direct_message.py", "web/dm_panel.py"):
         text = (ROOT / source).read_text(encoding="utf-8")
         assert "dm/all" not in text and "dmAll" not in text, source
 

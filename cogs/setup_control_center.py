@@ -461,7 +461,11 @@ class ModuleSwitchSelect(discord.ui.Select):
     def __init__(self, view, states: dict[str, str]):
         self.owner = view
         options = []
+        from cogs import setup_v2_core as core
+
         for key, label in MODULE_SWITCHES:
+            if key in core.ALWAYS_ON_MODULES:
+                continue  # toujours actif : aucune option pour le couper
             etat = states.get(key, "not_configured")
             options.append(discord.SelectOption(
                 label=f"{label} — {_SWITCH_LABELS.get(etat, 'OFF')}",

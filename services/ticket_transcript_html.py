@@ -17,9 +17,24 @@ import discord
 
 _MESSAGE = re.compile(
     r"^\[(?P<date>\d{4}-\d{2}-\d{2} \d{2}:\d{2})\] "
-    r"(?P<author>.+?) \((?P<id>\d+)\):(?: ?(?P<content>.*))?$"
+    r"(?P<author>.+?) \((?P<id>\d+)\)"
+    # Mentions ajoutées par la transcription v17 active (cogs/v17_tickets_logs.py).
+    r"(?: • (?:modifié \d{4}-\d{2}-\d{2} \d{2}:\d{2}|répond à \d+))*"
+    r":(?: ?(?P<content>.*))?$"
 )
-_ATTACHMENT = re.compile(r"^\s+\[Pièce jointe\] (?P<url>\S+)")
+# « [Pièce jointe] url » (format historique) ou « [fichier] nom — url » (v17).
+_ATTACHMENT = re.compile(
+    r"^\s+(?:\[Pièce jointe\] |\[fichier\] .*? — )(?P<url>\S+)$"
+)
+# Préfixe des lignes de suite d'un message multiligne : sans lui, un membre
+# pouvait écrire « [date] Admin (id): … » et forger un message d'un autre auteur.
+CONTINUATION = "  | "
+
+
+def continuation_lines(content: str) -> str:
+    """Indente les lignes 2..n d'un contenu libre pour qu'aucune ne soit relue
+    comme un en-tête de message ou une pièce jointe."""
+    return str(content or "").replace("\r\n", "\n").replace("\n", "\n" + CONTINUATION)
 _SAFE_FILENAME = re.compile(r"[^A-Za-z0-9_-]+")
 _COLORS = ("#5865f2", "#3ba7a0", "#d58b52", "#9a7bdb", "#5b9dd6", "#c07396")
 
@@ -42,6 +57,8 @@ def parse_transcript(text: str) -> list[dict]:
         if attachment and messages:
             messages[-1]["attachments"].append(attachment.group("url"))
         elif messages:
+            if line.startswith(CONTINUATION):
+                line = line[len(CONTINUATION):]
             messages[-1]["content"].append(line)
     return messages
 

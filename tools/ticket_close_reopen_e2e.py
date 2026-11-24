@@ -77,8 +77,16 @@ async def main():
     check("Ticket #1 · Fermé" in carte and "Demande résolue" in carte, "fermeture : carte de clôture avec la raison", carte[:200])
     check("Transcription — TICKET-0001" in mp, "MP : « Transcription — TICKET-0001 »", mp[:200])
     check("**Sujet :** Aide" in mp, "MP : le sujet est la catégorie choisie, pas le nom du salon", mp[:300])
-    check(" 0 min" not in mp and re.search(r"\b\d+ s\b", mp) is not None, "MP : une durée courte s'écrit en secondes", mp[:400])
     tid = int(row["id"])
+    # La durée affichée dépend du temps réellement écoulé entre l'ouverture et
+    # la fermeture. Sous -n 8, la machine chargée peut dépasser 60 s entre les
+    # deux : le produit écrit alors légitimement « 1 min ». On attend donc la
+    # forme qui correspond à l'écart enregistré en base, jamais « 0 min ».
+    horo = await bot.db.fetchone("SELECT created_at, closed_at FROM tickets WHERE id=?", (tid,))
+    ecart = int(horo["closed_at"]) - int(horo["created_at"])
+    attendu = rf"\b{ecart} s\b" if ecart < 60 else r"\b\d+ min\b"
+    check(" 0 min" not in mp and re.search(attendu, mp) is not None,
+          f"MP : la durée correspond à l'écart réel ({ecart} s), en secondes sous une minute", mp[:400])
     since=len(h.CALLS)
     inter_data=_base(h.ADMIN_ID,(h.ADMIN_ROLE_ID,),kind=3,data={"custom_id":f"sx_ticket_open:{tid}","component_type":2},message=h.message_payload(h.next_id(),chan,""))
     inter_data["channel_id"]=str(chan)
