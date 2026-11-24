@@ -179,38 +179,9 @@ def install(bot: commands.Bot) -> None:
     # 24/11/2026 : la protection des propriétaires dans check_targetable vit
     # désormais dans cogs/moderation.py (refactorisation, étape 1).
 
-    try:
-        from . import automod
-        original_exempt = automod.AutoMod.is_automod_exempt
-        original_antinuke_exempt = automod.AutoMod.is_antinuke_exempt
-
-        async def is_automod_exempt_protected(self, member):
-            if is_bot_owner_id(getattr(member, "id", None)):
-                return True
-            return await original_exempt(self, member)
-
-        async def antinuke_exempt_protected(self, guild, actor):
-            if is_bot_owner_id(getattr(actor, "id", None)):
-                return True
-            return await original_antinuke_exempt(self, guild, actor)
-
-        patches = (
-            ("is_automod_exempt", original_exempt, is_automod_exempt_protected),
-            # punish_nuker n'est plus remplacée ici (22/11/2026) : cette protection
-            # n'était jamais exécutée (les couches d'instance avaient capturé la
-            # méthode avant) ; elle est écrite dans AutoMod.punish_nuker.
-            # _maybe_escalate, _delete_and_warn et _delete_and_timeout ne sont plus
-            # remplacées ici (22/11/2026) : l'exemption du propriétaire du bot est
-            # écrite dans AutoMod._proprietaire_protege, que les trois appellent.
-            ("is_antinuke_exempt", original_antinuke_exempt, antinuke_exempt_protected),
-        )
-        for name, original, replacement in patches:
-            if getattr(original, "_sentrix_owner_protection", False):
-                continue
-            replacement._sentrix_owner_protection = True
-            setattr(automod.AutoMod, name, replacement)
-    except Exception:
-        logger.exception("Protection propriétaire impossible sur AutoMod.")
+    # 24/11/2026 : l'exemption du propriétaire dans is_automod_exempt et
+    # is_antinuke_exempt est écrite dans AutoMod lui-même (refactorisation,
+    # étape 1). Ce module ne remplace plus aucune méthode.
 
     _INSTALLED = True
     logger.info("Immunité complète de sanction du propriétaire SentriX activée.")

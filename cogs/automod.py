@@ -2718,6 +2718,12 @@ class AutoMod(commands.Cog, name="Automod"):
 
     async def is_automod_exempt(self, member: discord.abc.User) -> bool:
         """Détermine l'immunité AutoMod avec un override personnel explicite."""
+        # Propriétaire de SentriX : jamais visé (venait de la surcharge de classe
+        # de cogs/owner_sanction_immunity, réintégrée le 24/11/2026).
+        from utils.owner_access import is_bot_owner_id
+
+        if is_bot_owner_id(getattr(member, "id", None)):
+            return True
         if not isinstance(member, discord.Member):
             return False
         if await self._membre_de_confiance(member.guild.id, member.id):
@@ -6521,6 +6527,10 @@ class AutoMod(commands.Cog, name="Automod"):
     async def is_antinuke_exempt(self, guild: discord.Guild, actor: discord.abc.User) -> bool:
         # Sans auteur fiable dans l'audit log, ne sanctionne personne au hasard.
         if actor is None:
+            return True
+        from utils.owner_access import is_bot_owner_id
+
+        if is_bot_owner_id(getattr(actor, "id", None)):
             return True
         if await self._membre_de_confiance(guild.id, actor.id):
             return True

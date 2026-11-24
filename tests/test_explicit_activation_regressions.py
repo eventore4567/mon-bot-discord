@@ -138,3 +138,20 @@ def test_mp_de_sanction_borne_et_proprietaire_protege_sans_couche():
         finally:
             panels.envoyer, owner_access.is_bot_owner_id = orig_envoyer, orig_owner
     asyncio.run(scenario())
+
+
+def test_le_proprietaire_de_sentrix_est_exempte_par_automod_lui_meme(monkeypatch):
+    # 24/11/2026 : venait d'une surcharge de classe (cogs/owner_sanction_immunity).
+    from cogs.automod import AutoMod
+    from utils import owner_access
+
+    monkeypatch.setattr(owner_access, "is_bot_owner_id", lambda uid: uid == 4242)
+
+    async def scenario():
+        automod = AutoMod.__new__(AutoMod)
+        automod.bot = SimpleNamespace(user=SimpleNamespace(id=1))
+        monkeypatch.setattr(core, 'is_trusted', AsyncMock(return_value=False))
+        proprio = SimpleNamespace(id=4242)
+        assert await automod.is_automod_exempt(proprio) is True
+        assert await automod.is_antinuke_exempt(SimpleNamespace(id=42, owner_id=9), proprio) is True
+    asyncio.run(scenario())
