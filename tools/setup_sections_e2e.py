@@ -175,6 +175,32 @@ async def main() -> int:
     check(int(conf["warn_ban_threshold"] or 0) == 3 and view.page == "section:moderation",
           "le seuil de ban automatique se règle depuis la section", str(conf["warn_ban_threshold"]))
 
+    # Modération par IA dans la section (24/11/2026) : même état que +sentrixpro aimod.
+    from cogs import sentrix_ultimate as ultimate
+
+    def choix_ia():
+        return control(view, lambda i: isinstance(i, discord.ui.Select)
+                       and str(i.placeholder or "").startswith("Modération par IA"))
+
+    check(choix_ia() is not None and await ultimate.etat_ia_moderation(bot, guild.id) is None,
+          "la section Modération propose la modération par IA, coupée par défaut")
+    ia = choix_ia()
+    ia._values = ["delete"]
+    await cliquer(bot, ia)
+    texte_mod = "\n".join(i.content for i in view.walk_children() if isinstance(i, discord.ui.TextDisplay))
+    check(await ultimate.etat_ia_moderation(bot, guild.id) == "delete" and view.page == "section:moderation"
+          and "Active · Supprimer le message" in texte_mod,
+          "choisir « Supprimer le message » active l'IA de modération en base", texte_mod[-160:])
+    cog_ultimate = bot.get_cog("SentriXUltimate")
+    check(await cog_ultimate._enabled(guild.id, "ai_moderation"),
+          "le moteur _ai_moderate la voit active tout de suite (cache purgé)")
+    ia = choix_ia()
+    ia._values = ["off"]
+    await cliquer(bot, ia)
+    check(await ultimate.etat_ia_moderation(bot, guild.id) is None
+          and not await cog_ultimate._enabled(guild.id, "ai_moderation"),
+          "« Désactivée » coupe les deux interrupteurs (aucun ne la laisse active)")
+
     from utils import log_service
     from cogs import setup_v2_core as core
 

@@ -113,6 +113,57 @@ def _reponse(titre: str, description: str, *, kind: str = "brand") -> discord.Em
     return embeds._base(titre, description, kind=kind)
 
 
+IA_MOD_ACTIONS = ("alert", "delete", "timeout")
+
+
+async def etat_ia_moderation(bot, guild_id: int) -> str | None:
+    """Action de la modération par IA (alert/delete/timeout), ou None si coupée.
+
+    Même règle que _ai_moderate : active si ultimate_ai_mod OU le module
+    ultimate « ai_moderation » le dit.
+    """
+    try:
+        cfg = await bot.db.fetchone("SELECT enabled,action FROM ultimate_ai_mod WHERE guild_id=?", (int(guild_id),))
+        mod = await bot.db.fetchone(
+            "SELECT enabled FROM ultimate_modules WHERE guild_id=? AND module='ai_moderation'", (int(guild_id),),
+        )
+    except Exception:  # noqa: BLE001 — tables absentes sur une base neuve : coupée
+        return None
+    if not (bool(int(_get(cfg, "enabled", 0) or 0)) or bool(int(_get(mod, "enabled", 0) or 0))):
+        return None
+    action = str(_get(cfg, "action", "alert") or "alert")
+    return action if action in IA_MOD_ACTIONS else "alert"
+
+
+async def regler_ia_moderation(bot, guild_id: int, action: str | None) -> None:
+    """Active la modération par IA avec ``action``, ou la coupe (None).
+
+    Écrit les DEUX interrupteurs (comme ``+sentrixpro aimod``) : sinon l'un
+    des deux la laisserait active. Le seuil de confiance réglé est conservé.
+    """
+    if action is not None and action not in IA_MOD_ACTIONS:
+        raise ValueError(f"action inconnue : {action}")
+    actif = action is not None
+    for sql in (
+        "CREATE TABLE IF NOT EXISTS ultimate_modules(guild_id INTEGER NOT NULL,module TEXT NOT NULL,enabled INTEGER NOT NULL,PRIMARY KEY(guild_id,module))",
+        "CREATE TABLE IF NOT EXISTS ultimate_ai_mod(guild_id INTEGER PRIMARY KEY,enabled INTEGER NOT NULL DEFAULT 0,action TEXT NOT NULL DEFAULT 'alert',confidence REAL NOT NULL DEFAULT 0.88)",
+    ):
+        await bot.db.execute(sql)
+    await bot.db.execute(
+        "INSERT INTO ultimate_ai_mod(guild_id,enabled,action,confidence) VALUES(?,?,?,0.88) "
+        "ON CONFLICT(guild_id) DO UPDATE SET enabled=excluded.enabled, action=excluded.action",
+        (int(guild_id), int(actif), action or "alert"),
+    )
+    cog = bot.get_cog("SentriXUltimate")
+    if cog is not None:
+        await cog._set_module(int(guild_id), "ai_moderation", actif)
+    else:
+        await bot.db.execute(
+            "INSERT OR REPLACE INTO ultimate_modules(guild_id,module,enabled) VALUES(?,?,?)",
+            (int(guild_id), "ai_moderation", int(actif)),
+        )
+
+
 class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
     def __init__(self, bot: commands.Bot):
         # Caches du chemin chaud : _goal() est appele a CHAQUE message.

@@ -939,6 +939,48 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         seuil_select.callback = regler_seuil
         container.add_item(discord.ui.ActionRow(seuil_select))
 
+        # — Modération par IA (24/11/2026 : « mets l'IA de modération dans setup »)
+        from . import sentrix_ultimate as ultimate
+
+        container.add_item(discord.ui.Separator())
+        action_ia = await ultimate.etat_ia_moderation(self.bot, self.guild.id)
+        libelles_ia = {
+            "alert": t("Prévenir le staff", "Alert staff"),
+            "delete": t("Supprimer le message", "Delete the message"),
+            "timeout": t("Supprimer + exclure 10 min", "Delete + 10 min timeout"),
+        }
+        container.add_item(discord.ui.TextDisplay(
+            f"### 🤖 {t('Modération par IA', 'AI moderation')}\n"
+            + (
+                t(f"🟢 Active · {libelles_ia[action_ia]}", f"🟢 On · {libelles_ia[action_ia]}")
+                if action_ia else t("⚪ Désactivée", "⚪ Off")
+            )
+            + "\n-# " + t(
+                "L'IA relit les messages suspects (insultes, majuscules, mentions de masse…).",
+                "The AI reviews suspicious messages (insults, caps, mass mentions…).",
+            )
+        ))
+        ia_select = discord.ui.Select(
+            placeholder=t("Modération par IA…", "AI moderation…"),
+            options=[
+                discord.SelectOption(label=t("Désactivée", "Off"), value="off", default=action_ia is None),
+                *(
+                    discord.SelectOption(label=libelle, value=cle, default=action_ia == cle)
+                    for cle, libelle in libelles_ia.items()
+                ),
+            ],
+        )
+
+        async def regler_ia(interaction: discord.Interaction):
+            if not interaction.response.is_done():
+                await interaction.response.defer()
+            choix = ia_select.values[0]
+            await ultimate.regler_ia_moderation(self.bot, self.guild.id, None if choix == "off" else choix)
+            await self.refresh(interaction)
+
+        ia_select.callback = regler_ia
+        container.add_item(discord.ui.ActionRow(ia_select))
+
         # — Logs
         container.add_item(discord.ui.Separator())
         reglages = {
