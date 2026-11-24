@@ -2583,6 +2583,12 @@ class AutoMod(commands.Cog, name="Automod"):
                 return False
             if canonical not in FILTRES_POUR_ADMINS:
                 return False
+            # Admin épargné du mode strict (désigné, rôle exempté…) : même
+            # décision que ``_admin_exempte`` sur le chemin des messages. Sans
+            # elle, la réponse d'un bot à ses commandes / passait l'anti-spam
+            # (_handle_command_spam) et finissait en retrait de rôles.
+            if await self.admin_epargne_en_strict(member, message.guild.id):
+                return False
 
         policy = await self.get_security_filter_policy_cached(message.guild.id, canonical)
         scope_ids = self._message_scope_ids(message)
@@ -5331,15 +5337,14 @@ class AutoMod(commands.Cog, name="Automod"):
             auteur_admin = _is_discord_administrator(_as_member(message.author, message.guild))
         except Exception:  # noqa: BLE001 — auteur illisible : traité comme un membre
             auteur_admin = False
-        if auteur_admin:
-            # Option coupée : un message d'admin n'est jamais supprimé ni sanctionné.
-            if not await self.admins_soumis(message.guild.id):
-                return None
-            return await self._incident_admin(message, reason, filter_name)
         # Protection de dernier recours pour les autres listeners AutoMod qui
         # appelleraient cette méthode directement, sans passer par le filtre.
-        if await self._admin_exempte(message.author, message.guild.id):
-            return
+        # Vérifiée AVANT la branche admin : un admin épargné du mode strict
+        # n'entre jamais dans _incident_admin (retrait de rôles au 3e incident).
+        if await self._admin_exempte(_as_member(message.author, message.guild), message.guild.id):
+            return None
+        if auteur_admin:
+            return await self._incident_admin(message, reason, filter_name)
         if not self._sanctioned_messages.claim(message.guild.id, message.id):
             logger.debug(
                 "AutoMod : détection concurrente ignorée guild=%s message=%s filtre=%s",
@@ -6549,6 +6554,10 @@ class AutoMod(commands.Cog, name="Automod"):
         """La sanction elle-même : rôles à risque retirés, ban (même absent), replis."""
         member = guild.get_member(actor_id)
         action_taken = "aucune action possible (permissions insuffisantes)"
+        # L'échec se décide sur ce qui s'est passé, pas sur le libellé : un ban
+        # par identifiant refusé laissait « aucune action possible » et la carte
+        # au propriétaire annonçait « Serveur protégé ».
+        echec = True
         if member:
             dangerous_roles = [
                 r for r in member.roles
@@ -6557,19 +6566,22 @@ class AutoMod(commands.Cog, name="Automod"):
             try:
                 if dangerous_roles:
                     await member.remove_roles(*dangerous_roles, reason=f"AutoMod anti-nuke : {reason}")
-            except discord.Forbidden:
-                pass
+            except discord.HTTPException:
+                # 429/5xx comme 403 : le ban doit quand même être tenté.
+                logger.warning("Anti-nuke : rôles à risque non retirés guild=%s actor=%s.", guild.id, actor_id)
             # Un nuke en cours justifie une réponse décisive : on bannit directement
             # (empêche de revenir avec une nouvelle invitation), avec repli sur un kick
             # si le bot n'a pas la permission de bannir.
             try:
                 await guild.ban(discord.Object(id=actor_id), reason=f"AutoMod anti-nuke : {reason}", delete_message_seconds=3600)
                 action_taken = "banni du serveur"
-            except discord.Forbidden:
+                echec = False
+            except discord.HTTPException:
                 try:
                     await member.kick(reason=f"AutoMod anti-nuke : {reason}")
-                    action_taken = "expulsé du serveur (le bot n'a pas la permission de bannir)"
-                except discord.Forbidden:
+                    action_taken = "expulsé du serveur (le bot n'a pas pu le bannir)"
+                    echec = False
+                except discord.HTTPException:
                     # 07/11/2026 : plutôt qu'un échec, la solution de repli : SentriX
                     # supprime lui-même ses messages pendant 24 h et prévient le propriétaire.
                     repli = await self._muter(guild, member, 86400, f"anti-nuke — {reason}")
@@ -6579,6 +6591,7 @@ class AutoMod(commands.Cog, name="Automod"):
                         if repli != "mute_failed"
                         else "rôles à risque retirés, mais impossible de le sanctionner davantage (permissions insuffisantes)"
                     )
+                    echec = repli == "mute_failed"
                     await self._alerter_permission_manquante(guild, "hierarchie", membre=member)
         else:
             # L'auteur est déjà parti (ou n'a jamais été en cache) : un ban par
@@ -6587,9 +6600,9 @@ class AutoMod(commands.Cog, name="Automod"):
                 await guild.ban(discord.Object(id=actor_id), reason=f"AutoMod anti-nuke : {reason}",
                                 delete_message_seconds=3600)
                 action_taken = "banni par identifiant (déjà parti du serveur)"
+                echec = False
             except (discord.Forbidden, discord.HTTPException):
                 logger.warning("Anti-nuke : ban par identifiant impossible guild=%s actor=%s.", guild.id, actor_id)
-        echec = "impossible de le sanctionner" in str(action_taken)
         regle = f"Plus de {NUKE_ACTION_THRESHOLD - 1} actions destructrices en peu de temps"
         await self._journal_securite(
             guild, titre="Anti-nuke déclenché", auteur=member or actor_id, protection="Anti-nuke",
