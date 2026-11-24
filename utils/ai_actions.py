@@ -340,6 +340,12 @@ ACTIONS: dict[str, ActionSpec] = {
         "member.dm", None, (), ("target", "text"), "member", "medium",
         description="envoyer un message privé à l'auteur (« mp moi ») ou, pour le staff, à un membre",
     ),
+    # 23/11/2026 : « @ un mec au hasard », « vzi @ vortex ». Ouvert à tous mais
+    # limité (voir cogs/ai.py) : un seul membre, une demande par minute.
+    "member.ping": ActionSpec(
+        "member.ping", None, (), ("target",), "member", "medium",
+        description="mentionner (ping) un membre précis, ou un membre au hasard",
+    ),
     "member.nickname": ActionSpec(
         "member.nickname", None, ("target", "nickname"), (), "member", "medium",
         description="modifier le pseudo serveur d'un membre",
@@ -791,7 +797,7 @@ def looks_action_request(text: str) -> bool:
     # amont, les renvoyait à la conversation : ils n'atteignaient jamais le
     # parseur. Ces deux reconnaissances sont locales, déterministes et gardées
     # contre les questions : si elles reconnaissent la phrase, c'est une demande.
-    if _message_prive(text) is not None or _creation(text) is not None:
+    if _message_prive(text) is not None or _creation(text) is not None or _ping(text) is not None:
         return True
 
     # Une question de connaissance ne doit jamais devenir une action par accident.
@@ -952,6 +958,32 @@ _MP_AUTRUI = re.compile(
 )
 
 
+_PING = re.compile(
+    r"^(?:(?:vas[- ]?y|vzi|vzy|go|stp|svp|pls|allez|oui|ok)\s+)*"
+    r"(?:(?:ping|pingue|mentionne|tag|tague|appelle)\b|@)\s*(?P<cible>.+?)\s*(?:stp|svp|pls|please|merci)?\s*[.!?]*$",
+    re.IGNORECASE,
+)
+_PING_HASARD = re.compile(r"\b(?:au\s+hasard|random|n'?importe\s+qui|au\s+pif)\b", re.IGNORECASE)
+
+
+def _ping(question: str) -> "ParsedAction | None":
+    """« ping vortex », « @ un mec au hasard », « vzi @ vortex » (23/11/2026)."""
+    match = _PING.match(question.strip())
+    if match is None:
+        return None
+    cible = match.group("cible").strip()
+    if _PING_HASARD.search(cible):
+        return ParsedAction("member.ping", {"target": "__random__"}, 99, "local")
+    cible = cible.lstrip("@").strip(" .,:;!?")
+    if re.match(r"^(?:moi|me|m')\b", cible, re.IGNORECASE):
+        return None  # « appelle-moi demain » n'est pas une demande de ping
+    # « @everyone », « @here » ou un rôle ne sont jamais des cibles de ping.
+    if not cible or normalize_text(cible) in {"everyone", "here", "tout le monde", "tous"} or cible.startswith("<@&"):
+        return None
+    return ParsedAction("member.ping", {"target": cible[:100]}, 99, "local")
+
+
+
 def _message_prive(question: str) -> "ParsedAction | None":
     texte = question.strip()
     moi = _MP_MOI.match(texte)
@@ -1051,6 +1083,10 @@ def local_parse(question: str) -> ParsedAction | None:
     prive = _message_prive(question)
     if prive is not None:
         return prive
+
+    ping = _ping(question)
+    if ping is not None:
+        return ping
 
     creation = _creation(question)
     if creation is not None:
