@@ -35,6 +35,38 @@ PROFILS = [
 ]
 
 
+# Contrat de securite independant de utils.access_matrix : NE PAS generer
+# cette table depuis les ensembles PUBLIC_COMMANDS / CATEGORY_COMMANDS.
+# Sinon une regression qui declare une commande destructrice publique change a
+# la fois le resultat et l'attendu : l'audit afficherait faussement 0 anomalie.
+# Les commandes de cette liste peuvent etre masquees dans la surface Discord ;
+# si elles existent dans le registre, leur niveau minimal doit rester garanti.
+MINIMUM_SENSITIVE_TIERS = {
+    "setup": "categorie:configuration",
+    "ticketsetup": "categorie:tickets",
+    "antiraid": "categorie:securite",
+    "antinuke": "categorie:securite",
+    "ban": "discord:ban_members",
+    "kick": "discord:kick_members",
+    "clear": "discord:manage_messages",
+    "wipe-server": "guild-owner",
+    "server-restore": "guild-owner",
+    "config-reset": "guild-owner",
+    "reset-economy": "guild-owner",
+    "reset-levels": "guild-owner",
+    "represet": "guild-owner",
+    "proofreset": "guild-owner",
+    "immunity": "guild-owner",
+    "dm": "guild-owner",
+    "bl": "owner-global",
+    "unbl": "owner-global",
+    "sync": "owner-global",
+    "syncguild": "owner-global",
+    "season start": "categorie:economie",
+    "season end": "categorie:economie",
+}
+
+
 class _Bot:
     def __init__(self, backend):
         self.sentrix_access_backend = backend
@@ -45,6 +77,35 @@ def _decider(backend, auteur, nom):
     return asyncio.run(
         M.evaluate(_Bot(backend), command_name=nom, author=auteur, guild=Guild())
     )
+
+
+async def _charger_extensions(bot, extensions: list[str], *, timeout: float = 20) -> dict[str, str]:
+    """Retourne les échecs de chargement au lieu de les masquer.
+
+    Ne conserve que le nom du module et le type d'exception : les détails
+    d'erreur peuvent contenir des informations d'environnement sensibles.
+    """
+    failures: dict[str, str] = {}
+    for extension in dict.fromkeys(extensions):
+        try:
+            await asyncio.wait_for(bot.load_extension(extension), timeout=timeout)
+        except Exception as exc:
+            failures[extension] = type(exc).__name__
+    return failures
+
+
+def auditer_chargement(bot) -> int:
+    failures = getattr(bot, "_sentrix_audit_load_failures", None)
+    if failures is None:
+        print("\\nECHEC : état de chargement non fourni au contrôle.")
+        return 1
+    if not failures:
+        print("\\nOK : toutes les extensions attendues ont chargé.")
+        return 0
+    print(f"\\nECHEC : {len(failures)} extension(s) absente(s) de l'audit")
+    for name, error_type in sorted(failures.items()):
+        print(f"   EXTENSION NON CHARGEE   {name} ({error_type})")
+    return 1
 
 
 async def _commandes_reelles(retourner_bot: bool = False):
@@ -69,11 +130,10 @@ async def _commandes_reelles(retourner_bot: bool = False):
         if module not in extensions:
             extensions.append(module)
 
-    for extension in extensions:
-        try:
-            await asyncio.wait_for(bot.load_extension(extension), timeout=20)
-        except Exception:
-            pass
+    # L'ancien audit avalait les erreurs de chargement. Une extension cassée
+    # retirait ses commandes du registre, puis les contrôles annonçaient 0
+    # anomalie. Garder l'inventaire des échecs ET auditer ce qui a chargé.
+    bot._sentrix_audit_load_failures = await _charger_extensions(bot, extensions)
     noms = sorted({c.qualified_name for c in bot.walk_commands()})
     if retourner_bot:
         return noms, bot
@@ -99,6 +159,27 @@ def auditer(noms: list[str]) -> int:
                 autorises.append(etiquette)
                 par_profil[etiquette] += 1
         ouverture[nom] = autorises
+
+        # Contrat INDEPENDANT : l'attendu vient de la revue de securite et non
+        # de la table dont on veut justement detecter les erreurs.
+        racine = M.resolve_name(nom)
+        # Verifier aussi le nom complet : si SUBCOMMAND_TIERS perd une regle,
+        # resolve_name rabat la commande sur sa racine publique ('season start'
+        # devient 'season'). L'audit doit conserver l'intention de securite.
+        attendu = MINIMUM_SENSITIVE_TIERS.get(M.normalise(nom)) or MINIMUM_SENSITIVE_TIERS.get(racine)
+        if attendu is not None:
+            if niveau != attendu:
+                anomalies.append(
+                    f"NIVEAU SENSIBLE INCORRECT   {nom}: attendu {attendu}, obtenu {niveau}"
+                )
+            if "membre" in autorises:
+                anomalies.append(f"ESCALADE SENSIBLE MEMBRE   {nom}")
+            if attendu == "guild-owner" and "administrateur" in autorises:
+                anomalies.append(f"ESCALADE SENSIBLE ADMIN > OWNER SERVEUR   {nom}")
+            if attendu == "owner-global" and (
+                "administrateur" in autorises or "proprietaire du serveur" in autorises
+            ):
+                anomalies.append(f"ESCALADE SENSIBLE > OWNER GLOBAL   {nom}")
 
         # 1. Une commande inconnue de la matrice retombe en fail-closed : elle
         #    n'est cassee pour personne, mais personne ne l'a classee non plus.
@@ -145,6 +226,25 @@ def auditer(noms: list[str]) -> int:
     print(f"\nECHEC : {len(anomalies)} anomalie(s)\n")
     for a in sorted(set(anomalies)):
         print("   " + a)
+    return 1
+
+
+# Contrat produit indépendant de la taille de registre (qui évolue
+# naturellement) : ces commandes sont indispensables et doivent exister.
+# Une extension peut charger sans erreur mais retirer silencieusement ses
+# commandes via une passe de nettoyage finale.
+REQUIRED_COMMANDS = frozenset({"help", "ban", "kick", "clear", "wipe-server"})
+
+
+def auditer_commandes_critiques(noms: list[str]) -> int:
+    present = {M.normalise(nom) for nom in noms}
+    missing = sorted(REQUIRED_COMMANDS - present)
+    if not missing:
+        print("\\nOK : commandes critiques présentes dans le registre.")
+        return 0
+    print(f"\\nECHEC : {len(missing)} commande(s) critiques disparue(s)")
+    for name in missing:
+        print(f"   COMMANDE CRITIQUE ABSENTE   {name}")
     return 1
 
 
@@ -238,6 +338,8 @@ def main() -> int:
         auditer(noms)
         | auditer_configuration_hostile(noms)
         | auditer_affichage_slash(bot)
+        | auditer_chargement(bot)
+        | auditer_commandes_critiques(noms)
     )
 
 

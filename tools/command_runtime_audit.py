@@ -49,22 +49,25 @@ async def run() -> int:
         if not command_catalog_cleanup._INSTALLED:
             errors.append("politique canonique du catalogue non installée")
 
-        # La surface historique comptait 97 commandes directes après le passage de la
-        # musique en groupe /music. Une suppression produit explicitement documentée doit
-        # réduire ce nombre, sans obliger à réintroduire une commande juste pour satisfaire
-        # un compteur de CI. Au 13/09/2026, blacklist-add et blacklist-users sont retirées.
-        explicit_removed = set(
-            getattr(command_catalog_cleanup, "EXPLICITLY_REMOVED_COMMANDS", frozenset())
-        )
-        # Contrat actuel : 97 commandes directes historiques moins les deux retraits
-        # produit blacklist-add/blacklist-users = 95. L'ancien alias `me` est aussi
-        # marqué retiré, mais n'appartenait pas à ces 97 commandes directes : sa surface
-        # canonique est désormais `stats`, qui reste directe.
-        expected_normal_direct = 97
+        # Contrat canonique produit : on ne doit jamais fabriquer une liste
+        # différente des commandes retirées ni lire une variable inexistante.
+        explicit_removed = command_catalog_cleanup.EXPLICITLY_REMOVED_COMMANDS
+
+        # Base validée historiquement : 97 commandes directes. Les ajouts produit
+        # explicites doivent être pris en compte ici, sans changer le compteur en
+        # supprimant des commandes ou en annulant une fonctionnalité valide.
+        # Traduction et timestamp ont été ajoutés le 24/10/2026.
+        new_direct_commands = {"translate", "timestamp"}
+        missing_new = sorted(new_direct_commands - set(command_catalog_cleanup.NORMAL_DIRECT_COMMANDS))
+        if missing_new:
+            errors.append("nouvelles commandes utilitaires absentes: " + ", ".join(missing_new))
+
+        expected_normal_direct = 97 + len(new_direct_commands)
         if len(command_catalog_cleanup.NORMAL_DIRECT_COMMANDS) != expected_normal_direct:
             errors.append(
                 "la surface normale doit contenir exactement "
-                f"{expected_normal_direct} commandes directes après retraits produit, "
+                f"{expected_normal_direct} commandes directes (base 97 + "
+                f"{len(new_direct_commands)} nouvelles), "
                 f"obtenu: {len(command_catalog_cleanup.NORMAL_DIRECT_COMMANDS)}"
             )
         # 45 depuis l'ajout de +collec, la collection de prises des expéditions.

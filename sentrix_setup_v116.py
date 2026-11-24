@@ -204,13 +204,58 @@ async def _module_status(view, module_key: str) -> str:
     return "Module disponible"
 
 
+async def _log_routes_summary(view) -> str:
+    """État du routage stocké dans log_config ; ne déclenche aucune activation."""
+    try:
+        rows = await view.bot.db.fetchall(
+            "SELECT channel_id, enabled FROM log_config WHERE guild_id = ?",
+            (view.guild_id,),
+        )
+    except Exception:
+        logger.warning("Setup : état log_config indisponible", exc_info=True)
+        return "**Journaux : état indisponible.** Vérifiez la configuration des salons."
+
+    configured = [row for row in (rows or ()) if row["channel_id"]]
+    enabled = [row for row in configured if row["enabled"]]
+    if not configured:
+        return (
+            "**Journaux : à configurer.** Aucune destination enregistrée. "
+            "Sélectionnez **Configurer les logs** pour choisir les salons et catégories. "
+            "Rien n'est activé automatiquement."
+        )
+    if not enabled:
+        return (
+            f"**Journaux : {len(configured)} catégorie(s) configurée(s), désactivées.** "
+            "Choisissez les catégories à activer dans les réglages."
+        )
+
+    guild = view._guild()
+    missing = 0
+    if guild is not None:
+        for row in enabled:
+            try:
+                if guild.get_channel(int(row["channel_id"])) is None:
+                    missing += 1
+            except (TypeError, ValueError):
+                missing += 1
+    status = (
+        f"**Journaux : {len(enabled)} catégorie(s) avec destination activée(s)** "
+        f"sur {len(configured)} configurée(s)."
+    )
+    if missing:
+        status += f" **Attention : {missing} destination(s) introuvable(s).**"
+    return status + " La réception dépend aussi des permissions et de l'état du module."
+
+
 async def _home_embed(view) -> discord.Embed:
     health = await v4._health_snapshot(view)
+    logs_status = await _log_routes_summary(view)
     description = (
-        "Configure SentriX par module. Chaque page ne montre que ce qui concerne le réglage choisi.\n\n"
+        "Configurez SentriX par module. Chaque page présente les réglages utiles.\n\n"
         f"Santé **{health['score']}/100** · Sécurité **{health['security_score']}/100** · "
         f"Essentiel **{health['essential_done']}/5**\n\n"
-        "Choisis un module dans le menu ci-dessous."
+        f"{logs_status}\n\n"
+        "Choisissez un module dans le menu ou ouvrez directement les logs."
     )
     embed = discord.Embed(title="SentriX Setup", description=description, colour=v4._score_colour(health["score"]))
     embed.set_footer(text="SentriX • Setup V116")
@@ -333,6 +378,18 @@ def _render_home(view) -> None:
     view.add_item(button("restart", view.message_id, label="Smart Setup", style=discord.ButtonStyle.success, row=1))
     view.add_item(button("summary", view.message_id, label="Diagnostic", style=discord.ButtonStyle.primary, row=1))
     view.add_item(button("prev", view.message_id, label="Configuration rapide", style=discord.ButtonStyle.secondary, row=1))
+
+    # Le raccourci ouvre seulement l'interface, aucune activation automatique.
+    logs_button = discord.ui.Button(
+        label="Configurer les logs", style=discord.ButtonStyle.secondary, row=2,
+    )
+    async def logs_callback(interaction: discord.Interaction):
+        view.page = v4.PAGE_LOGS
+        view.render_page()
+        await view.persist_session()
+        await view._refresh_message(interaction)
+    logs_button.callback = logs_callback
+    view.add_item(logs_button)
 
 
 def _render_module(view) -> None:

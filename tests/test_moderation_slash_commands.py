@@ -94,12 +94,13 @@ class ModerationCatalogSurfaceTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertIn(name, NORMAL_DIRECT_COMMANDS)
 
-    def test_normal_direct_commands_reste_exactement_a_97(self):
-        """Contrat imposé par tools/command_runtime_audit.py : la surface directe
-        contient désormais 97 commandes — Démineur puis +collec, la collection de
-        prises, sont deux vrais nouveaux jeux publics.
-        Les retraits produit blacklist-add/blacklist-users restent supprimés."""
-        self.assertEqual(len(NORMAL_DIRECT_COMMANDS), 97)
+    def test_surface_directe_inclut_nouveaux_utilitaires_sans_regression(self):
+        """97 commandes directes historiques + translate/timestamp.
+        On conserve le catalogue existant et évite les suppressions silencieuses.
+        """
+        nouvelles = {"translate", "timestamp"}
+        self.assertTrue(nouvelles.issubset(NORMAL_DIRECT_COMMANDS))
+        self.assertEqual(len(NORMAL_DIRECT_COMMANDS - nouvelles), 97)
 
 
 if __name__ == "__main__":

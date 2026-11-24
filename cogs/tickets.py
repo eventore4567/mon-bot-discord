@@ -42,6 +42,7 @@ from cogs.ticket_constants import (
     TEXT_STYLES,
 )
 from services.tickets import count_genuinely_open_tickets
+from utils.ticket_open_timings import TicketOpenTimings
 from services import tickets as tickets_service
 from utils import embeds, checks, helpers, design_system
 from utils import sentrix_panels as sx_panels
@@ -963,6 +964,21 @@ class Tickets(commands.Cog):
         from utils import log_service
         await log_service.send_log(self.bot, guild, "tickets", embed)
 
+    async def _send_open_log_safely(self, guild: discord.Guild, embed: discord.Embed, log_channel_id: int | None) -> bool:
+        """Un échec de journalisation APRÈS confirmation ne doit pas faire croire
+        au membre que la création du ticket a échoué. On conserve l'erreur dans
+        les logs techniques pour réparation, sans renvoyer de faux message.
+        """
+        try:
+            await self.log_action(guild, embed, log_channel_id)
+        except Exception as exc:
+            logger.error(
+                "Ticket créé mais journal d'ouverture impossible (guild=%s, type_erreur=%s).",
+                guild.id, type(exc).__name__, exc_info=True,
+            )
+            return False
+        return True
+
     # ---------------------------------------------------------------- OUVERTURE
 
     def build_panel_embed(self, panel) -> discord.Embed:
@@ -1009,15 +1025,18 @@ class Tickets(commands.Cog):
 
     async def start_ticket_flow(self, interaction: discord.Interaction, type_id: int):
         started = time.monotonic()
+        timings = TicketOpenTimings()
         guild_id = interaction.guild.id if interaction.guild else None
         user_id = interaction.user.id if interaction.user else None
         try:
             ticket_type = await self.get_type(type_id)
+            timings.mark("db_ticket_type")
             if not ticket_type:
                 return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error("Ce type de ticket n'existe plus.")), ephemere=True)
 
             limit = ticket_type["max_per_member"] or 1
             open_count = await count_genuinely_open_tickets(self.bot, interaction.guild, interaction.user.id, type_id)
+            timings.mark("db_existing_tickets")
             if open_count >= limit:
                 return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.warning(f"Vous avez déjà **{open_count}** ticket(s) « {ticket_type['name']} » ouvert(s) (maximum : {limit}).")), ephemere=True)
 
@@ -1025,11 +1044,14 @@ class Tickets(commands.Cog):
                 questions = await self.bot.db.fetchall(
                     "SELECT * FROM ticket_form_questions WHERE ticket_type_id = ? ORDER BY position", (type_id,)
                 )
+                timings.mark("db_form_questions")
                 if questions:
                     return await interaction.response.send_modal(TicketFormModal(self, ticket_type, questions))
 
             await interaction.response.defer(ephemeral=True)
+            timings.mark("discord_defer")
             await self.create_ticket(interaction, ticket_type, [])
+            timings.mark("create_ticket")
         except discord.InteractionResponded:
             logger.info("Interaction déjà répondue pour l'ouverture du type #%s (guild=%s, user=%s).", type_id, guild_id, user_id)
         except (discord.Forbidden, discord.NotFound, discord.HTTPException) as e:
@@ -1054,13 +1076,19 @@ class Tickets(commands.Cog):
         finally:
             elapsed = time.monotonic() - started
             level = logger.warning if elapsed > 2.0 else logger.info
-            level("Ouverture ticket type #%s traitée en %.2fs (guild=%s, user=%s).", type_id, elapsed, guild_id, user_id)
+            level(
+                "Ouverture ticket type #%s traitée en %.2fs (guild=%s, user=%s) ; "
+                "phase_ms=%s",
+                type_id, elapsed, guild_id, user_id, timings.stages_ms,
+            )
 
     async def create_ticket(self, interaction: discord.Interaction, ticket_type, answers: list):
         guild = interaction.guild
         user = interaction.user
+        timings = TicketOpenTimings()
 
         count_row = await self.bot.db.fetchone("SELECT COUNT(*) c FROM tickets WHERE guild_id = ?", (guild.id,))
+        timings.mark("db_ticket_count")
         number = (count_row["c"] or 0) + 1
         channel_name = format_channel_name(ticket_type["name_format"], user, number)
 
@@ -1085,17 +1113,21 @@ class Tickets(commands.Cog):
         except discord.HTTPException:
             return await sx_panels.envoyer(interaction.followup, sx_panels.depuis_embed(embeds.error('Impossible de créer le salon (permissions du bot ou catégorie pleine).')), ephemere=True)
 
+        timings.mark("discord_channel_create")
         cur = await self.bot.db.execute(
             "INSERT INTO tickets (guild_id, channel_id, user_id, status, category, type_id, priority, created_at, last_activity_at) "
             "VALUES (?, ?, ?, 'ouvert', ?, ?, 'normale', ?, ?)",
             (guild.id, channel.id, user.id, ticket_type["name"], ticket_type["id"], now(), now()),
         )
+        timings.mark("db_ticket_insert")
         ticket_id = cur.lastrowid
         for label, value in answers:
             if value:
                 await self.bot.db.execute(
                     "INSERT INTO ticket_answers (ticket_id, question_label, answer) VALUES (?, ?, ?)", (ticket_id, label, value[:1000])
                 )
+
+        timings.mark("db_ticket_answers")
 
         # Fiche d'ouverture de ticket (Phase 3, design premium/sombre) — n'affecte QUE ce
         # message d'accueil, jamais TicketControlView ni les custom_id des boutons
@@ -1115,6 +1147,7 @@ class Tickets(commands.Cog):
             if value:
                 e.add_field(name=label[:256], value=helpers.truncate(value, 1024), inline=False)
         button_settings = await get_button_settings(self.bot, guild.id)
+        timings.mark("db_button_settings")
         content = user.mention
         if ticket_type["mention_staff"] and staff_role:
             content += f" {staff_role.mention}"
@@ -1122,6 +1155,7 @@ class Tickets(commands.Cog):
         # `content` sur un message Components V2, donc il reste un embed. Le ping
         # prime sur la banniere — c'est une exception assumee, pas un oubli.
         await channel.send(content=content, embed=e, view=TicketControlView(button_settings))
+        timings.mark("discord_welcome_message")
 
         await sx_panels.envoyer(
             interaction,
@@ -1158,6 +1192,8 @@ class Tickets(commands.Cog):
             ephemere=True,
         )
 
+        timings.mark_confirmed()
+
         ticket_extra = {
             "📂 Type": ticket_type["name"],
             "📌 Salon": channel.mention,
@@ -1171,7 +1207,18 @@ class Tickets(commands.Cog):
             "🎫 Ticket ouvert", 0x5865F2, cible=user,
             extra=ticket_extra,
         )
-        await self.log_action(guild, log_e, ticket_type["log_channel_id"])
+        log_ok = await self._send_open_log_safely(guild, log_e, ticket_type["log_channel_id"])
+        timings.mark("ticket_log")
+        info = timings.summary()
+        # Une alerte >2 s concerne le délai visible, pas l'envoi du log qui
+        # intervient APRÈS la confirmation à l'utilisateur.
+        log_level = logger.warning if (info["confirmed_ms"] or 0) > 2000 or not log_ok else logger.info
+        log_level(
+            "Ticket ouverture étapes guild=%s type=%s visible_ms=%s total_ms=%s "
+            "journal_ok=%s étapes_ms=%s",
+            guild.id, ticket_type["id"], info["confirmed_ms"], info["total_ms"],
+            log_ok, info["stages_ms"],
+        )
 
     # ---------------------------------------------------------------- BOUTONS STAFF
 
