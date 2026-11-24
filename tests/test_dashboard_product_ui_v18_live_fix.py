@@ -3,7 +3,6 @@ from pathlib import Path
 from sentrix_product_update import _DASHBOARD_RECOVERY_JS
 from web import dashboard_growth_control_v12
 from web import dashboard_live_response_v15
-from web import dashboard_product_ui_v18
 from web import dashboard_unified_v2
 import pytest
 
