@@ -53,6 +53,44 @@ def build_command_index(bot: commands.Bot) -> CommandIndex:
     return index
 
 
+#: Mots vides : un « le » ou un « de » commun ne relie pas une phrase à une commande.
+_MOTS_VIDES = frozenset({
+    "les", "des", "une", "un", "le", "la", "de", "du", "et", "ou", "en", "au", "aux",
+    "pour", "par", "sur", "dans", "avec", "sans", "que", "qui", "quoi", "est", "son",
+    "ses", "mon", "mes", "ton", "tes", "moi", "toi", "lui", "nous", "vous", "eux",
+    "stp", "svp", "pls", "the", "and", "for", "you", "your", "this", "that", "sentrix",
+    "donne", "fais", "fait", "mets", "met", "envoie", "peux", "veux", "faire", "avoir",
+})
+
+
+def _mots_utiles(texte: str) -> set[str]:
+    normalise = ai_actions.normalize_text(texte)
+    return {
+        mot for mot in re.findall(r"[a-z0-9_-]{3,}", normalise)
+        if mot not in _MOTS_VIDES
+    }
+
+
+def command_grounded_in_question(command: commands.Command, question: str) -> bool:
+    """La commande a-t-elle un rapport RÉEL avec la phrase ?
+
+    24/11/2026 : « donne le mess » a lancé le jeu des portes mystères. Le préfiltre
+    retenait une commande sur une simple ressemblance de lettres, et le modèle en
+    choisissait une sans que rien ne vérifie le lien. Une commande n'est retenue
+    que si la phrase contient son nom, un alias, ou un vrai mot de sa description.
+    """
+    normalise = ai_actions.normalize_text(question)
+    noms = [str(getattr(command, "qualified_name", "") or "")] + [
+        str(alias) for alias in getattr(command, "aliases", ()) or ()
+    ]
+    for nom in noms:
+        nom_norm = ai_actions.normalize_text(nom)
+        if nom_norm and re.search(rf"(?<![a-z0-9]){re.escape(nom_norm)}(?![a-z0-9])", normalise):
+            return True
+    description = str(getattr(command, "description", "") or getattr(command, "help", "") or "")
+    return bool(_mots_utiles(question) & _mots_utiles(" ".join(noms) + " " + description))
+
+
 def rank_command_candidates(
     index: CommandIndex,
     question: str,
@@ -70,6 +108,10 @@ def rank_command_candidates(
 
     rows: list[tuple[float, commands.Command]] = []
     for command, qualified_norm, command_tokens in index:
+        # Une ressemblance de lettres seule ne suffit plus : sans lien réel
+        # (nom, alias, vrai mot de la description), la commande n'est pas candidate.
+        if not command_grounded_in_question(command, question):
+            continue
         overlap = len(tokens & command_tokens)
         ratio = (
             difflib.SequenceMatcher(a=normalized, b=qualified_norm).ratio()
