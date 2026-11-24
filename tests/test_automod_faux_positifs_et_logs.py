@@ -33,11 +33,9 @@ def test_une_candidature_qui_parle_d_un_ami_n_est_pas_une_insulte():
 
 
 def test_majuscules_et_emojis_sont_retires_sans_sanction():
+    # Le comportement réel (aucune escalade, ni anti-spam, ni mute) est vérifié
+    # sur le bot booté par tools/petites_fautes_e2e.py (test_product_e2e).
     assert {"anticaps", "antiemoji"} <= automod.FILTRES_SANS_SANCTION
-    import inspect
-
-    source = inspect.getsource(automod.AutoMod._delete_and_warn)
-    assert "if filter_name in FILTRES_SANS_SANCTION:\n            allow_escalation = False" in source
 
 
 def test_une_ligne_vide_ne_laisse_plus_de_chevron_seul():

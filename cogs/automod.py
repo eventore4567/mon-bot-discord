@@ -5559,7 +5559,9 @@ class AutoMod(commands.Cog, name="Automod"):
         # prenait DEUX sanctions : le mute anti-mentions, puis l'escalade de spam
         # qui avance son compteur, peut rajouter un mute plus long et envoyer un
         # second MP — alors que l'incident n'enregistre que le premier.
-        if filter_name in SPAM_FILTERS and not mute_immediat:
+        # Revue Codex (PR #723) : « antiemoji » est aussi un filtre de spam ; sans
+        # cette garde, l'escalade de spam l'avertissait ou le mutait quand même.
+        if filter_name in SPAM_FILTERS and not mute_immediat and filter_name not in FILTRES_SANS_SANCTION:
             try:
                 spam_sanction = await self._spam_progressive_action(
                     message.guild, message.author, reason,
