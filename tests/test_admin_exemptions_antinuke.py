@@ -161,7 +161,9 @@ def test_everyone_d_un_admin_une_fois_rien_trois_fois_sanction():
         await cog._everyone_d_un_admin(message(3))
 
     asyncio.run(scenario())
-    assert supprimes == []   # 07/11 : le message d'un admin n'est pas supprimé
+    # 24/11/2026 : « s'il fait 3 fois d'affilée, ça supprime et ça le dérank ».
+    # Le 07/11, le message d'un admin n'était jamais supprimé ; ce test l'exigeait.
+    assert sorted(supprimes) == [1, 2, 3]
     args = cog._repondre_abus_privilegie.await_args.args
     assert args[1] is admin and args[3] == automod_module.ABUS_PRIVILEGIE_SEUIL
 
@@ -195,3 +197,46 @@ def test_les_admins_ont_plus_de_marge_que_les_membres(monkeypatch):
 
     action = asyncio.run(cog._spam_progressive_action(guild, admin, "spam"))
     assert action == ("warning_ping", 0, None, "⚠️ doucement sur le spam.")
+
+
+def test_everyone_d_un_admin_derank_impossible_coupe_son_everyone():
+    # 24/11/2026 : « ou bien s'il ne peut pas, il désactive le @everyone ».
+    admin = _membre(61, administrateur=True)
+    cog, guild = _contexte(admin)
+    cog._repondre_abus_privilegie = AsyncMock(return_value=None)  # rôles au-dessus de SentriX
+    supprimes = []
+
+    def message(n):
+        async def delete():
+            supprimes.append(n)
+        return SimpleNamespace(id=n, guild=guild, author=admin, delete=delete)
+
+    async def scenario():
+        for n in (1, 2, 3):
+            await cog._everyone_d_un_admin(message(n))
+        await cog._everyone_d_un_admin(message(4))  # coupé : supprimé dès le 1er
+
+    asyncio.run(scenario())
+    assert sorted(supprimes) == [1, 2, 3, 4]
+    assert cog._repondre_abus_privilegie.await_count == 1
+
+
+def test_everyone_d_un_admin_hors_mode_strict_est_sanctionne():
+    # Hors mode strict, un admin est exempté des filtres… mais pas de l'@everyone répété.
+    admin = _membre(62, administrateur=True)
+    cog, guild = _contexte(admin)
+    cog.admins_soumis = AsyncMock(return_value=False)
+    cog.admin_epargne_en_strict = AsyncMock(return_value=False)
+    cog.get_automod_cached = AsyncMock(return_value={"antimention": 1})
+    message = SimpleNamespace(id=1, guild=guild, author=admin, mention_everyone=True)
+    assert asyncio.run(cog._everyone_admin_a_sanctionner(message)) is True
+    cog.get_automod_cached = AsyncMock(return_value={"antimention": 0})
+    assert asyncio.run(cog._everyone_admin_a_sanctionner(message)) is False
+    cog.get_automod_cached = AsyncMock(return_value={"antimention": 1})
+    cog.admin_epargne_en_strict = AsyncMock(return_value=True)  # propriétaire, admin épargné
+    assert asyncio.run(cog._everyone_admin_a_sanctionner(message)) is False
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "cogs" / "automod.py").read_text(encoding="utf-8")
+    bypass = source.index("if await self._admin_exempte(_as_member(message.author, message.guild), message.guild.id):")
+    assert source.index("_everyone_admin_a_sanctionner(message)", bypass) < source.index("SENTRIX_LINK_BYPASS", bypass)

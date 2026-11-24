@@ -643,6 +643,8 @@ FILTRES_POUR_ADMINS = frozenset({"antispam", "antimention", "antiscam", "antiinv
 #: retirés : Discord interdit de le muter). Un membre, lui, est averti puis muté.
 ADMIN_SEUILS = {"antiscam": 1, "spam": 3, "antiinvite": 3}
 ADMIN_EVERYONE_FENETRE = 600
+#: Dérank impossible : son @everyone est supprimé dès l'envoi pendant 24 h.
+ADMIN_EVERYONE_COUPURE = 86400
 # 05/11/2026 : des mutes jusqu'à 24 h « abusent ». Paliers courts : 5 min,
 # 10 min, 30 min, 1 h, puis 2 h au maximum.
 SPAM_MUTE_DURATIONS_SECONDS = (300, 600, 1800, 3600, 7200)
@@ -4306,6 +4308,12 @@ class AutoMod(commands.Cog, name="Automod"):
         # Le bypass admin s'applique AVANT la blacklist, le spam, l'anti-arnaque,
         # les insultes et toute détection qui pourrait supprimer un message.
         if await self._admin_exempte(_as_member(message.author, message.guild), message.guild.id):
+            # 24/11/2026 : même hors mode strict, @everyone / @here répété par un
+            # admin est sanctionné (protection Anti-mention active). Le
+            # propriétaire et les admins épargnés un par un restent intouchables.
+            if getattr(message, "mention_everyone", False) is True:
+                if await self._everyone_admin_a_sanctionner(message):
+                    return await self._everyone_d_un_admin(message)
             # Prouve que le message de l'administrateur est bien arrivé au bot.
             # Si Discord l'intercepte auparavant, seul on_automod_action apparaît.
             if LINK_RE.search(_normalize_link_text(message.content)):
@@ -4861,26 +4869,64 @@ class AutoMod(commands.Cog, name="Automod"):
                 ABUS_PRIVILEGIE_SEUIL,
             )
 
+    async def _everyone_admin_a_sanctionner(self, message) -> bool:
+        """Admin exempté des filtres, mais pas de l'@everyone répété."""
+        membre = _as_member(message.author, message.guild)
+        if not _is_discord_administrator(membre):
+            return False
+        if await self.admin_epargne_en_strict(membre, message.guild.id):
+            return False
+        conf = await self.get_automod_cached(message.guild.id)
+        return bool(conf.get("antimention")) and not conf.get("security_module_disabled")
+
     async def _everyone_d_un_admin(self, message) -> None:
-        """@everyone / @here d'un administrateur : toléré, sauf s'il insiste."""
+        """@everyone / @here d'un administrateur : toléré, sauf s'il insiste.
+
+        24/11/2026 Jayden : « s'il fait 3 fois d'affilée, ça supprime et ça le
+        dérank, ou bien s'il ne peut pas, il désactive le @everyone ».
+        Au 3e en 10 minutes : les trois messages sont supprimés et ses rôles à
+        risque retirés. Si SentriX ne peut rien lui retirer (rôles au-dessus du
+        sien), son @everyone est coupé : chaque nouveau @everyone / @here de
+        sa part est supprimé dès l'envoi pendant 24 h. C'est tout ce que
+        Discord permet (un admin ignore les surcharges de salon et la règle
+        AutoMod native).
+        """
+        cle = (message.guild.id, message.author.id)
+        coupes = self.__dict__.setdefault("_everyone_coupe", {})
+        fin = coupes.get(cle)
+        if fin is not None:
+            if time.monotonic() < fin:
+                await self._supprimer_pings_precedents([message])
+                return
+            coupes.pop(cle, None)
         suivi = self.__dict__.get("_everyone_admins")
         if suivi is None:
             suivi = self.__dict__["_everyone_admins"] = FenetreGlissante(
                 fenetre=ADMIN_EVERYONE_FENETRE, purge_toutes=200,
             )
-        cle = (message.guild.id, message.author.id)
-        if suivi.ajouter(cle, message.id) < ADMIN_EVERYONE_SEUIL:
+        if suivi.ajouter(cle, message) < ADMIN_EVERYONE_SEUIL:
             return  # une ou deux fois : rien du tout
+        pings = [m for m in suivi.valeurs(cle) if m is not None]
         suivi.reinitialiser(cle)
-        # 07/11/2026 : le message d'un admin n'est pas supprimé (ce n'est pas du spam) ;
-        # ses rôles à risque sont retirés et il reçoit un MP qui explique pourquoi.
+        try:
+            log_service.mark_purged(tuple(int(getattr(m, "id", 0) or 0) for m in pings))
+        except Exception:  # noqa: BLE001 — journal : la suppression passe avant
+            pass
+        await self._supprimer_pings_precedents(pings)
         membre = _as_member(message.author, message.guild)
+        resultat = None
         if isinstance(membre, discord.Member):
-            await self._repondre_abus_privilegie(
+            resultat = await self._repondre_abus_privilegie(
                 message.guild, membre,
                 f"{ADMIN_EVERYONE_SEUIL} @everyone/@here en {ADMIN_EVERYONE_FENETRE // 60} minutes",
                 ABUS_PRIVILEGIE_SEUIL,
             )
+        if resultat != "derank":
+            if len(coupes) > 2000:
+                maintenant = time.monotonic()
+                for k in [k for k, v in coupes.items() if v <= maintenant]:
+                    coupes.pop(k, None)
+            coupes[cle] = time.monotonic() + ADMIN_EVERYONE_COUPURE
 
     @staticmethod
     async def _supprimer_pings_precedents(anciens) -> None:
