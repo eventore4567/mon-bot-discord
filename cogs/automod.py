@@ -1566,6 +1566,31 @@ def _reglages_par_defaut() -> dict:
     return ligne
 
 
+def _peut_encore_mentionner_tout_le_monde(membre) -> bool:
+    """Le membre garde-t-il un rôle qui lui donne @everyone (ou admin) ?
+
+    Lit ses rôles restants, hors ceux que SentriX vient de retirer : le cache
+    du membre n'est pas forcément à jour juste après remove_roles, mais un
+    rôle au-dessus de SentriX, lui, n'a de toute façon pas pu être retiré.
+    """
+    guild = getattr(membre, "guild", None)
+    moi = getattr(guild, "me", None)
+    haut = getattr(moi, "top_role", None)
+    try:
+        roles = list(getattr(membre, "roles", []) or [])
+    except TypeError:  # rôles illisibles : rien ne prouve qu'il est encore armé
+        return False
+    for role in roles:
+        if guild is not None and role == getattr(guild, "default_role", None):
+            continue
+        perms = getattr(role, "permissions", None)
+        if not (getattr(perms, "administrator", False) or getattr(perms, "mention_everyone", False)):
+            continue
+        if haut is None or role >= haut:
+            return True
+    return False
+
+
 class AutoMod(commands.Cog, name="Automod"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -2555,8 +2580,14 @@ class AutoMod(commands.Cog, name="Automod"):
         self,
         message: discord.Message,
         filter_name: str,
+        *,
+        sans_bypass_admin: bool = False,
     ) -> bool:
         """Décide si UN filtre doit s'appliquer à ce message.
+
+        ``sans_bypass_admin`` : l'exemption PAR DÉFAUT des administrateurs est
+        levée (@everyone répété d'un admin, 24/11/2026), mais toutes les autres
+        règles restent : admins épargnés, exemptions du filtre, salons ignorés.
 
         Priorité :
         1. Administrateur / Gérer le serveur => bypass de tous les filtres de messages ;
@@ -2581,10 +2612,11 @@ class AutoMod(commands.Cog, name="Automod"):
         # ne désactive AUCUNE protection globale de sécurité du serveur.
         member = _as_member(message.author, message.guild)
         if _is_discord_administrator(member):
-            if not await self.admins_soumis(message.guild.id):
-                return False
-            if canonical not in FILTRES_POUR_ADMINS:
-                return False
+            if not sans_bypass_admin:
+                if not await self.admins_soumis(message.guild.id):
+                    return False
+                if canonical not in FILTRES_POUR_ADMINS:
+                    return False
             # Admin épargné du mode strict (désigné, rôle exempté…) : même
             # décision que ``_admin_exempte`` sur le chemin des messages. Sans
             # elle, la réponse d'un bot à ses commandes / passait l'anti-spam
@@ -4877,7 +4909,12 @@ class AutoMod(commands.Cog, name="Automod"):
         if await self.admin_epargne_en_strict(membre, message.guild.id):
             return False
         conf = await self.get_automod_cached(message.guild.id)
-        return bool(conf.get("antimention")) and not conf.get("security_module_disabled")
+        if not conf.get("antimention") or conf.get("security_module_disabled"):
+            return False
+        # Revue Codex (PR #722) : les exemptions de l'Anti-mention (membres,
+        # rôles, salons ignorés) s'appliquent aussi ici ; seule l'exemption
+        # par défaut des admins est levée.
+        return await self.security_filter_applies_to(message, "antimention", sans_bypass_admin=True)
 
     async def _everyone_d_un_admin(self, message) -> None:
         """@everyone / @here d'un administrateur : toléré, sauf s'il insiste.
@@ -4921,7 +4958,10 @@ class AutoMod(commands.Cog, name="Automod"):
                 f"{ADMIN_EVERYONE_SEUIL} @everyone/@here en {ADMIN_EVERYONE_FENETRE // 60} minutes",
                 ABUS_PRIVILEGIE_SEUIL,
             )
-        if resultat != "derank":
+        # Revue Codex (PR #722) : un dérank PARTIEL (un rôle à risque retiré, mais
+        # un rôle admin au-dessus de SentriX conservé) ne désarme pas : la
+        # coupure s'applique tant qu'il peut encore faire @everyone.
+        if resultat != "derank" or _peut_encore_mentionner_tout_le_monde(membre):
             if len(coupes) > 2000:
                 maintenant = time.monotonic()
                 for k in [k for k, v in coupes.items() if v <= maintenant]:

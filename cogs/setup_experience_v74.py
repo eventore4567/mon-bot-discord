@@ -961,10 +961,18 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         container.add_item(discord.ui.Section(
             discord.ui.TextDisplay(
                 f"### 🤖 {t('Modération par IA', 'AI moderation')}\n"
-                + (t("🟢 Active", "🟢 On") if action_ia else t("⚪ Désactivée", "⚪ Off"))
+                + (
+                    "🟢 " + {
+                        # Revue Codex (PR #722) : l'action réellement enregistrée
+                        # (+sentrixpro aimod peut encore choisir alert/delete).
+                        "alert": t("Active · prévient le staff", "On · alerts staff"),
+                        "delete": t("Active · supprime le message", "On · deletes the message"),
+                    }.get(action_ia, t("Active · supprime et exclut 10 min", "On · deletes and times out 10 min"))
+                    if action_ia else t("⚪ Désactivée", "⚪ Off")
+                )
                 + "\n-# " + t(
-                    "L'IA relit les messages suspects : message supprimé et auteur exclu 10 min.",
-                    "The AI reviews suspicious messages: message deleted and author timed out 10 min.",
+                    "L'IA relit les messages suspects (insultes, majuscules, mentions de masse…).",
+                    "The AI reviews suspicious messages (insults, caps, mass mentions…).",
                 )
             ),
             accessory=bouton_ia,

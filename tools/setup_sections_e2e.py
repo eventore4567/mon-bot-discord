@@ -183,7 +183,7 @@ async def main() -> int:
     await cliquer(bot, bouton(view, "Activer"))
     texte_mod = "\n".join(i.content for i in view.walk_children() if isinstance(i, discord.ui.TextDisplay))
     check(await ultimate.etat_ia_moderation(bot, guild.id) == "timeout" and view.page == "section:moderation"
-          and "🟢 Active" in texte_mod and bouton(view, "Désactiver") is not None,
+          and "🟢 Active · supprime et exclut 10 min" in texte_mod and bouton(view, "Désactiver") is not None,
           "« Activer » allume l'IA de modération en base (supprime + exclut 10 min)", texte_mod[-160:])
     cog_ultimate = bot.get_cog("SentriXUltimate")
     check(await cog_ultimate._enabled(guild.id, "ai_moderation"),
@@ -192,6 +192,14 @@ async def main() -> int:
     check(await ultimate.etat_ia_moderation(bot, guild.id) is None
           and not await cog_ultimate._enabled(guild.id, "ai_moderation"),
           "« Désactiver » coupe les deux interrupteurs (aucun ne la laisse active)")
+    # Revue Codex (PR #722) : une config « alert » (+sentrixpro aimod) s'affiche telle quelle.
+    await ultimate.regler_ia_moderation(bot, guild.id, "alert")
+    view.clear_items()
+    await view._build_page(view.page)
+    texte_mod = "\n".join(i.content for i in view.walk_children() if isinstance(i, discord.ui.TextDisplay))
+    check("prévient le staff" in texte_mod and "exclut 10 min" not in texte_mod,
+          "une IA réglée sur « alerte » affiche « prévient le staff », pas une exclusion", texte_mod[-160:])
+    await ultimate.regler_ia_moderation(bot, guild.id, None)
 
     from utils import log_service
     from cogs import setup_v2_core as core
