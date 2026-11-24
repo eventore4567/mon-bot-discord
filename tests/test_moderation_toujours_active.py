@@ -47,7 +47,10 @@ def test_les_autres_modules_restent_desactivables(bot):
 
 
 def test_plus_aucun_bouton_pour_couper_la_moderation():
+    from cogs import setup_moderation_clear_v76 as v76
+
     assert "Désactiver la modération" not in inspect.getsource(v74)
+    assert "Désactiver la modération" not in inspect.getsource(v76)
     view = type("V", (), {"bot": None, "guild": None})()
     select = scc.ModuleSwitchSelect(view, {"moderation": "enabled", "security": "enabled"})
     assert "moderation" not in [o.value for o in select.options]

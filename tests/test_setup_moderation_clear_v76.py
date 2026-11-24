@@ -59,8 +59,11 @@ def test_la_page_moderation_suit_la_presentation_de_la_securite():
 
     assert "securite_simple.conteneur(" in source, "la bande de bannière manquait"
     assert 'icons.titre("mod", "Modération")' in source
-    # Plus de bouton d'état figé : le bouton Activer/Désactiver dit déjà l'état.
+    # Plus de bouton d'état figé.
     assert 'label="Activée" if enabled else "Désactivée"' not in source
     assert "### État actuel" not in source
-    # Les quatre actions tiennent sur une seule rangée.
-    assert "ActionRow(use_default, customize, disable_dm, toggle)" in source
+    # 24/11/2026 : la modération ne se désactive plus (ALWAYS_ON_MODULES) ; le
+    # bouton Activer/Désactiver a disparu, les trois actions des MP de
+    # sanction restent sur une seule rangée.
+    assert "ActionRow(use_default, customize, disable_dm)" in source
+    assert "Désactiver la modération" not in source

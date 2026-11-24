@@ -109,7 +109,6 @@ async def _set_dm_custom(view: v74.SentriXSetupV74, action: str, message: str) -
 
 
 async def _build_moderation_v76(self: v74.SentriXSetupV74) -> None:
-    enabled = await core.module_enabled(self.bot, self.guild.id, "moderation")
     conf = await self.bot.db.get_guild_config(self.guild.id)
     try:
         warn_threshold = int(setup_ui._get(conf, "warn_ban_threshold") or 0)
@@ -149,24 +148,6 @@ async def _build_moderation_v76(self: v74.SentriXSetupV74) -> None:
         + (f", dont **{custom_dm_count} personnalisés**" if custom_dm_count else "")
     ))
 
-    toggle = discord.ui.Button(
-        label="🛡️ Désactiver la modération" if enabled else "🛡️ Activer la modération",
-        style=discord.ButtonStyle.danger if enabled else discord.ButtonStyle.success,
-    )
-
-    async def toggle_moderation(interaction: discord.Interaction):
-        if not interaction.response.is_done():
-            await interaction.response.defer()
-        await core.set_module_enabled(
-            self.bot,
-            self.guild.id,
-            "moderation",
-            not enabled,
-            actor_id=interaction.user.id,
-        )
-        await self.refresh(interaction)
-
-    toggle.callback = toggle_moderation
     container.add_item(discord.ui.Separator())
 
     threshold_options = [
@@ -327,7 +308,7 @@ async def _build_moderation_v76(self: v74.SentriXSetupV74) -> None:
     use_default.callback = use_default_dm
     customize.callback = customize_dm
     disable_dm.callback = disable_selected_dm
-    container.add_item(discord.ui.ActionRow(use_default, customize, disable_dm, toggle))
+    container.add_item(discord.ui.ActionRow(use_default, customize, disable_dm))
 
     self._add_navigation(container)
     self.add_item(container)
