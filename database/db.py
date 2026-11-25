@@ -2975,6 +2975,15 @@ class Database:
             price = int(item["price"] or 0)
             if price <= 0:
                 return "not_found", None
+            # 25/11/2026 : stock et promotion (venaient de +shopstock/+shoppromo,
+            # jamais chargés en production depuis août), réglés dans /setup → Économie.
+            regle = await self.regle_boutique(guild_id, item_id)
+            if regle is not None:
+                if regle["stock"] == 0:
+                    return "out_of_stock", item
+                if regle["prix_promo"]:
+                    item = dict(item)
+                    item["price"] = price = min(price, regle["prix_promo"])
             role_id = item["role_id"]
             if role_id:
                 reservation = await self._conn.execute(
@@ -3011,8 +3020,55 @@ class Database:
                 "VALUES (?, ?, NULL, 'buy', ?, ?, ?)",
                 (guild_id, user_id, price, now(), f"Achat : {item['name']}"),
             )
+            if regle is not None and regle["stock"] > 0:
+                await self._conn.execute(
+                    "UPDATE v17_shop_rules SET stock = stock - 1, updated_at = ? "
+                    "WHERE guild_id = ? AND item_id = ? AND stock > 0",
+                    (now(), guild_id, item_id),
+                )
             await self._conn.commit()
             return "ok", item
+
+    SCHEMA_REGLES_BOUTIQUE = (
+        "CREATE TABLE IF NOT EXISTS v17_shop_rules (guild_id INTEGER NOT NULL, item_id INTEGER NOT NULL, "
+        "stock INTEGER NOT NULL DEFAULT -1, sale_price INTEGER, sale_ends_at INTEGER, "
+        "available_from INTEGER, available_until INTEGER, updated_at INTEGER, PRIMARY KEY (guild_id, item_id))"
+    )
+
+    async def regle_boutique(self, guild_id: int, item_id: int) -> dict | None:
+        """Stock (-1 = illimité) et prix promo en cours d'un article, ou None."""
+        try:
+            row = await self.fetchone(
+                "SELECT stock, sale_price, sale_ends_at FROM v17_shop_rules WHERE guild_id = ? AND item_id = ?",
+                (guild_id, item_id),
+            )
+        except Exception:  # table absente : aucune règle
+            return None
+        if not row:
+            return None
+        promo = int(row["sale_price"] or 0)
+        fin = int(row["sale_ends_at"] or 0)
+        if promo and fin and fin < now():
+            promo = 0
+        return {"stock": int(row["stock"] if row["stock"] is not None else -1), "prix_promo": promo, "fin_promo": fin}
+
+    async def regler_boutique(self, guild_id: int, item_id: int, *, stock: int | None = None,
+                              prix_promo: int | None = None, fin_promo: int | None = None) -> None:
+        await self.execute(self.SCHEMA_REGLES_BOUTIQUE)
+        await self.execute(
+            "INSERT OR IGNORE INTO v17_shop_rules (guild_id, item_id, stock, updated_at) VALUES (?, ?, -1, ?)",
+            (guild_id, item_id, now()),
+        )
+        if stock is not None:
+            await self.execute(
+                "UPDATE v17_shop_rules SET stock = ?, updated_at = ? WHERE guild_id = ? AND item_id = ?",
+                (int(stock), now(), guild_id, item_id),
+            )
+        if prix_promo is not None:
+            await self.execute(
+                "UPDATE v17_shop_rules SET sale_price = ?, sale_ends_at = ?, updated_at = ? WHERE guild_id = ? AND item_id = ?",
+                (int(prix_promo) or None, int(fin_promo or 0) or None, now(), guild_id, item_id),
+            )
 
     async def refund_shop_item(self, guild_id: int, user_id: int, item, reason: str):
         """Rembourse un achat si Discord refuse ensuite l'attribution du rôle."""

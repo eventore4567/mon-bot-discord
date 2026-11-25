@@ -154,12 +154,109 @@ class EconomySetupView(AdminView):
                 ).build()
             )
 
+        async def boutique(i):
+            await i.response.edit_message(
+                view=await ShopRulesView(self.bot, self.guild, self.owner_id).build()
+            )
+
         box.add_item(
             discord.ui.ActionRow(
                 button("Créer un panneau", publish),
                 button("Régler l'économie", settings),
+                button("Boutique : stock et promos", boutique),
             )
         )
+        self.add_item(box)
+        return self
+
+    async def refresh(self, interaction):
+        await self.build()
+        await interaction.response.edit_message(view=self)
+
+
+#: Promotions proposées : (pourcentage de réduction, durée en heures).
+PROMOS = (("10-24", "−10 % pendant 24 h"), ("25-24", "−25 % pendant 24 h"),
+          ("50-24", "−50 % pendant 24 h"), ("25-168", "−25 % pendant 7 jours"), ("0-0", "Aucune promotion"))
+STOCKS = (("-1", "Stock illimité"), ("0", "Rupture (plus en vente)"), ("1", "1 exemplaire"),
+          ("5", "5 exemplaires"), ("10", "10 exemplaires"), ("25", "25 exemplaires"), ("50", "50 exemplaires"))
+
+
+class ShopRulesView(AdminView):
+    """25/11/2026 : stock et promotions (venaient de +shopstock/+shoppromo,
+    jamais chargés en production depuis août), sans nouvelle commande."""
+
+    article: int | None = None
+
+    async def build(self):
+        from database.db import now
+
+        self.clear_items()
+        articles = await self.bot.db.fetchall(
+            "SELECT id, name, price FROM shop_items WHERE guild_id = ? ORDER BY id LIMIT 25", (self.guild.id,)
+        )
+        box = discord.ui.Container(accent_colour=GOLD)
+        lignes = []
+        for a in articles:
+            regle = await self.bot.db.regle_boutique(self.guild.id, int(a["id"]))
+            etat = []
+            if regle and regle["stock"] >= 0:
+                etat.append("rupture" if regle["stock"] == 0 else f"stock {regle['stock']}")
+            if regle and regle["prix_promo"]:
+                etat.append(f"promo {regle['prix_promo']} jusqu'à <t:{regle['fin_promo']}:R>")
+            lignes.append(f"• **{a['name']}** · {a['price']}" + (f" · {' · '.join(etat)}" if etat else ""))
+        box.add_item(discord.ui.TextDisplay(
+            "## Boutique : stock et promos\n"
+            + ("\n".join(lignes) if lignes else "-# Aucun article en vente. Ajoutez-en avec `+shoprole add`.")
+        ))
+
+        async def retour(i):
+            await i.response.edit_message(
+                view=await EconomySetupView(self.bot, self.guild, self.owner_id).build()
+            )
+
+        if articles:
+            choix = discord.ui.Select(
+                placeholder="Article à régler",
+                options=[discord.SelectOption(label=str(a["name"])[:100], value=str(a["id"]),
+                                              default=self.article == int(a["id"])) for a in articles],
+            )
+
+            async def choisir(i):
+                self.article = int(choix.values[0])
+                await self.refresh(i)
+
+            choix.callback = choisir
+            box.add_item(discord.ui.ActionRow(choix))
+        if self.article is not None:
+            stock = discord.ui.Select(
+                placeholder="Stock",
+                options=[discord.SelectOption(label=libelle, value=v) for v, libelle in STOCKS],
+            )
+            promo = discord.ui.Select(
+                placeholder="Promotion",
+                options=[discord.SelectOption(label=libelle, value=v) for v, libelle in PROMOS],
+            )
+
+            async def regler_stock(i):
+                await self.bot.db.regler_boutique(self.guild.id, self.article, stock=int(stock.values[0]))
+                await self.refresh(i)
+
+            async def regler_promo(i):
+                pourcent, heures = (int(x) for x in promo.values[0].split("-"))
+                article = next((a for a in articles if int(a["id"]) == self.article), None)
+                if article is None:
+                    return await self.refresh(i)
+                prix = max(1, int(int(article["price"]) * (100 - pourcent) / 100)) if pourcent else 0
+                await self.bot.db.regler_boutique(
+                    self.guild.id, self.article, prix_promo=prix, fin_promo=now() + heures * 3600 if prix else 0,
+                )
+                await self.refresh(i)
+
+            stock.callback = regler_stock
+            promo.callback = regler_promo
+            box.add_item(discord.ui.ActionRow(stock))
+            box.add_item(discord.ui.ActionRow(promo))
+        box.add_item(discord.ui.ActionRow(button("Retour économie", retour)))
         self.add_item(box)
         return self
 
