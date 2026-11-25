@@ -288,10 +288,11 @@ class EnterpriseSuite(commands.Cog, name=_COG_NAME):
         self._backup_lock = asyncio.Lock()
         self._automation_locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._canary_ran = False
-        self.metrics_loop.start()
+        # 25/11/2026 : rechargé pour les recours et le modmail seulement. Les
+        # boucles de métriques, d'analyses et de sauvegarde (mortes depuis
+        # août) ne repartent pas : elles écriraient en base toutes les minutes
+        # et feraient doublon avec la supervision actuelle.
         self.automation_loop.start()
-        self.analytics_loop.start()
-        self.backup_loop.start()
 
     def cog_unload(self):
         for loop in (self.metrics_loop, self.automation_loop, self.analytics_loop, self.backup_loop):
@@ -821,7 +822,8 @@ class EnterpriseSuite(commands.Cog, name=_COG_NAME):
         if message.author.bot:
             return
         if message.guild is not None:
-            self._message_counters[(message.guild.id, message.channel.id, _hour_bucket())] += 1
+            if self.metrics_loop.is_running():
+                self._message_counters[(message.guild.id, message.channel.id, _hour_bucket())] += 1
             if isinstance(message.channel, discord.Thread):
                 row = await self.bot.db.fetchone(
                     "SELECT * FROM modmail_threads WHERE thread_id=? AND status='open' ORDER BY id DESC LIMIT 1",
@@ -1354,8 +1356,11 @@ async def setup(bot: commands.Bot) -> None:
         return  # déjà installé par un autre chemin de démarrage : un seul module
     infra = getattr(bot, "sentrix_infra", None)
     if infra is None:
+        # 25/11/2026 : PAS de connexion — elle ouvrait une seconde réserve de
+        # connexions PostgreSQL (POSTGRES_URL) pour un simple miroir
+        # d'évènements. Sans connexion, EnterpriseInfra ne fait rien (repli
+        # prévu) et tout passe par la base de SentriX.
         infra = EnterpriseInfra()
-        await infra.connect()
         bot.sentrix_infra = infra
     service = EnterpriseSuite(bot, infra)
     await bot.add_cog(service)

@@ -34,12 +34,30 @@ def message_prive(bot, texte: str) -> discord.Message:
 
 
 async def main() -> int:
+    from utils import enterprise_infra
+
+    connexions = []
+    original_connect = enterprise_infra.EnterpriseInfra.connect
+
+    async def connect_espion(self):
+        connexions.append(self)
+        return await original_connect(self)
+
+    enterprise_infra.EnterpriseInfra.connect = connect_espion
     bot = await h.boot(quiet=True)
     guild = await h.setup_world(bot)
     support = bot.get_cog("EnterpriseSuite")
     check(support is not None, "le module recours/modmail est chargé au démarrage")
     if support is None:
         os._exit(1)
+
+    # Pas de seconde réserve de connexions PostgreSQL, ni de boucles qui
+    # écrivent toutes les minutes (métriques, analyses, sauvegardes).
+    check(not connexions and getattr(support.infra, "pg_pool", None) is None,
+          "le module n'ouvre aucune connexion PostgreSQL à part")
+    check(not support.metrics_loop.is_running() and not support.analytics_loop.is_running()
+          and not support.backup_loop.is_running(),
+          "les boucles de métriques, d'analyses et de sauvegarde ne tournent pas")
 
     reglages = await support.get_settings(h.GID)
     check(not int(reglages["appeals_enabled"]) and not int(reglages["modmail_enabled"]),
