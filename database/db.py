@@ -49,6 +49,24 @@ _CONFIG_PERSISTENCE_MARKERS = (
 )
 
 
+#: 25/11/2026 (« chaque commande se lance en retard ») : réglages relus par
+#: CHAQUE commande avant sa réponse (salons bloqués, salons autorisés, règles
+#: par rôle). Ils changent rarement : lus une fois puis gardés en mémoire, et
+#: oubliés dès qu'une écriture touche l'une de ces tables (ou après 60 s).
+_TABLES_LUES_PAR_CHAQUE_COMMANDE = (
+    "command_blocked_channels",
+    "command_channel_blocks",
+    "category_allowed_channels",
+    "command_role_permissions",
+)
+_CACHE_REGLAGES_TTL = 60.0
+
+
+def _table_lue_par_chaque_commande(query: str) -> bool:
+    texte = str(query or "").lower()
+    return any(table in texte for table in _TABLES_LUES_PAR_CHAQUE_COMMANDE)
+
+
 def _is_configuration_write(query: str) -> bool:
     normalized = " ".join(str(query or "").strip().lower().split())
     if not normalized.startswith(("insert ", "update ", "delete ", "replace ")):
@@ -1631,6 +1649,7 @@ class Database:
         # au même moment sur le même serveur (deux modérateurs qui agissent en même temps)
         # ne doivent jamais recevoir le même numéro.
         self._sanctions_lock = asyncio.Lock()
+        self._cache_reglages: dict = {}
         self._invite_join_lock = asyncio.Lock()
 
     @property
@@ -1964,6 +1983,12 @@ class Database:
             await self._conn.close()
 
     async def execute(self, query: str, params: tuple = ()):
+        if (
+            self._cache_reglages
+            and _table_lue_par_chaque_commande(query)
+            and not str(query).lstrip().lower().startswith(("select", "create table if not exists", "create index if not exists", "create unique index if not exists"))
+        ):
+            self._cache_reglages.clear()
         fast = getattr(self._conn, "execute_and_commit", None)
         if fast is not None:
             cur = await fast(query, params)
@@ -1975,16 +2000,43 @@ class Database:
         return cur
 
     async def fetchone(self, query: str, params: tuple = ()):
+        cle = self._cle_reglages("one", query, params)
+        if cle is not None:
+            trouve = self._cache_reglages.get(cle)
+            if trouve is not None and time.monotonic() - trouve[0] < _CACHE_REGLAGES_TTL:
+                return trouve[1]
         cur = await self._conn.execute(query, params)
         row = await cur.fetchone()
         await cur.close()
+        if cle is not None:
+            self._cache_reglages[cle] = (time.monotonic(), row)
         return row
 
     async def fetchall(self, query: str, params: tuple = ()):
+        cle = self._cle_reglages("all", query, params)
+        if cle is not None:
+            trouve = self._cache_reglages.get(cle)
+            if trouve is not None and time.monotonic() - trouve[0] < _CACHE_REGLAGES_TTL:
+                return list(trouve[1])
         cur = await self._conn.execute(query, params)
         rows = await cur.fetchall()
         await cur.close()
+        if cle is not None:
+            self._cache_reglages[cle] = (time.monotonic(), list(rows))
         return rows
+
+    def _cle_reglages(self, sorte: str, query: str, params) -> tuple | None:
+        """Clé de cache pour une LECTURE des réglages relus par chaque commande."""
+        if not _table_lue_par_chaque_commande(query):
+            return None
+        if not str(query).lstrip().lower().startswith("select"):
+            return None
+        if len(self._cache_reglages) > 5000:
+            self._cache_reglages.clear()
+        try:
+            return (sorte, query, tuple(params or ()))
+        except TypeError:
+            return None
 
     # ---------- Créateur(s) officiel(s) du bot ----------
 
