@@ -93,6 +93,15 @@ async def main() -> int:
     check(not ok and not leve and "plus récente" in message,
           "annuler un ancien mute ne lève pas l'exclusion d'un dossier plus récent", message)
 
+    # Codex #727 : idem pour un ban remplacé par un ban plus récent.
+    ban_a = await bot.db.record_sanction(h.GID, 525252, h.ADMIN_ID, "ban", "premier")
+    await bot.db.record_sanction(h.GID, 525252, h.ADMIN_ID, "ban", "second")
+    debut = len(h.CALLS)
+    ok, message = await cog.annuler_dossier(guild, ban_a, guild.get_member(h.ADMIN_ID))
+    check(not ok and "plus récente" in message
+          and not any(m == "DELETE" and "/bans/" in p for m, p, _ in h.CALLS[debut:]),
+          "annuler un ancien ban ne lève pas le ban d'un dossier plus récent", message)
+
     # Codex #727 : un modérateur n'annule pas ses propres avertissements.
     await commande(f"+warn <@{h.MOD_ID}> test hiérarchie")
     dossier_mod = await bot.db.fetchone(

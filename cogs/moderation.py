@@ -1730,6 +1730,19 @@ class Moderation(commands.Cog):
             erreur = checks.check_hierarchy(acteur, cible)
             if erreur:
                 return False, erreur
+        # Un ban ou une exclusion plus récent (autre dossier) a pu remplacer
+        # celui-ci : l'annuler ici lèverait la sanction d'un autre dossier.
+        if action != "warn":
+            famille = "('ban','tempban','hackban')" if action != "mute" else "('mute')"
+            plus_recent = await self.bot.db.fetchone(
+                f"SELECT MAX(case_number) AS n FROM sanctions WHERE guild_id=? AND user_id=? AND action IN {famille}",
+                (guild.id, user_id),
+            )
+            if plus_recent and int(plus_recent["n"] or 0) > int(numero):
+                return False, (
+                    f"Une sanction plus récente (dossier #{int(plus_recent['n'])}) a remplacé celle-ci : "
+                    "annulez plutôt ce dossier."
+                )
         try:
             if action in {"ban", "tempban", "hackban"}:
                 try:
@@ -1744,14 +1757,6 @@ class Moderation(commands.Cog):
                 membre = guild.get_member(user_id)
                 if membre is None:
                     return False, "Le membre n'est plus sur le serveur : son exclusion ne peut pas être retirée."
-                # Une exclusion plus récente (autre dossier) a pu remplacer celle-ci :
-                # l'annuler ici lèverait la sanction d'un autre dossier.
-                plus_recent = await self.bot.db.fetchone(
-                    "SELECT MAX(case_number) AS n FROM sanctions WHERE guild_id=? AND user_id=? AND action='mute'",
-                    (guild.id, user_id),
-                )
-                if plus_recent and int(plus_recent["n"] or 0) > int(numero):
-                    return False, f"Une exclusion plus récente (dossier #{int(plus_recent['n'])}) a remplacé celle-ci : annulez plutôt ce dossier."
                 await membre.timeout(None, reason=raison)
                 await moderation_service._apply_mute_role(self.bot, guild, membre, add=False, reason=raison)
                 detail = "exclusion temporaire retirée"
