@@ -3136,9 +3136,9 @@ class Ai(commands.Cog, name="Ai"):
             # 25/11/2026 : SentriX propose un prompt d'image et on lui répond
             # « oui vas-y fais » : l'image est générée avec CE prompt.
             if reply_to_bot and isinstance(referenced, discord.Message):
-                from utils.ai_image_intents import est_un_oui, prompt_propose
+                from utils.ai_image_intents import est_un_oui, prompt_propose, texte_du_message
 
-                propose = prompt_propose(referenced.content)
+                propose = prompt_propose(texte_du_message(referenced))
                 if propose and est_un_oui(question):
                     await self._send_generated_image_natural(message, f"Crée une image : {propose}")
                     return

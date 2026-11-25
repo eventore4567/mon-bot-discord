@@ -29,3 +29,13 @@ def test_oui_apres_un_prompt_propose_retrouve_le_prompt():
     assert prompt_propose("Le ban est fait. **Membre** : @x") is None
     assert all(est_un_oui(t) for t in ("oui vzi fait", "vas-y", "go", "ok fais le"))
     assert not any(est_un_oui(t) for t in ("non", "oui mais change complètement le style et la couleur stp"))
+
+
+def test_revue_codex_pr_726():
+    # Une acceptation nuancée reste une conversation (pas de génération à l'identique).
+    for texte in ("oui mais en rouge", "ok ne génère rien", "oui attends avant de lancer"):
+        assert not est_un_oui(texte), texte
+    # « donne/envoie » ne compte que s'il porte sur l'image elle-même.
+    for texte in ("donne-moi ton avis sur cette image", "donne une description de cette photo"):
+        assert not is_image_creation_request(texte), texte
+    assert is_image_creation_request("envoie moi une photo d'un chat")

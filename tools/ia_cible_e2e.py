@@ -124,6 +124,22 @@ async def main() -> int:
     check(any("robot Discord futuriste" in g for g in generees),
           "« oui vzi fait » après un prompt proposé : l'image est générée avec ce prompt", str(generees)[:160])
 
+    # Revue Codex (PR #726) : le prompt proposé dans une CARTE de l'IA.
+    generees.clear()
+    data = h.message_payload(h.next_id(), h.CID, "", author_id=h.BOT_ID, name="SentriX")
+    data["components"] = [{"type": 17, "components": [{"type": 10, "content":
+        "Voici un prompt : **un toit de maison moderne vu d'en bas, ciel bleu**"}]}]
+    carte_msg = discord.Message(state=bot._connection, channel=guild.get_channel(h.CID), data=data)
+    from utils import reponses_ia
+    reponses_ia.noter(carte_msg)
+    oui = h.build_message(bot, guild, "vas-y", author_id=h.AUTHOR_ID, author_roles=(h.ADMIN_ROLE_ID,))
+    oui.reference = discord.MessageReference.from_message(carte_msg)
+    oui.reference.resolved = carte_msg
+    bot.dispatch("message", oui)
+    await h.settle(idle=0.8, maximum=8)
+    check(any("toit de maison moderne" in g for g in generees),
+          "« vas-y » à un prompt proposé dans une carte de l'IA : l'image est générée", str(generees)[:160])
+
     failed = [r for r in RESULTS if not r[0]]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} étapes réussies.")
     sys.stdout.flush()
