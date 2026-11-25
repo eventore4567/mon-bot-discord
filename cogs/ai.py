@@ -2264,7 +2264,13 @@ class Ai(commands.Cog, name="Ai"):
             # nomme et l'action vise sa mention ; introuvable ou ambigu, on
             # passe par le chemin normal qui le dit ou demande lequel.
             cible = str(action.slots.get("target") or "").strip()
-            if cible and not cible.startswith("__") and message.guild is not None:
+            # Revue Codex (PR #725) : seulement pour une action qui VISE un membre.
+            # Sinon (purge « de @x »), une cible introuvable faisait sauter la
+            # confirmation d'une action destructrice.
+            if (
+                cible and not cible.startswith("__") and message.guild is not None
+                and getattr(spec, "target_kind", None) == "member"
+            ):
                 trouve = ai_actions.resolve_member(
                     message.guild, cible, message=message,
                     bot_user_id=getattr(self.bot.user, "id", None),
@@ -3019,7 +3025,14 @@ class Ai(commands.Cog, name="Ai"):
             not reply_to_bot and id_cite and referenced is None and len(content) <= 200
             and (id_cite in self.__dict__.get("_images_generees", {}) or _RETOUCHE_RE.search(content))
         )
+        # Revue Codex (PR #725) : bot_experience_v5 ne traite plus les réponses à
+        # SentriX sur un serveur ; c'est donc ici que se récupère le message cité
+        # quand Discord ne l'a pas joint, pour une réponse texte ordinaire aussi.
         if bot_id is not None and (demande_retouche or (
+            not reply_to_bot
+            and referenced is None
+            and id_cite
+        ) or (
             image_attachments
             and not reply_to_bot
             and getattr(reference, "message_id", None)
