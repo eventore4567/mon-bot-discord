@@ -303,6 +303,12 @@ class EnterpriseSuite(commands.Cog, name=_COG_NAME):
 
     # ----------------------------------------------------------- settings / permissions
     async def ensure_settings(self, guild_id: int) -> None:
+        # Une seule écriture par serveur et par démarrage : get_settings est relu
+        # à chaque commande (automatisations) et à chaque MP.
+        connus = self.__dict__.setdefault("_reglages_assures", set())
+        if int(guild_id) in connus:
+            return
+        connus.add(int(guild_id))
         # 25/11/2026 : recours et modmail se choisissent dans /setup → Modération ;
         # rien ne s'active tout seul sur un serveur.
         await self.bot.db.execute(

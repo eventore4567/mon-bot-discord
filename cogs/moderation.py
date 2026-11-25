@@ -2342,4 +2342,16 @@ class Moderation(commands.Cog):
 
 
 async def setup(bot: commands.Bot):
+    # 25/11/2026 (alerte « Base de données lente : execute 1732 ms » juste après
+    # le déploiement) : ces tables étaient créées au premier usage, pendant un
+    # +warn. Sur PostgreSQL une création de table recharge le catalogue sous le
+    # verrou d'écriture (jusqu'à ~1,5 s). Créées ici, au chargement : les
+    # CREATE … IF NOT EXISTS rejoués ensuite sont gratuits (déjà connus).
+    from services.moderation import SCHEMA_LIENS_AVERTISSEMENT
+
+    for schema in (_SCHEMA_PALIERS, _SCHEMA_ANNULATIONS, SCHEMA_LIENS_AVERTISSEMENT):
+        try:
+            await bot.db.execute(schema)
+        except Exception:  # noqa: BLE001 — créée au premier usage, comme avant
+            logger.warning("Table de modération non créée au démarrage.", exc_info=True)
     await bot.add_cog(Moderation(bot))
