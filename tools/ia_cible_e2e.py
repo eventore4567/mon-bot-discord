@@ -83,6 +83,27 @@ async def main() -> int:
           "réponse texte sans message cité joint : SentriX va le chercher",
           str([h.describe_call(*c)[:80] for c in h.CALLS[since:]][:4]))
 
+    # Revue Codex (PR #725) : répondre (sans ping) à une CARTE de réponse de l'IA
+    # continue la conversation ; un panneau ordinaire, lui, ne la déclenche pas.
+    from utils import reponses_ia
+
+    async def repondre_a(carte_ia: bool) -> list:
+        data = h.message_payload(h.next_id(), h.CID, "", author_id=h.BOT_ID, name="SentriX")
+        data["components"] = [{"type": 17, "components": [{"type": 10, "content": "longue réponse"}]}]
+        cite_msg = discord.Message(state=bot._connection, channel=guild.get_channel(h.CID), data=data)
+        if carte_ia:
+            reponses_ia.noter(cite_msg)
+        suite = h.build_message(bot, guild, "et ensuite ?", author_id=h.AUTHOR_ID, author_roles=(h.ADMIN_ROLE_ID,))
+        suite.reference = discord.MessageReference.from_message(cite_msg)
+        suite.reference.resolved = cite_msg
+        debut = len(h.CALLS)
+        bot.dispatch("message", suite)
+        await h.settle(idle=0.8, maximum=8)
+        return [c for c in h.CALLS[debut:] if c[0] == "POST" and c[1].startswith(f"/channels/{h.CID}/")]
+
+    check(bool(await repondre_a(True)), "réponse à une carte de l'IA : la conversation continue")
+    check(not await repondre_a(False), "réponse à un panneau ordinaire : rien ne se déclenche")
+
     failed = [r for r in RESULTS if not r[0]]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} étapes réussies.")
     sys.stdout.flush()

@@ -3057,12 +3057,17 @@ class Ai(commands.Cog, name="Ai"):
         # 06/11/2026 : répondre à une réponse de SentriX continue la conversation,
         # même avec le ping de réponse désactivé. Seulement sur ses messages texte
         # (ses réponses IA) : répondre à un panneau ou à un log ne le déclenche pas.
-        reponse_a_l_ia = (
-            reply_to_bot
-            and isinstance(referenced, discord.Message)
-            and bool((referenced.content or "").strip())
-            and not referenced.embeds
-            and not getattr(referenced, "components", None)
+        from utils import reponses_ia
+
+        reponse_a_l_ia = reply_to_bot and isinstance(referenced, discord.Message) and (
+            (
+                bool((referenced.content or "").strip())
+                and not referenced.embeds
+                and not getattr(referenced, "components", None)
+            )
+            # Revue Codex (PR #725) : une longue réponse de l'IA est une carte ;
+            # y répondre continue aussi la conversation (utils/reponses_ia).
+            or reponses_ia.est_reponse_ia(referenced)
         )
         if not mentioned and not name_trigger and not reponse_a_l_ia and not (
             image_attachments and (pending or reply_to_bot)
