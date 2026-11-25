@@ -98,7 +98,7 @@ def test_un_meme_incident_n_est_signale_qu_une_fois(monkeypatch):
     monkeypatch.setattr(production_ops, "_resolve_alert_target", cible)
     bot = _Bot([], int(time.time()) - 600)
     bot._sentrix_observability_v26["slow_commands"] = [
-        {"command": "doors", "ms": 13323, "at": int(time.time()) - 60}
+        {"command": "help", "ms": 13323, "at": int(time.time()) - 60}
     ]
     etat = production_ops._ops_state(bot)
 
@@ -113,8 +113,22 @@ def test_un_meme_incident_n_est_signale_qu_une_fois(monkeypatch):
     assert len(envoyes) == 1, "le même incident est reparti"
     # Un NOUVEL incident (autre instant) est bien signalé.
     bot._sentrix_observability_v26["slow_commands"].append(
-        {"command": "doors", "ms": 9000, "at": int(time.time())}
+        {"command": "help", "ms": 9000, "at": int(time.time())}
     )
     etat["last_alert_at"] = 0
     asyncio.run(tour())
     assert len(envoyes) == 2
+
+
+def test_jeux_et_operations_longues_par_nature_n_alertent_pas():
+    """25/11/2026 : doors (partie en cours), clear, protection restore."""
+    for commande in ("doors", "clear", "protection restore"):
+        bot = _Bot([], int(time.time()) - 600)
+        bot._sentrix_observability_v26["slow_commands"] = [
+            {"command": commande, "ms": 30000, "at": int(time.time())}
+        ]
+        assert production_ops._health_alert(bot) == (None, None), commande
+    bot = _Bot([], int(time.time()) - 600)
+    bot._sentrix_observability_v26["slow_commands"] = [{"command": "help", "ms": 6158, "at": int(time.time())}]
+    cle, _ = production_ops._health_alert(bot)
+    assert cle.startswith("slow-command:help@")
