@@ -302,11 +302,8 @@ class AnnulerDossierView(discord.ui.View):
         await interaction.response.defer(ephemeral=True)
         ok, texte = await self.cog.annuler_dossier(interaction.guild, self.numero, interaction.user)
         if ok:
-            button.disabled = True
-            try:
-                await interaction.message.edit(view=self)
-            except (discord.HTTPException, AttributeError):
-                pass
+            # Pas d'édition du message (Components V2) : un second clic est
+            # refusé par annuler_dossier (« déjà été annulé »).
             try:
                 await journaliser(self.cog.bot, interaction, "moderation", "↩️ Sanction annulée", {
                     "📁 Dossier": f"#{self.numero}", "📝 Détail": texte,
@@ -1805,7 +1802,8 @@ class Moderation(commands.Cog):
             vue = AnnulerDossierView(self, ctx.guild.id, numero)
         panneau = panels.depuis_embed(e)
         if vue is not None:
-            return await ctx.send(embed=e, view=vue, ephemeral=reponse_privee(ctx)) if ctx.interaction else await ctx.send(embed=e, view=vue)
+            # La vue est relogée DANS le panneau (Components V2 refuse embed + vue).
+            panneau = panels.avec_composants(panneau, vue)
         await panels.envoyer(ctx, panneau)
 
     @commands.hybrid_command(name="modhistory", description="Afficher l'historique complet des sanctions d'un membre (tous types confondus).", with_app_command=False)
