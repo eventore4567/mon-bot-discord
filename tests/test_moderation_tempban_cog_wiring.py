@@ -125,7 +125,8 @@ class TempbanCogWiringTests(unittest.IsolatedAsyncioTestCase):
         guild.ban.assert_awaited_once()
         ctx.send.assert_awaited()
         # Succès : confirmation visible en carte native Components V2.
-        self.assertIsNotNone(ctx.send.await_args.kwargs.get("view"))
+        # 25/11/2026 : la confirmation est une phrase libre (texte simple, sans carte).
+        self.assertIn("a été banni", ctx.send.await_args.kwargs.get("content") or "")
 
     async def test_echec_de_la_programmation_de_la_levee_n_empeche_pas_la_confirmation_de_succes(self):
         """Le DEUXIÈME trou corrigé par cette migration : l'écriture dans
@@ -140,7 +141,8 @@ class TempbanCogWiringTests(unittest.IsolatedAsyncioTestCase):
         guild.ban.assert_awaited_once()
         ctx.send.assert_awaited()
         # Succès : confirmation visible en carte native Components V2.
-        self.assertIsNotNone(ctx.send.await_args.kwargs.get("view"))
+        # 25/11/2026 : la confirmation est une phrase libre (texte simple, sans carte).
+        self.assertIn("a été banni", ctx.send.await_args.kwargs.get("content") or "")
 
 
 if __name__ == "__main__":

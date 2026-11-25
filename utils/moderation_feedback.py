@@ -53,6 +53,35 @@ def _phrase_seule(texte: str, *, refus: bool) -> discord.ui.LayoutView:
     return view
 
 
+def phrase_de_sanction(
+    *, action: str, target: discord.abc.User, reason: str = "",
+    case_number: int | None = None, suffix: str = "", duration: str | None = None,
+) -> str:
+    """La phrase envoyée après une sanction (texte simple, 25/11/2026)."""
+    return texte_de(build_sanction_confirmation(
+        action=action, target=target, reason=reason, case_number=case_number,
+        suffix=suffix, duration=duration,
+    ))
+
+
+def phrase_de_refus(message: str) -> str | None:
+    vue = build_hierarchy_refusal(message)
+    return texte_de(vue) if vue is not None else None
+
+
+def texte_de(vue: discord.ui.LayoutView) -> str:
+    morceaux: list[str] = []
+
+    def parcourir(item) -> None:
+        if isinstance(getattr(item, "content", None), str):
+            morceaux.append(item.content)
+        for enfant in list(getattr(item, "children", ()) or ()):
+            parcourir(enfant)
+
+    parcourir(vue)
+    return "\n".join(morceaux)
+
+
 def build_sanction_confirmation(
     *, action: str, target: discord.abc.User,
     actor: discord.abc.User | None = None,
@@ -77,7 +106,8 @@ def build_sanction_confirmation(
     texte = f"{emoji} " + modele.format(m=mention, d=d)
     motif = str(reason or "").strip()
     if motif and motif.casefold() not in {"aucune raison fournie", "aucune raison"}:
-        texte += f" Motif : {_mark_safe(motif, max_length=200)}"
+        motif_propre = _mark_safe(motif, max_length=200)
+        texte += f" Motif : {motif_propre}" + ("" if motif_propre.endswith((".", "!", "?", "…")) else ".")
     if suffix:
         texte += f" {_mark_safe(suffix, max_length=120)}"
     if case_number is None:

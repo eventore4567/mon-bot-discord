@@ -427,6 +427,13 @@ def _install_reply_and_dm_conversations(bot: commands.Bot) -> None:
                 logger.debug("Refus de conversation privée non remis.", exc_info=True)
             return
 
+        # 25/11/2026 : sur un serveur, cogs/ai.py (Ai.on_message) traite déjà les
+        # réponses à SentriX (reply_to_bot), avec ses garde-fous (salon bloqué,
+        # IA coupée). Ce second traitement relançait la même analyse ; quand elle
+        # ne redonnait rien, il demandait au modèle une réponse libre : le « ok »
+        # qui suivait chaque sanction lancée par l'IA. Il s'arrête ici.
+        return
+
         # Les mentions et mots de réveil sont déjà pris en charge par les listeners
         # historiques SentriX/Odboug. Ici on ne traite QUE la continuation par réponse.
         if bot.user is not None and bot.user in message.mentions:

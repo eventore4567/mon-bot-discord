@@ -90,33 +90,32 @@ def test_hierarchy_refusal_is_compact_and_actionable_without_big_banner():
 
 @pytest.mark.asyncio
 async def test_moderation_shared_confirmation_uses_one_native_panel_and_no_ping():
+    # 25/11/2026 Jayden : « une phrase libre pour mute, ban, warn… ». Ce test
+    # exigeait la carte ; il vérifie maintenant la phrase libre (texte simple).
     cog = Moderation.__new__(Moderation)
     context = SimpleNamespace(
         guild=SimpleNamespace(id=111111111111111111),
         author=SimpleNamespace(id=987654321012345678),
     )
-    with patch.object(panels, "envoyer", AsyncMock()) as send:
+    with patch.object(panels, "phrase_libre", AsyncMock()) as send:
         await cog._confirm_sanction(
             context, "kick", _target(), "Spam", 48,
         )
     assert send.await_count == 1
-    assert isinstance(send.await_args.args[1], discord.ui.LayoutView)
-    # envoyer applies AllowedMentions.none when actually sending the view.
-
+    assert send.await_args.args[1] == "🚪 <@123456789012345678> a été expulsé. Motif : Spam."
+    # phrase_libre passe par texte_court, qui n'autorise aucune mention.
 
 @pytest.mark.asyncio
 async def test_moderation_refusal_uses_new_view_instead_of_legacy_full_panel():
+    # 25/11/2026 Jayden : « une phrase libre pour mute, ban, warn… ». Ce test
+    # exigeait la carte ; il vérifie maintenant la phrase libre (texte simple).
     cog = Moderation.__new__(Moderation)
     ctx = SimpleNamespace()
-    with patch.object(panels, "envoyer", AsyncMock()) as send, patch.object(
-        panels, "texte_court", AsyncMock()
-    ) as short:
+    with patch.object(panels, "phrase_libre", AsyncMock()) as send:
         await cog._reply(ctx, "SentriX ne peut pas sanctionner ce membre.", ephemere=True)
     send.assert_awaited_once()
     assert send.await_args.kwargs["ephemere"] is True
-    assert isinstance(send.await_args.args[1], discord.ui.LayoutView)
-    short.assert_not_awaited()
-
+    assert send.await_args.args[1].startswith("❌ Impossible")
 
 class _Tree:
     def __init__(self):

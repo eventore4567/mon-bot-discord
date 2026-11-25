@@ -135,8 +135,9 @@ class WarnCogWiringTests(unittest.IsolatedAsyncioTestCase):
 
         ctx.send.assert_awaited()
         # Succès de l'avertissement, y compris si le dossier n'est pas enregistré.
-        self.assertIsInstance(ctx.send.await_args.kwargs.get("view"), discord.ui.LayoutView)
-        self.assertIsNone(ctx.send.await_args.kwargs.get("content"))
+        # 25/11/2026 : phrase libre (texte simple, sans carte).
+        self.assertIn("a reçu un avertissement", ctx.send.await_args.kwargs.get("content") or "")
+        self.assertIsNone(ctx.send.await_args.kwargs.get("view"))
 
     async def test_echec_du_comptage_n_empeche_pas_la_confirmation_de_succes(self):
         cog = _make_cog()
@@ -148,7 +149,7 @@ class WarnCogWiringTests(unittest.IsolatedAsyncioTestCase):
         ctx.send.assert_awaited()
         # Le total inconnu n'apparaît plus dans la réponse courte : il est dans la
         # fiche envoyée aux logs (log_sanction), qui a bien été appelée.
-        self.assertIsInstance(ctx.send.await_args.kwargs.get("view"), discord.ui.LayoutView)
+        self.assertIn("a reçu un avertissement", ctx.send.await_args.kwargs.get("content") or "")
         cog.log_action.assert_awaited()
 
     async def test_ban_automatique_declenche_au_seuil_appelle_guild_ban(self):

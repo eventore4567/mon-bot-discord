@@ -48,25 +48,23 @@ def test_seules_les_hierarchies_compliquees_deviennent_des_panneaux():
 
 @pytest.mark.asyncio
 async def test_reponse_moderation_choisit_la_bonne_surface():
-    send_panel = AsyncMock()
-    send_text = AsyncMock()
+    # 25/11/2026 Jayden : « une phrase libre pour mute, ban, warn… ». Ce test
+    # exigeait la carte ; il vérifie maintenant la phrase libre (texte simple).
+    send = AsyncMock()
     ctx = SimpleNamespace()
-    with patch.object(sentrix_panels, "envoyer", send_panel), patch.object(sentrix_panels, "texte_court", send_text):
+    with patch.object(sentrix_panels, "phrase_libre", send):
         await Moderation._reply(
             object(),
             ctx,
             "SentriX ne peut pas sanctionner ce membre : son rôle le plus élevé est au-dessus.",
             ephemere=True,
         )
-        send_panel.assert_awaited_once()
-        assert send_panel.await_args.kwargs["ephemere"] is True
-        send_text.assert_not_awaited()
+        assert send.await_args.kwargs["ephemere"] is True
+        assert send.await_args.args[1].startswith("❌ Impossible")
 
-        send_panel.reset_mock()
+        send.reset_mock()
         await Moderation._reply(object(), ctx, "Le membre a été banni.")
-        send_text.assert_awaited_once()
-        send_panel.assert_not_awaited()
-
+        assert send.await_args.args[1] == "Le membre a été banni."
 
 def test_game_reward_route_vers_serveur_et_identite_joueur():
     assert log_categories.category_for("game_reward") == "server"

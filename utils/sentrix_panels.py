@@ -1082,6 +1082,13 @@ CARTES_COURTES = True
 def _en_carte_courte(kwargs: dict[str, Any]) -> dict[str, Any]:
     """Un texte court devient une petite carte : bande fine, le texte, et les
     boutons éventuels dans la carte — sans liseré coloré sur le flanc."""
+    if kwargs.get(_PHRASE_LIBRE):
+        # 25/11/2026 : une phrase libre reste du texte, sans carte ; ses boutons
+        # de suite éventuels restent dessous, dans une vue classique.
+        libre = dict(kwargs)
+        libre.pop(_PHRASE_LIBRE, None)
+        libre["content"] = commandes_en_code(str(libre.get("content") or ""))[:1900]
+        return libre
     texte = str(kwargs.get("content") or "").strip()
     if not CARTES_COURTES or not texte:
         return kwargs
@@ -1958,6 +1965,33 @@ def carte_refus(message: str) -> "Panneau":
         kind="danger",
         banniere=False,
     )
+
+
+_PHRASE_LIBRE = "_sentrix_phrase_libre"
+
+
+async def phrase_libre(
+    destination: Any, message: str, *, ephemere: bool = False, suites: bool = True, **extra: Any,
+):
+    """Une phrase en texte simple, sans carte.
+
+    25/11/2026 Jayden : « une phrase libre pour mute, ban, warn, unmute, unban,
+    unwarn ». Même chemin que :func:`texte_court` (commandes en code et en
+    « / », boutons de suite, ligne de mémoire du membre), sans le cadre.
+    ``suites=False`` (un refus) : la phrase seule, sans bouton ni mémoire.
+    """
+    if not suites:
+        kwargs: dict[str, Any] = {
+            "content": commandes_en_code(str(message))[:1900],
+            "allowed_mentions": _MENTIONS_AUCUNE, _PHRASE_LIBRE: True,
+        }
+        kwargs.update(extra)
+        jeton = TEXTE_BRUT.set(True)
+        try:
+            return await _envoyer_texte(destination, kwargs, ephemere=ephemere, supprimer_apres=None)
+        finally:
+            TEXTE_BRUT.reset(jeton)
+    return await texte_court(destination, message, ephemere=ephemere, **{_PHRASE_LIBRE: True}, **extra)
 
 
 async def texte_court(

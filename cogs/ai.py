@@ -2258,6 +2258,25 @@ class Ai(commands.Cog, name="Ai"):
         # Une source unique pour les deux chemins : classer une action `high`
         # suffit maintenant à lui donner sa confirmation, sans revenir ici.
         if not confirmed and ai_actions.exige_confirmation(spec):
+            # 25/11/2026 : « ban pp » affichait « Confirmation requise
+            # (target=pp) » AVANT de chercher le membre ; le clic échouait
+            # ensuite. Le membre est cherché d'abord : trouvé, la carte le
+            # nomme et l'action vise sa mention ; introuvable ou ambigu, on
+            # passe par le chemin normal qui le dit ou demande lequel.
+            cible = str(action.slots.get("target") or "").strip()
+            if cible and not cible.startswith("__") and message.guild is not None:
+                trouve = ai_actions.resolve_member(
+                    message.guild, cible, message=message,
+                    bot_user_id=getattr(self.bot.user, "id", None),
+                )
+                if trouve.member is None:
+                    # Le chemin normal refait la même recherche, sans exécuter :
+                    # il cite le nom introuvable ou liste les candidats.
+                    return await self._handle_parsed_action(message, action, prefix, confirmed=True)
+                action = ai_actions.ParsedAction(
+                    intent=action.intent, slots={**action.slots, "target": trouve.member.mention},
+                    confidence=action.confidence, source=action.source,
+                )
             view = _NaturalPlanConfirmView(
                 self,
                 message=message,
@@ -2460,10 +2479,11 @@ class Ai(commands.Cog, name="Ai"):
             member = resolution.member
             if member is not None:
                 self._remember_recent_target(message, member)
-            if member is None and "target" in spec.required:
-                await self._ask_for_missing_action_slot(message, action, "target")
-                return True
-            if target_text and member is None:
+            # 25/11/2026 : un nom donné mais introuvable (« ban pp ») recevait
+            # « Quel membre voulez-vous viser ? », comme si aucun nom n'avait été
+            # donné. Le nom cherché est maintenant cité (hors marqueurs internes
+            # comme « __recent__ », qui ne sont pas des noms).
+            if target_text and not str(target_text).startswith("__") and member is None:
                 self._remember_pending(message, action)
                 await message.reply(
                     f"Je ne trouve pas de membre correspondant clairement à « {target_text} ». "
@@ -2471,6 +2491,9 @@ class Ai(commands.Cog, name="Ai"):
                     mention_author=False,
                     allowed_mentions=discord.AllowedMentions.none(),
                 )
+                return True
+            if member is None and "target" in spec.required:
+                await self._ask_for_missing_action_slot(message, action, "target")
                 return True
 
         missing = ai_actions.missing_slots(action)
