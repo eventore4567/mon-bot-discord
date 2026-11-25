@@ -3444,10 +3444,11 @@ class Ai(commands.Cog, name="Ai"):
                     ai_service.get_daily_usage(self.bot, guild_id, user_id),
                     self._build_system_instructions(user_id, author_name, guild_id),
                 )
-            if used_today >= settings["daily_limit"]:
+            limite = await ai_service.limite_quotidienne(self.bot, guild_id, user_id, settings)
+            if used_today >= limite:
                 return {"ok": False, "error": (
-                    f"📅 Tu as atteint ta limite d'IA sur ce serveur ({settings['daily_limit']} demandes par jour). "
-                    f"Réessaie <t:{ai_service.prochaine_remise_a_zero()}:R>."
+                    f"📅 Vous avez atteint votre limite d'IA sur ce serveur ({limite} demandes par jour). "
+                    f"Réessayez <t:{ai_service.prochaine_remise_a_zero()}:R>."
                 )}
             if await ai_service.get_global_usage(self.bot, user_id) >= ai_service.LIMITE_GLOBALE_PAR_JOUR:
                 return {"ok": False, "error": (
@@ -3937,4 +3938,8 @@ CANONICAL_PREPARE_FOR_VISION = Ai._prepare_and_generate
 
 
 async def setup(bot: commands.Bot):
+    try:
+        await bot.db.execute(ai_service.SCHEMA_QUOTAS_PAR_ROLE)
+    except Exception:  # noqa: BLE001 — sans table, la limite du serveur s'applique
+        logger.warning("Table des quotas IA par rôle non créée.", exc_info=True)
     await bot.add_cog(Ai(bot))
