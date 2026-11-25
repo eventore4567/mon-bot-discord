@@ -301,10 +301,7 @@ async def _run_sanction_pipeline(
     log_service.mark_sanction(guild.id, target.id, _EVENT_KIND.get(action, action))
     await execute()
 
-    if dm_after:
-        dm_sent = await _send_dm()
-
-    case_number, persistence_error = await persist_sanction(
+    persistance = persist_sanction(
         bot,
         guild_id=guild.id,
         target_id=target.id,
@@ -312,6 +309,13 @@ async def _run_sanction_pipeline(
         action=action,
         reason=reason,
     )
+    if dm_after:
+        # 25/11/2026 : « la lenteur pour mute ou warn, ça saoule ». Le MP (deux
+        # allers-retours Discord) et le dossier en base sont indépendants : ils
+        # partent ensemble au lieu de s'attendre.
+        dm_sent, (case_number, persistence_error) = await asyncio.gather(_send_dm(), persistance)
+    else:
+        case_number, persistence_error = await persistance
 
     return SanctionOutcome(
         executed=True,
@@ -453,25 +457,23 @@ async def mute(
     until = discord.utils.utcnow() + timedelta(seconds=seconds)
     log_service.mark_sanction(guild.id, target.id, "timeout")
     await target.timeout(until, reason=f"{actor} : {reason}")
-    await _apply_mute_role(bot, guild, target, add=True, reason=f"Mute par {actor} : {reason}", seconds=seconds)
 
-    dm_sent = False
+    # Le timeout est posé : rôle mute, MP et dossier ne dépendent plus les uns
+    # des autres et partent ensemble (25/11/2026, lenteur de +mute). Avant, ils
+    # s'enchaînaient : jusqu'à quatre allers-retours Discord avant la réponse.
     dm_text = render_dm_text(seconds) if render_dm_text else None
-    if dm_text:
-        try:
-            await _send_dm_card(target, dm_text)
-            dm_sent = True
-        except discord.HTTPException:
-            dm_sent = False
-
-    case_number, persistence_error = await persist_sanction(
-        bot,
-        guild_id=guild.id,
-        target_id=target.id,
-        actor_id=actor.id,
-        action="mute",
-        reason=reason,
-        duration_seconds=seconds,
+    _role, dm_sent, (case_number, persistence_error) = await asyncio.gather(
+        _apply_mute_role(bot, guild, target, add=True, reason=f"Mute par {actor} : {reason}", seconds=seconds),
+        _send_dm_best_effort(target, dm_text),
+        persist_sanction(
+            bot,
+            guild_id=guild.id,
+            target_id=target.id,
+            actor_id=actor.id,
+            action="mute",
+            reason=reason,
+            duration_seconds=seconds,
+        ),
     )
 
     return SanctionOutcome(
@@ -783,17 +785,23 @@ async def unban(
             validation_error="Cet utilisateur n'est pas banni ou n'existe pas.",
         )
 
-    dm_sent = False
     dm_text = render_dm_text(user) if render_dm_text else None
-    if dm_text:
+
+    async def _mp_debanni() -> bool:
+        if not dm_text:
+            return False
         try:
             await _send_dm_card(user, dm_text, rejoindre_url=await _lien_retour(guild))
-            dm_sent = True
+            return True
         except discord.HTTPException:
-            dm_sent = False
+            return False
 
-    case_number, persistence_error = await persist_sanction(
-        bot, guild_id=guild.id, target_id=user.id, actor_id=actor.id, action="unban", reason=reason,
+    # MP et dossier en même temps (25/11/2026, lenteur des sanctions).
+    dm_sent, (case_number, persistence_error) = await asyncio.gather(
+        _mp_debanni(),
+        persist_sanction(
+            bot, guild_id=guild.id, target_id=user.id, actor_id=actor.id, action="unban", reason=reason,
+        ),
     )
 
     return SanctionOutcome(
