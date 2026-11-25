@@ -1006,6 +1006,65 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             accessory=bouton_ia,
         ))
 
+        # — Recours et modmail (25/11/2026 : venaient de l'Enterprise Suite,
+        # jamais chargée en production depuis août).
+        support = self.bot.get_cog("EnterpriseSuite")
+        if support is not None:
+            reglages = await support.get_settings(self.guild.id)
+            recours = bool(int(reglages.get("appeals_enabled") or 0))
+            salon_modmail = self.guild.get_channel(int(reglages.get("modmail_channel_id") or 0))
+            modmail = bool(int(reglages.get("modmail_enabled") or 0)) and salon_modmail is not None
+            container.add_item(discord.ui.Separator())
+            bouton_recours = discord.ui.Button(
+                label=t("Désactiver", "Turn off") if recours else t("Activer", "Turn on"),
+                style=discord.ButtonStyle.secondary if recours else discord.ButtonStyle.success,
+            )
+
+            async def basculer_recours(interaction: discord.Interaction):
+                if not interaction.response.is_done():
+                    await interaction.response.defer()
+                await support.update_settings(self.guild.id, appeals_enabled=0 if recours else 1)
+                await self.refresh(interaction)
+
+            bouton_recours.callback = basculer_recours
+            container.add_item(discord.ui.Section(
+                discord.ui.TextDisplay(
+                    f"### 📨 {t('Recours de bannissement', 'Ban appeals')}\n"
+                    + (t("🟢 Actif", "🟢 On") if recours else t("⚪ Désactivé", "⚪ Off"))
+                    + "\n-# " + t(
+                        "Un membre banni reçoit en MP un lien pour contester ; le staff tranche sur le dashboard.",
+                        "A banned member gets a DM link to appeal; staff decides on the dashboard.",
+                    )
+                ),
+                accessory=bouton_recours,
+            ))
+            container.add_item(discord.ui.TextDisplay(
+                f"### 📬 {t('Modmail', 'Modmail')}\n"
+                + (f"🟢 {salon_modmail.mention}" if modmail else t("⚪ Désactivé", "⚪ Off"))
+                + "\n-# " + t(
+                    "Les MP envoyés à SentriX arrivent dans un fil de ce salon ; le staff répond dans le fil. "
+                    "Videz le choix pour désactiver.",
+                    "DMs sent to SentriX open a thread in this channel; staff replies in the thread. "
+                    "Clear the choice to turn it off.",
+                )
+            ))
+            salon_select = discord.ui.ChannelSelect(
+                channel_types=[discord.ChannelType.text], min_values=0, max_values=1,
+                placeholder=t("Salon du modmail", "Modmail channel"),
+            )
+
+            async def regler_modmail(interaction: discord.Interaction):
+                if not interaction.response.is_done():
+                    await interaction.response.defer()
+                choix = salon_select.values[0].id if salon_select.values else None
+                await support.update_settings(
+                    self.guild.id, modmail_channel_id=choix, modmail_enabled=1 if choix else 0,
+                )
+                await self.refresh(interaction)
+
+            salon_select.callback = regler_modmail
+            container.add_item(discord.ui.ActionRow(salon_select))
+
         # — Logs
         container.add_item(discord.ui.Separator())
         reglages = {

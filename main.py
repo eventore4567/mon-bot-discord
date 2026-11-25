@@ -86,6 +86,9 @@ EXTENSIONS = [
     # ne soit pas retardé par le reste du chargement.
     "cogs.sentrix_emoji_sync",
     "cogs.moderation",
+    # 25/11/2026 : recours de bannissement et modmail (dormaient depuis août),
+    # désactivés par défaut, réglés dans /setup → Modération.
+    "cogs.enterprise_suite",
     "cogs.report_center",  # Cartes de signalement privé et actions staff persistantes
     "cogs.automod",
     "cogs.forbidden_words_ui",

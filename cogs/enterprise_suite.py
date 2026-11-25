@@ -303,8 +303,11 @@ class EnterpriseSuite(commands.Cog, name=_COG_NAME):
 
     # ----------------------------------------------------------- settings / permissions
     async def ensure_settings(self, guild_id: int) -> None:
+        # 25/11/2026 : recours et modmail se choisissent dans /setup → Modération ;
+        # rien ne s'active tout seul sur un serveur.
         await self.bot.db.execute(
-            "INSERT OR IGNORE INTO enterprise_guild_settings (guild_id, updated_at) VALUES (?, ?)",
+            "INSERT OR IGNORE INTO enterprise_guild_settings (guild_id, appeals_enabled, modmail_enabled, updated_at) "
+            "VALUES (?, 0, 0, ?)",
             (guild_id, now()),
         )
 
@@ -384,7 +387,7 @@ class EnterpriseSuite(commands.Cog, name=_COG_NAME):
 
     async def create_appeal_for_ban(self, guild: discord.Guild, user: discord.User | discord.Member) -> dict[str, Any] | None:
         settings = await self.get_settings(guild.id)
-        if not int(settings.get("appeals_enabled", 1)):
+        if not int(settings.get("appeals_enabled") or 0):
             return None
         await self.bot.db.execute(
             "UPDATE ban_appeals SET status='superseded', reviewed_at=? WHERE guild_id=? AND user_id=? AND status IN ('awaiting_user','open','more_info')",
@@ -527,7 +530,9 @@ class EnterpriseSuite(commands.Cog, name=_COG_NAME):
             if guild.get_member(user_id) is None:
                 continue
             settings = await self.get_settings(guild.id)
-            if int(settings.get("modmail_enabled", 1)):
+            # Sans salon modmail choisi, un MP n'est jamais détourné.
+            salon = guild.get_channel(int(settings.get("modmail_channel_id") or 0))
+            if int(settings.get("modmail_enabled") or 0) and isinstance(salon, discord.TextChannel):
                 result.append(guild)
         return result
 
@@ -830,6 +835,17 @@ class EnterpriseSuite(commands.Cog, name=_COG_NAME):
             return
 
         if not isinstance(message.channel, discord.DMChannel):
+            return
+        try:
+            from utils import mp_ouvertes
+
+            # Une conversation privée ouverte avec l'IA (« mp moi ») reste à l'IA.
+            if await mp_ouvertes.est_ouverte(self.bot, message.author.id):
+                return
+            ctx = await self.bot.get_context(message)
+            if ctx.valid:  # une vraie commande en MP n'est pas un message au staff
+                return
+        except Exception:  # noqa: BLE001 — en cas de doute, on ne détourne pas le MP
             return
         try:
             mutual = await self._mutual_modmail_guilds(message.author.id)
@@ -1298,6 +1314,8 @@ class EnterpriseSuite(commands.Cog, name=_COG_NAME):
 
     @tasks.loop(hours=6)
     async def backup_loop(self):
+        if getattr(self.bot.db, "backend", "sqlite") == "postgres":
+            return  # sauvegardes côté PostgreSQL (Railway) : rien à faire, pas d'erreur
         try:
             # Lease Redis : un seul shard/process crée le backup partagé.
             lease = secrets.token_hex(8)
@@ -1315,8 +1333,19 @@ class EnterpriseSuite(commands.Cog, name=_COG_NAME):
         await asyncio.sleep(90)
 
 
+#: 25/11/2026 : le module dormait depuis août. Les réglages d'avant ce jour
+#: (colonne à 1 par défaut) ne réactivent rien : on repart désactivé.
+_REPRISE_SUPPORT = 1795564800
+
+
 async def setup(bot: commands.Bot) -> None:
     await _ensure_tables(bot)
+    await bot.db.execute(
+        "UPDATE enterprise_guild_settings SET appeals_enabled=0, modmail_enabled=0 WHERE updated_at < ?",
+        (_REPRISE_SUPPORT,),
+    )
+    if bot.get_cog(_COG_NAME) is not None:
+        return  # déjà installé par un autre chemin de démarrage : un seul module
     infra = getattr(bot, "sentrix_infra", None)
     if infra is None:
         infra = EnterpriseInfra()
