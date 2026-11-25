@@ -78,6 +78,34 @@ async def main() -> int:
             and (js or {}).get("communication_disabled_until", "x") is None]
     check(ok and bool(leve), "annuler un mute retire l'exclusion temporaire", message)
 
+    # Codex #727 : une exclusion remplacée par un dossier plus récent ne s'annule
+    # pas depuis l'ancien dossier (cela lèverait la nouvelle).
+    cog.SANCTION_DUPLICATE_TTL = 0
+    await commande(f"+mute <@{h.TARGET_ID}> 10m premier")
+    ancien = await bot.db.fetchone(
+        "SELECT case_number FROM sanctions WHERE guild_id=? AND user_id=? AND action='mute' ORDER BY id DESC LIMIT 1",
+        (h.GID, h.TARGET_ID))
+    await commande(f"+mute <@{h.TARGET_ID}> 20m second")
+    guild.get_member(h.TARGET_ID).timed_out_until = discord.utils.utcnow() + __import__("datetime").timedelta(minutes=20)
+    debut = len(h.CALLS)
+    ok, message = await cog.annuler_dossier(guild, int(ancien["case_number"]), guild.get_member(h.ADMIN_ID))
+    leve = [js for m, p, js in h.CALLS[debut:] if m == "PATCH" and p.endswith(f"/members/{h.TARGET_ID}")]
+    check(not ok and not leve and "plus récente" in message,
+          "annuler un ancien mute ne lève pas l'exclusion d'un dossier plus récent", message)
+
+    # Codex #727 : un modérateur n'annule pas ses propres avertissements.
+    await commande(f"+warn <@{h.MOD_ID}> test hiérarchie")
+    dossier_mod = await bot.db.fetchone(
+        "SELECT case_number FROM sanctions WHERE guild_id=? AND user_id=? AND action='warn' ORDER BY id DESC LIMIT 1",
+        (h.GID, h.MOD_ID))
+    if dossier_mod:
+        moderateur = guild.get_member(h.MOD_ID)
+        ok, message = await cog.annuler_dossier(guild, int(dossier_mod["case_number"]), moderateur)
+        reste = await bot.db.fetchone("SELECT COUNT(*) AS n FROM warnings WHERE guild_id=? AND user_id=?", (h.GID, h.MOD_ID))
+        check(not ok and int(reste["n"]) >= 1, "un modérateur ne peut pas annuler son propre avertissement", message)
+    else:
+        check(False, "le modérateur a bien reçu un avertissement de test")
+
     # Une expulsion ne s'annule pas automatiquement.
     await commande(f"+kick <@{h.SECOND_ID}> test")
     dossier = await bot.db.fetchone(
