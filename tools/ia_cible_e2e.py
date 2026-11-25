@@ -104,6 +104,26 @@ async def main() -> int:
     check(bool(await repondre_a(True)), "réponse à une carte de l'IA : la conversation continue")
     check(not await repondre_a(False), "réponse à un panneau ordinaire : rien ne se déclenche")
 
+    # 25/11/2026 : « oui vzi fait » après un prompt proposé par SentriX → image.
+    generees = []
+
+    async def generation_espion(_message, demande):
+        generees.append(demande)
+        return True
+
+    ai._send_generated_image_natural = generation_espion
+    data = h.message_payload(h.next_id(), h.CID,
+                             "Utilise ce prompt : **SentriX, robot Discord futuriste noir et bleu**.",
+                             author_id=h.BOT_ID, name="SentriX")
+    propose_msg = discord.Message(state=bot._connection, channel=guild.get_channel(h.CID), data=data)
+    oui = h.build_message(bot, guild, "oui vzi fait", author_id=h.AUTHOR_ID, author_roles=(h.ADMIN_ROLE_ID,))
+    oui.reference = discord.MessageReference.from_message(propose_msg)
+    oui.reference.resolved = propose_msg
+    bot.dispatch("message", oui)
+    await h.settle(idle=0.8, maximum=8)
+    check(any("robot Discord futuriste" in g for g in generees),
+          "« oui vzi fait » après un prompt proposé : l'image est générée avec ce prompt", str(generees)[:160])
+
     failed = [r for r in RESULTS if not r[0]]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} étapes réussies.")
     sys.stdout.flush()
