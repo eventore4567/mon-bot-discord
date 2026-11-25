@@ -244,6 +244,78 @@ def _hierarchy_refusal_panel(message: str) -> discord.ui.LayoutView | None:
     return build_hierarchy_refusal(message)
 
 
+#: Paliers d'avertissements (/setup → Modération) : mute d'1 h, expulsion.
+PALIER_MUTE_SECONDES = 3600
+_SCHEMA_PALIERS = (
+    "CREATE TABLE IF NOT EXISTS sanction_paliers ("
+    "guild_id INTEGER PRIMARY KEY, mute_at INTEGER NOT NULL DEFAULT 0, kick_at INTEGER NOT NULL DEFAULT 0)"
+)
+
+
+async def lire_paliers(bot, guild_id: int) -> dict[str, int]:
+    """Lecture seule : table absente (jamais réglée) ou illisible = aucun palier."""
+    try:
+        row = await bot.db.fetchone("SELECT mute_at, kick_at FROM sanction_paliers WHERE guild_id=?", (int(guild_id),))
+    except Exception:  # noqa: BLE001 — aucun palier plutôt qu'un warn qui échoue
+        row = None
+    try:
+        return {"mute": int((row["mute_at"] if row else 0) or 0), "kick": int((row["kick_at"] if row else 0) or 0)}
+    except (TypeError, KeyError, ValueError):
+        return {"mute": 0, "kick": 0}
+
+
+async def regler_paliers(bot, guild_id: int, mute: int, kick: int) -> None:
+    await bot.db.execute(_SCHEMA_PALIERS)
+    await bot.db.execute(
+        "INSERT INTO sanction_paliers (guild_id, mute_at, kick_at) VALUES (?,?,?) "
+        "ON CONFLICT(guild_id) DO UPDATE SET mute_at=excluded.mute_at, kick_at=excluded.kick_at",
+        (int(guild_id), int(mute), int(kick)),
+    )
+
+
+#: 25/11/2026 : « Annuler la sanction » sous /case <numéro> (venait de +modundo,
+#: cogs/v17_moderation_security, jamais chargé en production depuis août).
+SANCTIONS_ANNULABLES = frozenset({"ban", "tempban", "hackban", "mute", "warn"})
+_SCHEMA_ANNULATIONS = (
+    "CREATE TABLE IF NOT EXISTS sanction_annulations ("
+    "guild_id INTEGER NOT NULL, case_number INTEGER NOT NULL, undone_by INTEGER, "
+    "detail TEXT, undone_at INTEGER, PRIMARY KEY (guild_id, case_number))"
+)
+
+
+class AnnulerDossierView(discord.ui.View):
+    """Un bouton sous la fiche d'un dossier : annuler la sanction."""
+
+    def __init__(self, cog: "Moderation", guild_id: int, numero: int):
+        super().__init__(timeout=600)
+        self.cog = cog
+        self.guild_id = int(guild_id)
+        self.numero = int(numero)
+
+    @discord.ui.button(label="Annuler la sanction", style=discord.ButtonStyle.secondary, emoji="↩️")
+    async def annuler(self, interaction: discord.Interaction, button: discord.ui.Button):
+        perms = getattr(interaction.user, "guild_permissions", None)
+        if interaction.guild is None or not getattr(perms, "moderate_members", False):
+            return await interaction.response.send_message(
+                "❌ Il faut la permission « Exclure temporairement des membres ».", ephemeral=True,
+            )
+        await interaction.response.defer(ephemeral=True)
+        ok, texte = await self.cog.annuler_dossier(interaction.guild, self.numero, interaction.user)
+        if ok:
+            button.disabled = True
+            try:
+                await interaction.message.edit(view=self)
+            except (discord.HTTPException, AttributeError):
+                pass
+            try:
+                await journaliser(self.cog.bot, interaction, "moderation", "↩️ Sanction annulée", {
+                    "📁 Dossier": f"#{self.numero}", "📝 Détail": texte,
+                })
+            except Exception:  # noqa: BLE001 — le journal ne bloque pas l'annulation
+                logger.debug("Journal d'annulation indisponible.", exc_info=True)
+        await interaction.followup.send(("↩️ " if ok else "❌ ") + texte, ephemeral=True)
+
+
 #: Un MP de sanction lent ne retarde jamais la sanction elle-même.
 MP_SANCTION_DELAI_MAX = 2.5
 
@@ -1468,6 +1540,11 @@ class Moderation(commands.Cog):
             await journal
 
         if not outcome.auto_ban_triggered:
+            # 25/11/2026 : paliers (venaient de +sanctionpolicy, jamais chargé en
+            # production depuis août) : mute 1 h ou expulsion au palier EXACT, pour
+            # ne pas re-sanctionner à chaque avertissement suivant.
+            if outcome.total_warnings is not None:
+                await self._appliquer_palier(ctx, membre, int(outcome.total_warnings))
             return
         if outcome.auto_ban_hierarchy_error:
             return await self._reply(
@@ -1588,7 +1665,94 @@ class Moderation(commands.Cog):
             return " ⚠️ Le rôle d'avertissement n'a pas pu être retiré (hiérarchie ou permissions)."
         return ""
 
+    async def _appliquer_palier(self, ctx: commands.Context, membre: discord.Member, total: int) -> None:
+        paliers = await lire_paliers(self.bot, ctx.guild.id)
+        if paliers["kick"] and total == paliers["kick"]:
+            action, raison = "kick", f"Palier : {total} avertissements"
+        elif paliers["mute"] and total == paliers["mute"]:
+            action, raison = "mute", f"Palier : {total} avertissements"
+        else:
+            return
+        if checks.check_bot_hierarchy(ctx.guild, membre):
+            return await self._reply(ctx, f"Palier de {total} avertissements atteint, mais {membre.mention} est au-dessus de SentriX.")
+        try:
+            if action == "kick":
+                await membre.kick(reason=raison)
+            else:
+                await membre.timeout(discord.utils.utcnow() + timedelta(seconds=PALIER_MUTE_SECONDES), reason=raison)
+        except discord.HTTPException:
+            return await self._reply(ctx, f"Palier de {total} avertissements atteint, mais Discord a refusé la sanction.")
+        numero, _erreur = await moderation_service.persist_sanction(
+            self.bot, guild_id=ctx.guild.id, target_id=membre.id, actor_id=self.bot.user.id,
+            action=action, reason=raison, **({"duration_seconds": PALIER_MUTE_SECONDES} if action == "mute" else {}),
+        )
+        await self._confirm_sanction(
+            ctx, action, membre, raison, numero,
+            duration=helpers.format_duration(PALIER_MUTE_SECONDES) if action == "mute" else None,
+        )
+
     # ---------------------------------------------------------------- DOSSIERS DE SANCTION
+
+    async def annulation_du_dossier(self, guild_id: int, numero: int):
+        """Lecture seule : table absente (aucune annulation encore) = None."""
+        try:
+            return await self.bot.db.fetchone(
+                "SELECT undone_by, detail, undone_at FROM sanction_annulations WHERE guild_id=? AND case_number=?",
+                (int(guild_id), int(numero)),
+            )
+        except Exception:  # noqa: BLE001 — table pas encore créée
+            return None
+
+    async def annuler_dossier(self, guild: discord.Guild, numero: int, acteur) -> tuple[bool, str]:
+        """Annule une sanction réversible : ban levé, exclusion retirée, avertissement supprimé."""
+        row = await self.bot.db.get_sanction_by_case(guild.id, numero)
+        if not row:
+            return False, f"Aucun dossier #{numero} sur ce serveur."
+        if await self.annulation_du_dossier(guild.id, numero):
+            return False, f"Le dossier #{numero} a déjà été annulé."
+        action = str(row["action"] or "")
+        if action not in SANCTIONS_ANNULABLES:
+            return False, "Cette sanction ne s'annule pas automatiquement (une expulsion, par exemple)."
+        user_id = int(row["user_id"])
+        raison = f"Annulation du dossier #{numero} par {acteur}"
+        try:
+            if action in {"ban", "tempban", "hackban"}:
+                try:
+                    await guild.unban(discord.Object(id=user_id), reason=raison)
+                except discord.NotFound:
+                    return False, "Ce membre n'est plus banni."
+                await self.bot.db.execute(
+                    "DELETE FROM tempactions WHERE guild_id=? AND user_id=? AND action='ban'", (guild.id, user_id),
+                )
+                detail = "bannissement levé"
+            elif action == "mute":
+                membre = guild.get_member(user_id)
+                if membre is None:
+                    return False, "Le membre n'est plus sur le serveur : son exclusion ne peut pas être retirée."
+                await membre.timeout(None, reason=raison)
+                await moderation_service._apply_mute_role(self.bot, guild, membre, add=False, reason=raison)
+                detail = "exclusion temporaire retirée"
+            else:  # warn
+                cree = int(row["created_at"] or 0)
+                avertissement = await self.bot.db.fetchone(
+                    "SELECT id FROM warnings WHERE guild_id=? AND user_id=? AND timestamp BETWEEN ? AND ? "
+                    "ORDER BY ABS(timestamp - ?) LIMIT 1",
+                    (guild.id, user_id, cree - 10, cree + 10, cree),
+                )
+                if not avertissement:
+                    return False, "L'avertissement d'origine est introuvable (déjà supprimé ?)."
+                await self.bot.db.execute("DELETE FROM warnings WHERE id=?", (avertissement["id"],))
+                detail = "avertissement supprimé"
+        except discord.Forbidden:
+            return False, "Discord refuse l'annulation : vérifiez les permissions et le rôle de SentriX."
+        except discord.HTTPException:
+            return False, "Discord a refusé l'annulation, réessayez dans un instant."
+        await self.bot.db.execute(_SCHEMA_ANNULATIONS)
+        await self.bot.db.execute(
+            "INSERT INTO sanction_annulations (guild_id, case_number, undone_by, detail, undone_at) VALUES (?,?,?,?,?)",
+            (guild.id, int(numero), int(getattr(acteur, "id", 0) or 0), detail, now()),
+        )
+        return True, f"Dossier #{numero} annulé : {detail}."
 
     @commands.hybrid_command(
         name="case",
@@ -1629,7 +1793,20 @@ class Moderation(commands.Cog):
         if row["duration_seconds"]:
             e.add_field(name="⏱️ Durée", value=helpers.format_duration(row["duration_seconds"]), inline=True)
         e.add_field(name="📝 Raison", value=row["reason"] or "Aucune raison fournie", inline=False)
-        await panels.envoyer(ctx, panels.depuis_embed(e))
+        annulation = await self.annulation_du_dossier(ctx.guild.id, numero)
+        if annulation:
+            e.add_field(
+                name="↩️ Annulé",
+                value=f"Par <@{annulation['undone_by']}> <t:{int(annulation['undone_at'] or 0)}:R> — {annulation['detail']}",
+                inline=False,
+            )
+        vue = None
+        if not annulation and row["action"] in SANCTIONS_ANNULABLES:
+            vue = AnnulerDossierView(self, ctx.guild.id, numero)
+        panneau = panels.depuis_embed(e)
+        if vue is not None:
+            return await ctx.send(embed=e, view=vue, ephemeral=reponse_privee(ctx)) if ctx.interaction else await ctx.send(embed=e, view=vue)
+        await panels.envoyer(ctx, panneau)
 
     @commands.hybrid_command(name="modhistory", description="Afficher l'historique complet des sanctions d'un membre (tous types confondus).", with_app_command=False)
     @app_commands.describe(membre="Le membre à consulter")
