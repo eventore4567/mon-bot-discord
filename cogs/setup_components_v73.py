@@ -388,8 +388,32 @@ class V73AiLimitsModal(discord.ui.Modal, title="Limites de l’IA"):
         await self.shell.refresh(interaction)
 
 
+def _proprietaire_de_sentrix(user_id) -> bool:
+    try:
+        identifiant = int(user_id)
+    except (TypeError, ValueError):
+        return False
+    import config
+    from database.db import PRIMARY_CREATOR_ID
+    from utils.owner_access import is_bot_owner_id
+
+    return (
+        identifiant == PRIMARY_CREATOR_ID
+        or identifiant in set(getattr(config, "OWNER_IDS", []) or [])
+        or is_bot_owner_id(identifiant)
+    )
+
+
 def peut_configurer(user, guild) -> bool:
-    """Propriétaire, administrateur ou « Gérer le serveur » : peut modifier /setup."""
+    """Propriétaire, administrateur ou « Gérer le serveur » : peut modifier /setup.
+
+    25/11/2026 Jayden : « comme c'est mon bot, je peux configurer SentriX même
+    si j'ai pas de perm, mais que les membres ne puissent pas ». Les
+    propriétaires de SentriX passent aussi (même liste que le contrôle d'accès
+    des commandes, utils/access_matrix : créateur principal et OWNER_IDS).
+    """
+    if _proprietaire_de_sentrix(getattr(user, "id", None)):
+        return True
     if guild is not None and int(getattr(user, "id", 0) or 0) == int(getattr(guild, "owner_id", 0) or 0):
         return True
     perms = getattr(user, "guild_permissions", None)
