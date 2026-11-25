@@ -212,13 +212,18 @@ def _health_alert(bot: commands.Bot) -> tuple[str | None, str | None]:
     def _apres_l_armement(entrees):
         return [e for e in entrees if int(e.get("at") or 0) >= depuis]
 
-    slow_commands = _apres_l_armement(list(state.get("slow_commands") or []))
+    slow_commands = [
+        e for e in _apres_l_armement(list(state.get("slow_commands") or []))
+        if not _longue_par_nature(e.get("command"))
+    ]
     if slow_commands:
         latest = slow_commands[-1]
         ms = float(latest.get("ms") or 0)
         if ms >= float(_positive_int_env("SENTRIX_ALERT_SLOW_COMMAND_MS", 6000, minimum=2000, maximum=120000)):
             command = str(latest.get("command") or "inconnue")[:100]
-            return f"slow-command:{command}", f"Commande lente détectée : `{command}` ({ms:.0f} ms)."
+            # « @instant » : l'incident précis, pour ne le signaler qu'une fois.
+            return (f"slow-command:{command}@{latest.get('at')}",
+                    f"Commande lente détectée : `{command}` ({ms:.0f} ms).")
 
     slow_db = _apres_l_armement(list(state.get("slow_db") or []))
     if slow_db:
@@ -236,17 +241,40 @@ def _health_alert(bot: commands.Bot) -> tuple[str | None, str | None]:
             gel = float(latest.get("boucle_bloquee_ms") or 0)
             if gel >= ms * 0.5:
                 return (
-                    f"loop-blocked:{method}",
+                    f"loop-blocked:{method}@{latest.get('at')}",
                     f"Boucle d'événements bloquée **{gel:.0f} ms** — l'attente de "
                     f"`{method}` ({ms:.0f} ms) en découle, la base n'est pas en cause. "
                     "Le code fautif est nommé dans les journaux « Boucle bloquée depuis »."
                 )
-            return f"slow-db:{method}", f"Base de données lente : `{method}` ({ms:.0f} ms)."
+            return f"slow-db:{method}@{latest.get('at')}", f"Base de données lente : `{method}` ({ms:.0f} ms)."
 
     ops = _ops_state(bot)
     if ops.get("last_backup_ok") is False:
         return "backup-failed", f"Le dernier backup SQLite a échoué ({ops.get('last_backup_error') or 'erreur inconnue'})."
     return None, None
+
+
+#: 25/11/2026 : commandes dont la durée n'est pas une lenteur. Un jeu reste
+#: ouvert tant que la partie dure (« doors (13323 ms) »), +clear efface des
+#: centaines de messages un par un (« clear (254683 ms) »), une restauration
+#: recrée des salons sous la limite de débit de Discord. Leurs mesures restent
+#: dans l'observabilité ; elles ne déclenchent simplement plus d'alerte.
+_LONGUES_PAR_NATURE = frozenset({
+    "clear", "purge", "protection restore", "backup restore", "restore",
+})
+
+
+def _longue_par_nature(commande) -> bool:
+    nom = str(commande or "").strip().casefold()
+    if not nom:
+        return False
+    if nom in _LONGUES_PAR_NATURE or nom.split(" ", 1)[0] in {"clear", "purge"}:
+        return True
+    try:
+        from cogs.games_catalog import GAME_CATALOG
+    except Exception:  # noqa: BLE001 — catalogue illisible : pas d'exception
+        return False
+    return nom.split(" ", 1)[0] in GAME_CATALOG
 
 
 async def _resolve_alert_target(bot: commands.Bot):
@@ -277,7 +305,16 @@ async def _send_ops_alert(bot: commands.Bot, key: str, detail: str) -> None:
     state = _ops_state(bot)
     now_value = int(time.time())
     cooldown = _positive_int_env("SENTRIX_ALERT_COOLDOWN_SECONDS", 900, minimum=60, maximum=86400)
-    if state.get("last_alert_key") == key and now_value - int(state.get("last_alert_at") or 0) < cooldown:
+    # 25/11/2026 : la même commande lente (« doors (13323 ms) ») repartait
+    # toutes les 15 minutes, pendant des jours : la boucle relit la dernière
+    # mesure enregistrée et le délai anti-répétition expirait. Un incident
+    # précis (clé « …@instant ») n'est désormais signalé qu'UNE fois ; le
+    # délai continue d'espacer des incidents différents de même nature.
+    deja = state.setdefault("alertes_envoyees", [])
+    if "@" in key and key in deja:
+        return
+    nature = key.split("@", 1)[0]
+    if state.get("last_alert_key") == nature and now_value - int(state.get("last_alert_at") or 0) < cooldown:
         return
 
     target = await _resolve_alert_target(bot)
@@ -304,8 +341,11 @@ async def _send_ops_alert(bot: commands.Bot, key: str, detail: str) -> None:
         return
 
     state["last_alert_at"] = now_value
-    state["last_alert_key"] = key
+    state["last_alert_key"] = nature
     state["last_alert_error"] = None
+    if "@" in key:
+        deja.append(key)
+        del deja[:-200]
 
 
 async def _backup_loop(bot: commands.Bot) -> None:

@@ -2984,6 +2984,22 @@ class Ai(commands.Cog, name="Ai"):
                 demande = None
         texte = re.sub(r"<@!?\d+>", "", str(getattr(demande, "content", "") or "")).strip()
         texte = re.sub(r"^(?:sentrix|ssentrix|sentri|snetri|snentrix)\b[ ,:-]*", "", texte, flags=re.IGNORECASE)
+        # Revue Codex (PR #726) : une image créée par « oui vas-y » répondait à
+        # ce « oui ». La vraie demande est le prompt que SentriX avait proposé,
+        # dans le message auquel ce « oui » répondait.
+        from utils.ai_image_intents import est_un_oui, prompt_propose, texte_du_message
+
+        if isinstance(demande, discord.Message) and est_un_oui(texte):
+            ref = getattr(demande, "reference", None)
+            proposition = getattr(ref, "resolved", None)
+            if not isinstance(proposition, discord.Message) and getattr(ref, "message_id", None):
+                try:
+                    proposition = await cite.channel.fetch_message(int(ref.message_id))
+                except (discord.HTTPException, AttributeError, ValueError):
+                    proposition = None
+            propose = prompt_propose(texte_du_message(proposition)) if proposition is not None else None
+            if propose:
+                return f"Crée une image : {propose}"[:3000]
         return texte[:3000] or "l'image précédente"
 
     @commands.Cog.listener()
@@ -3133,6 +3149,15 @@ class Ai(commands.Cog, name="Ai"):
             if is_image_creation_request(question):
                 await self._send_generated_image_natural(message, question)
                 return
+            # 25/11/2026 : SentriX propose un prompt d'image et on lui répond
+            # « oui vas-y fais » : l'image est générée avec CE prompt.
+            if reply_to_bot and isinstance(referenced, discord.Message):
+                from utils.ai_image_intents import est_un_oui, prompt_propose, texte_du_message
+
+                propose = prompt_propose(texte_du_message(referenced))
+                if propose and est_un_oui(question):
+                    await self._send_generated_image_natural(message, f"Crée une image : {propose}")
+                    return
             # Une image à comprendre n'est PAS une commande naturelle.
             if not attachments and await self._invoke_natural_command(message, question, prefix):
                 return

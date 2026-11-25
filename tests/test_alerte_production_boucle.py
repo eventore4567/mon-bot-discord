@@ -64,7 +64,8 @@ def test_une_vraie_lenteur_de_base_alerte_toujours():
     """Sans gel de boucle, l'attente EST imputable à la base : on le dit."""
     bot = _Bot([_attente(1588.0, gel_ms=0.0)], int(time.time()) - 600)
     cle, detail = production_ops._health_alert(bot)
-    assert cle == "slow-db:execute"
+    # 25/11/2026 : la clé porte l'instant de l'incident (« @… »), signalé une seule fois.
+    assert cle.startswith("slow-db:execute@")
     assert "Base de données lente" in detail
 
 
@@ -72,9 +73,62 @@ def test_un_gel_marginal_ne_disculpe_pas_la_base():
     """Un gel de 100 ms n'explique pas une attente de 1,5 s : la base reste en cause."""
     bot = _Bot([_attente(1588.0, gel_ms=100.0)], int(time.time()) - 600)
     cle, _detail = production_ops._health_alert(bot)
-    assert cle == "slow-db:execute"
+    # 25/11/2026 : la clé porte l'instant de l'incident (« @… »), signalé une seule fois.
+    assert cle.startswith("slow-db:execute@")
 
 
 def test_une_attente_sous_le_seuil_n_alerte_pas():
     bot = _Bot([_attente(200.0)], int(time.time()) - 600)
     assert production_ops._health_alert(bot) == (None, None)
+
+
+def test_un_meme_incident_n_est_signale_qu_une_fois(monkeypatch):
+    """25/11/2026 : « doors (13323 ms) » repartait toutes les 15 min pendant des jours."""
+    import asyncio
+
+    envoyes = []
+
+    class _Cible:
+        async def send(self, texte, **_k):
+            envoyes.append(texte)
+
+    async def cible(_bot):
+        return _Cible()
+
+    monkeypatch.setattr(production_ops, "_resolve_alert_target", cible)
+    bot = _Bot([], int(time.time()) - 600)
+    bot._sentrix_observability_v26["slow_commands"] = [
+        {"command": "help", "ms": 13323, "at": int(time.time()) - 60}
+    ]
+    etat = production_ops._ops_state(bot)
+
+    async def tour():
+        cle, detail = production_ops._health_alert(bot)
+        if cle:
+            await production_ops._send_ops_alert(bot, cle, detail)
+
+    asyncio.run(tour())
+    etat["last_alert_at"] = 0  # le délai anti-répétition est écoulé
+    asyncio.run(tour())
+    assert len(envoyes) == 1, "le même incident est reparti"
+    # Un NOUVEL incident (autre instant) est bien signalé.
+    bot._sentrix_observability_v26["slow_commands"].append(
+        {"command": "help", "ms": 9000, "at": int(time.time())}
+    )
+    etat["last_alert_at"] = 0
+    asyncio.run(tour())
+    assert len(envoyes) == 2
+
+
+def test_jeux_et_operations_longues_par_nature_n_alertent_pas():
+    """25/11/2026 : doors (partie en cours), clear, protection restore."""
+    for commande in ("doors", "clear", "protection restore"):
+        bot = _Bot([], int(time.time()) - 600)
+        bot._sentrix_observability_v26["slow_commands"] = [
+            {"command": commande, "ms": 30000, "at": int(time.time())}
+        ]
+        assert production_ops._health_alert(bot) == (None, None), commande
+    bot = _Bot([], int(time.time()) - 600)
+    bot._sentrix_observability_v26["slow_commands"] = [{"command": "help", "ms": 6158, "at": int(time.time())}]
+    cle, _ = production_ops._health_alert(bot)
+    assert cle.startswith("slow-command:help@")
