@@ -52,3 +52,32 @@ def test_revue_codex_pr_726_suite():
     offre = ("J'ai pas d'apparence officielle, mais je peux te faire une image de SentriX : "
              "**robot noir et bleu, symbole S lumineux**.")
     assert prompt_propose(offre) == "robot noir et bleu, symbole S lumineux"
+
+
+def test_traits_d_union_et_retouche_apres_oui():
+    for texte in ("donne-moi une image de toi", "envoie-moi une photo de chat", "dessine-moi un toit"):
+        assert is_image_creation_request(texte), texte
+
+    import asyncio
+    from types import SimpleNamespace
+
+    import discord
+    from cogs.ai import Ai
+
+    class _Msg(discord.Message):
+        def __init__(self, contenu, reference=None, attachments=()):  # noqa: D401 — faux message minimal
+            self.content = contenu
+            self.reference = reference
+            self.attachments = list(attachments)
+            self.components = []
+            self.id = id(self)
+            self.channel = SimpleNamespace()
+
+    proposition = _Msg("Utilise ce prompt : **robot Discord futuriste noir et bleu**.")
+    oui = _Msg("oui vas-y", reference=SimpleNamespace(resolved=proposition, message_id=1))
+    image = _Msg("", reference=SimpleNamespace(resolved=oui, message_id=2),
+                 attachments=[SimpleNamespace(filename="sentrix-image-1.png")])
+    cog = Ai.__new__(Ai)
+    description = asyncio.run(Ai._description_image(cog, image))
+    assert description == "Crée une image : robot Discord futuriste noir et bleu"
+    assert is_image_creation_request(description + "\nNouvelle version demandée : mieux pls")

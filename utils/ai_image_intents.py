@@ -58,7 +58,8 @@ def is_image_creation_request(text: str) -> bool:
     L'absence de verbes d'édition de serveur ici est voulue. La description
     peut les mentionner sans jamais autoriser des changements de permissions.
     """
-    value = _normal(text)
+    # Revue Codex (PR #726) : « donne-moi », « envoie-moi », « dessine-moi ».
+    value = _normal(text).replace("-", " ")
     if not value or _QUESTION_ONLY.match(value):
         return False
     if _DESSIN.search(value) or _DEMANDE_NUE.match(value) or _DONNE_UNE_IMAGE.search(value):
