@@ -88,11 +88,62 @@ async def main() -> int:
         ok, message = await cog.annuler_dossier(guild, int(dossier["case_number"]), guild.get_member(h.ADMIN_ID))
         check(not ok and "expulsion" in message, "une expulsion ne s'annule pas automatiquement", message)
 
+    cog.SANCTION_DUPLICATE_TTL = 0  # l'anti-doublon (même membre, quelques s) n'est pas testé ici
+    await bot.db.set_guild_config(h.GID, "warn_ban_threshold", 0)
+
+    # Codex #727 : lever un ban exige « Bannir des membres », pas seulement
+    # « Exclure temporairement » (sinon le bouton contourne /unban).
+    numero_ban = await bot.db.record_sanction(h.GID, 424242, h.ADMIN_ID, "ban", "test")
+    class Moderateur:
+        id = 77
+        guild_permissions = discord.Permissions(moderate_members=True)
+    debut = len(h.CALLS)
+    ok, message = await cog.annuler_dossier(guild, numero_ban, Moderateur())
+    check(not ok and "Bannir" in message
+          and not any(m == "DELETE" and "/bans/" in p for m, p, _ in h.CALLS[debut:]),
+          "sans « Bannir des membres », le ban n'est pas levé", message)
+
+    # Codex #727 : deux avertissements rapprochés ; le premier retiré par /unwarn,
+    # annuler son dossier ne supprime PAS le second.
+    await bot.db.execute("DELETE FROM warnings WHERE guild_id=? AND user_id=?", (h.GID, h.TARGET_ID))
+    await commande(f"+warn <@{h.TARGET_ID}> premier")
+    await commande(f"+warn <@{h.TARGET_ID}> second")
+    rangs = await bot.db.fetchall(
+        "SELECT id FROM warnings WHERE guild_id=? AND user_id=? ORDER BY id", (h.GID, h.TARGET_ID))
+    dossiers = await bot.db.fetchall(
+        "SELECT case_number FROM sanctions WHERE guild_id=? AND user_id=? AND action='warn' ORDER BY id DESC LIMIT 2",
+        (h.GID, h.TARGET_ID))
+    premier_dossier = int(dossiers[-1]["case_number"])
+    await bot.db.execute("DELETE FROM warnings WHERE id=?", (rangs[0]["id"],))
+    ok, message = await cog.annuler_dossier(guild, premier_dossier, guild.get_member(h.ADMIN_ID))
+    reste = await bot.db.fetchone("SELECT id FROM warnings WHERE id=?", (rangs[1]["id"],))
+    check(not ok and reste is not None, "annuler un dossier dont l'avertissement est parti ne touche pas le voisin", message)
+
+    # Codex #727 : annuler le dernier avertissement retire aussi le rôle d'avertissement.
+    appels_role = []
+    original = cog._retirer_role_avertissement_si_plus_aucun
+    async def espion(g, membre):
+        appels_role.append(membre)
+        return await original(g, membre)
+    cog._retirer_role_avertissement_si_plus_aucun = espion
+    ok, message = await cog.annuler_dossier(guild, int(dossiers[0]["case_number"]), guild.get_member(h.ADMIN_ID))
+    del cog._retirer_role_avertissement_si_plus_aucun
+    check(ok and len(appels_role) == 1, "annuler un avertissement vérifie le rôle d'avertissement", message)
+
+    # Codex #727 : un palier de mute ne raccourcit jamais une exclusion plus longue.
+    await bot.db.execute("DELETE FROM warnings WHERE guild_id=? AND user_id=?", (h.GID, h.TARGET_ID))
+    await mod.regler_paliers(bot, h.GID, 2, 3)
+    cible = guild.get_member(h.TARGET_ID)
+    cible.timed_out_until = discord.utils.utcnow() + __import__("datetime").timedelta(days=7)
+    await commande(f"+warn <@{h.TARGET_ID}> long 1")
+    appels = await commande(f"+warn <@{h.TARGET_ID}> long 2")
+    raccourci = [js for m, p, js in appels if m == "PATCH" and p.endswith(f"/members/{h.TARGET_ID}")
+                 and (js or {}).get("communication_disabled_until")]
+    check(not raccourci, "un membre exclu 7 jours n'est pas ramené à 1 h par le palier")
+    cible.timed_out_until = None
+
     # Paliers (venaient de +sanctionpolicy) : mute 1 h puis expulsion, au palier exact.
     await bot.db.execute("DELETE FROM warnings WHERE guild_id=? AND user_id=?", (h.GID, h.TARGET_ID))
-    await bot.db.set_guild_config(h.GID, "warn_ban_threshold", 0)
-    await mod.regler_paliers(bot, h.GID, 2, 3)
-    cog.SANCTION_DUPLICATE_TTL = 0  # l'anti-doublon (même membre, quelques s) n'est pas testé ici
     await commande(f"+warn <@{h.TARGET_ID}> palier 1")
     appels = await commande(f"+warn <@{h.TARGET_ID}> palier 2")
     mute = [js for m, p, js in appels if m == "PATCH" and p.endswith(f"/members/{h.TARGET_ID}")

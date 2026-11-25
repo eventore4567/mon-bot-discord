@@ -26,7 +26,7 @@ import io
 import logging
 import re
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Literal
 
 import discord
@@ -1676,7 +1676,12 @@ class Moderation(commands.Cog):
             if action == "kick":
                 await membre.kick(reason=raison)
             else:
-                await membre.timeout(discord.utils.utcnow() + timedelta(seconds=PALIER_MUTE_SECONDES), reason=raison)
+                fin = discord.utils.utcnow() + timedelta(seconds=PALIER_MUTE_SECONDES)
+                actuelle = getattr(membre, "timed_out_until", None)
+                if isinstance(actuelle, datetime) and actuelle >= fin:
+                    # Déjà exclu plus longtemps : le palier ne raccourcit jamais.
+                    return await self._reply(ctx, f"Palier de {total} avertissements atteint : {membre.mention} est déjà exclu plus longtemps.")
+                await membre.timeout(fin, reason=raison)
         except discord.HTTPException:
             return await self._reply(ctx, f"Palier de {total} avertissements atteint, mais Discord a refusé la sanction.")
         numero, _erreur = await moderation_service.persist_sanction(
@@ -1710,6 +1715,12 @@ class Moderation(commands.Cog):
         action = str(row["action"] or "")
         if action not in SANCTIONS_ANNULABLES:
             return False, "Cette sanction ne s'annule pas automatiquement (une expulsion, par exemple)."
+        # Lever un ban exige le droit de bannir, comme /unban : le bouton seul
+        # (ouvert avec « Exclure temporairement ») ne suffit pas.
+        droit = "ban_members" if action in {"ban", "tempban", "hackban"} else "moderate_members"
+        if not getattr(getattr(acteur, "guild_permissions", None), droit, False):
+            libelle = "Bannir des membres" if droit == "ban_members" else "Exclure temporairement des membres"
+            return False, f"Il faut la permission « {libelle} » pour annuler cette sanction."
         user_id = int(row["user_id"])
         raison = f"Annulation du dossier #{numero} par {acteur}"
         try:
@@ -1730,16 +1741,28 @@ class Moderation(commands.Cog):
                 await moderation_service._apply_mute_role(self.bot, guild, membre, add=False, reason=raison)
                 detail = "exclusion temporaire retirée"
             else:  # warn
-                cree = int(row["created_at"] or 0)
+                # Seul le lien exact dossier -> avertissement fait foi : deviner
+                # par l'heure supprimerait un avertissement voisin.
+                try:
+                    lien = await self.bot.db.fetchone(
+                        "SELECT warning_id FROM sanction_avertissements WHERE guild_id=? AND case_number=?",
+                        (guild.id, int(numero)),
+                    )
+                except Exception:  # noqa: BLE001 — table absente : aucun lien encore
+                    lien = None
+                if not lien:
+                    return False, "Ce dossier est antérieur à l'annulation : retirez l'avertissement avec /unwarn."
                 avertissement = await self.bot.db.fetchone(
-                    "SELECT id FROM warnings WHERE guild_id=? AND user_id=? AND timestamp BETWEEN ? AND ? "
-                    "ORDER BY ABS(timestamp - ?) LIMIT 1",
-                    (guild.id, user_id, cree - 10, cree + 10, cree),
+                    "SELECT id FROM warnings WHERE id=? AND guild_id=? AND user_id=?",
+                    (int(lien["warning_id"]), guild.id, user_id),
                 )
                 if not avertissement:
                     return False, "L'avertissement d'origine est introuvable (déjà supprimé ?)."
                 await self.bot.db.execute("DELETE FROM warnings WHERE id=?", (avertissement["id"],))
                 detail = "avertissement supprimé"
+                note = await self._retirer_role_avertissement_si_plus_aucun(guild, guild.get_member(user_id))
+                if note:
+                    detail += "." + note.rstrip(".")
         except discord.Forbidden:
             return False, "Discord refuse l'annulation : vérifiez les permissions et le rôle de SentriX."
         except discord.HTTPException:
