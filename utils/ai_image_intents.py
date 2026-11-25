@@ -24,7 +24,13 @@ _DONNE_UNE_IMAGE = re.compile(
     r"\s+(?:une?|des|d)\s+(?:image|photo|dessin|illustration|logo|avatar|visuel)s?\b"
 )
 # « dessine un chat » : dessiner suffit, sans le mot « image ».
-_DESSIN = re.compile(r"\b(?:dessin(?:e|er|ez)|draw)\b")
+# Revue Codex (PR #726) : une DEMANDE de dessin (impératif ou « tu peux me
+# dessiner »), pas « sais-tu dessiner ? » ni « je dessine un chat ».
+_DESSIN = re.compile(
+    r"^\s*(?:(?:stp|svp|pls)\s+)?(?:"
+    r"(?:tu\s+peux|peux\s+tu|tu\s+pourrais|pourrais\s+tu)\s+(?:me\s+|nous\s+)?dessiner"
+    r"|dessinez?(?:\s+(?:moi|nous))?|draw)\b"
+)
 # « image de toi », « une photo d'un chat » : la demande nue, sans verbe.
 _DEMANDE_NUE = re.compile(
     r"^\s*(?:une?\s+|l\s*)?(?:image|photo|dessin|illustration|logo|avatar)s?\s+(?:de|d|du|des)\b"
@@ -79,7 +85,11 @@ def prompt_propose(message_du_bot: str | None) -> str | None:
     """
     texte = str(message_du_bot or "")
     normal = _normal(texte)
-    if "prompt" not in normal and not _VISUAL.search(normal):
+    # Revue Codex (PR #726) : il faut une VRAIE proposition — un prompt, ou une
+    # offre de création d'image (« je peux te faire une image de… »). Un gras
+    # dans une analyse (« Sur cette image, **le texte est illisible** ») n'en
+    # est pas une.
+    if "prompt" not in normal and not (_CREATE.search(normal) and _VISUAL.search(normal)):
         return None
     morceaux = [m.strip() for m in _PROMPT_EN_GRAS.findall(texte)]
     return max(morceaux, key=len) if morceaux else None

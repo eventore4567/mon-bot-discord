@@ -39,3 +39,16 @@ def test_revue_codex_pr_726():
     for texte in ("donne-moi ton avis sur cette image", "donne une description de cette photo"):
         assert not is_image_creation_request(texte), texte
     assert is_image_creation_request("envoie moi une photo d'un chat")
+
+
+def test_revue_codex_pr_726_suite():
+    for texte in ("sais-tu dessiner ?", "je dessine un chat", "j'aime dessiner"):
+        assert not is_image_creation_request(texte), texte
+    for texte in ("dessine un chat", "dessine-moi un toit", "tu peux me dessiner un chien"):
+        assert is_image_creation_request(texte), texte
+    analyse = ("Sur cette image, **le texte est partiellement illisible**. "
+               "Veux-tu que je retranscrive les passages lisibles ?")
+    assert prompt_propose(analyse) is None
+    offre = ("J'ai pas d'apparence officielle, mais je peux te faire une image de SentriX : "
+             "**robot noir et bleu, symbole S lumineux**.")
+    assert prompt_propose(offre) == "robot noir et bleu, symbole S lumineux"
