@@ -157,6 +157,9 @@ def test_repondre_a_une_reponse_de_l_ia_sans_ping_la_relance():
     from pathlib import Path
 
     source = (Path(__file__).resolve().parents[1] / "cogs" / "ai.py").read_text(encoding="utf-8")
-    assert "reponse_a_l_ia = (" in source
+    # 25/11/2026 (revue Codex PR #725) : la condition reconnaît aussi les cartes
+    # de réponse de l'IA (utils/reponses_ia) ; sa forme a changé, pas son sens.
+    assert "reponse_a_l_ia = reply_to_bot and isinstance(referenced, discord.Message) and (" in source
     assert "and not referenced.embeds" in source
+    assert "reponses_ia.est_reponse_ia(referenced)" in source
     assert "if not mentioned and not name_trigger and not reponse_a_l_ia and not (" in source

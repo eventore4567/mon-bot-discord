@@ -126,13 +126,10 @@ class BanCogWiringTests(unittest.IsolatedAsyncioTestCase):
         ctx.send.assert_awaited()
         # La sanction Discord a réussi : la nouvelle carte V2 confirme le
         # succès, sans inventer de numéro de dossier lorsque la DB a échoué.
-        view = ctx.send.await_args.kwargs.get("view")
-        self.assertIsInstance(view, discord.ui.LayoutView)
-        self.assertIsNone(ctx.send.await_args.kwargs.get("content"))
-        self.assertIn("Dossier non enregistré", " ".join(
-            x.content for card in view.children for x in card.children
-            if isinstance(x, discord.ui.TextDisplay)
-        ))
+        # 25/11/2026 : la confirmation est une phrase libre (texte simple, sans carte).
+        _contenu = ctx.send.await_args.kwargs.get("content") or ""
+        self.assertIn("Dossier non enregistré", _contenu)
+        self.assertIsNone(ctx.send.await_args.kwargs.get("view"))
 
 
 if __name__ == "__main__":

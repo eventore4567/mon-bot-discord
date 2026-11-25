@@ -52,7 +52,7 @@ async def test_nickname_refus_hierarchie_en_panneau():
 
     with patch.object(moderation_module.checks, "check_hierarchy", return_value=None), patch.object(
         moderation_module.checks, "check_bot_hierarchy", return_value=erreur
-    ), patch.object(panels, "envoyer", AsyncMock()) as envoyer, patch.object(
+    ), patch.object(panels, "phrase_libre", AsyncMock()) as envoyer, patch.object(
         panels, "texte_court", AsyncMock()
     ) as texte_court:
         await Moderation.nickname.callback(cog, ctx, target, pseudo="Surnom")
@@ -60,6 +60,7 @@ async def test_nickname_refus_hierarchie_en_panneau():
     target.edit.assert_not_awaited()
     envoyer.assert_awaited_once()
     assert envoyer.await_args.kwargs["ephemere"] is True
-    # 24/11/2026 : une phrase au lieu de la carte « Comment corriger ».
-    assert _tout_le_texte(envoyer.await_args.args[1]).startswith("❌ Impossible")
+    # 24/11/2026 : une phrase au lieu de la carte « Comment corriger » ;
+    # 25/11/2026 : envoyée en texte simple (phrase libre).
+    assert envoyer.await_args.args[1].startswith("❌ Impossible")
     texte_court.assert_not_awaited()

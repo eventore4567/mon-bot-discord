@@ -625,13 +625,13 @@ class Moderation(commands.Cog):
         return candidate, rest[0] if rest else "Aucune raison"
 
     async def _reply(self, ctx: commands.Context, message: str, *, ephemere: bool = False):
-        """Erreurs de hiérarchie en carte courte, autres messages en texte."""
+        """Une phrase libre, en texte simple (25/11/2026) ; refus de hiérarchie raccourci."""
         # En « / », la réponse d'une action de modération est privée (utils/slash_privacy).
         ephemere = ephemere or reponse_privee(ctx)
-        panneau = _hierarchy_refusal_panel(message)
-        if panneau is not None:
-            return await panels.envoyer(ctx, panneau, ephemere=ephemere)
-        return await panels.texte_court(ctx, message, ephemere=ephemere)
+        from utils.moderation_feedback import phrase_de_refus
+
+        # Refus, erreur ou information : la phrase seule, sans bouton de suite.
+        return await panels.phrase_libre(ctx, phrase_de_refus(message) or message, ephemere=ephemere, suites=False)
 
     async def _confirm_sanction(
         self, ctx: commands.Context, action: str, target: discord.abc.User,
@@ -639,14 +639,16 @@ class Moderation(commands.Cog):
         suffix: str = "", duration: str | None = None,
     ):
         """Une confirmation Discord premium, même pour une sanction sans dossier DB."""
-        view = build_sanction_confirmation(
-            action=action, target=target, actor=ctx.author,
-            guild_id=ctx.guild.id if ctx.guild else None,
-            reason=reason, case_number=case_number,
+        # 25/11/2026 : « une phrase libre » — texte simple, sans carte, sans
+        # bouton de suite ni ligne de mémoire. Le dossier complet reste dans les logs.
+        from utils.moderation_feedback import phrase_de_sanction
+
+        texte = phrase_de_sanction(
+            action=action, target=target, reason=reason, case_number=case_number,
             suffix=suffix, duration=duration,
         )
         privee = reponse_privee(ctx)
-        message = await panels.envoyer(ctx, view, ephemere=privee, allowed_mentions=_SANS_PING)
+        message = await panels.phrase_libre(ctx, texte, ephemere=privee)
         if privee:
             # Visible du seul modérateur : rien à retirer du salon.
             return message

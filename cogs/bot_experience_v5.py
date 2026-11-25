@@ -190,6 +190,15 @@ def _install_ai_pipeline_upgrade(bot: commands.Bot) -> None:
         replied_once = False
 
         async def _send(**kwargs):
+            envoye = await _send_brut(**kwargs)
+            # Retenu comme réponse de l'IA (utils/reponses_ia) : répondre à une
+            # carte de l'IA relance la conversation dans Ai.on_message.
+            from utils import reponses_ia
+
+            reponses_ia.noter(envoye)
+            return envoye
+
+        async def _send_brut(**kwargs):
             nonlocal replied_once
             # Une seule reponse Discord native liee au message, SANS notification.
             # La reference Discord reste visible, mais aucun utilisateur/role n'est ping.
@@ -426,6 +435,13 @@ def _install_reply_and_dm_conversations(bot: commands.Bot) -> None:
             except discord.HTTPException:
                 logger.debug("Refus de conversation privée non remis.", exc_info=True)
             return
+
+        # 25/11/2026 : sur un serveur, cogs/ai.py (Ai.on_message) traite déjà les
+        # réponses à SentriX (reply_to_bot), avec ses garde-fous (salon bloqué,
+        # IA coupée). Ce second traitement relançait la même analyse ; quand elle
+        # ne redonnait rien, il demandait au modèle une réponse libre : le « ok »
+        # qui suivait chaque sanction lancée par l'IA. Il s'arrête ici.
+        return
 
         # Les mentions et mots de réveil sont déjà pris en charge par les listeners
         # historiques SentriX/Odboug. Ici on ne traite QUE la continuation par réponse.

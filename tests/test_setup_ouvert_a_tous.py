@@ -76,3 +76,13 @@ def test_le_compteur_infini_se_configure_en_slash_et_dans_setup():
         assert chemins.get("counter setup") == "infinit"
     setup = (Path(__file__).resolve().parents[1] / "cogs" / "setup_experience_v74.py").read_text(encoding="utf-8")
     assert "infinite_counter.InfiniteSetupView(cog, source)" in setup
+
+
+def test_le_proprietaire_de_sentrix_configure_sans_permission():
+    # 25/11/2026 : « comme c'est mon bot, je peux configurer SentriX même si
+    # j'ai pas de perm, mais que les membres ne puissent pas ».
+    from database.db import PRIMARY_CREATOR_ID
+
+    guild = SimpleNamespace(owner_id=1)
+    assert v73.peut_configurer(_user(PRIMARY_CREATOR_ID), guild) is True
+    assert v73.peut_configurer(_user(424242), guild) is False  # simple membre

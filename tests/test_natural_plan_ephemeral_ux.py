@@ -181,16 +181,18 @@ def test_actor_hierarchy_refusal_is_explained_in_structured_panel():
 
 @pytest.mark.asyncio
 async def test_actor_hierarchy_refusal_uses_panel_not_bare_text():
+    # 25/11/2026 Jayden : « une phrase libre pour mute, ban, warn… ». Ce test
+    # exigeait la carte ; il vérifie maintenant la phrase libre (texte simple).
     content = (
         "Vous ne pouvez pas sanctionner un membre ayant un rôle "
         "supérieur ou égal au vôtre."
     )
     ctx = SimpleNamespace()
-    with patch.object(panels, "envoyer", AsyncMock()) as send, patch.object(
-        panels, "texte_court", AsyncMock()
-    ) as bare:
+    with patch.object(panels, "phrase_libre", AsyncMock()) as send:
         await Moderation._reply(object(), ctx, content, ephemere=True)
 
     send.assert_awaited_once()
     assert send.await_args.kwargs["ephemere"] is True
-    bare.assert_not_awaited()
+    assert send.await_args.kwargs["suites"] is False
+    assert send.await_args.args[1] == "❌ Impossible : ce membre a un rôle égal ou supérieur au vôtre."
+

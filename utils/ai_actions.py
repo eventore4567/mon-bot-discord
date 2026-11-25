@@ -1536,12 +1536,19 @@ async def parse_action_plan(
 def describe_action(action: ParsedAction) -> str:
     """Résumé utilisateur court pour la confirmation d'un plan."""
     label = action.spec.description if action.spec else action.intent
+    # 25/11/2026 : « target=pp » en clair dans la carte. Les réglages
+    # s'affichent avec des mots, et le membre visé par sa mention.
+    noms = {
+        "name": "nom", "target": "membre", "role": "rôle", "category": "catégorie",
+        "channel": "salon", "log_category": "logs", "color": "couleur",
+        "duration": "durée", "count": "nombre",
+    }
     details = []
-    for key in ("name", "target", "role", "category", "channel", "log_category", "color", "duration", "count"):
+    for key, nom in noms.items():
         value = action.slots.get(key)
         if value not in (None, ""):
-            details.append(f"{key}={value}")
-    return label + (f" ({', '.join(details[:4])})" if details else "")
+            details.append(f"{nom} : {value}")
+    return label + (f" ({' · '.join(details[:4])})" if details else "")
 
 
 async def parse_action(
@@ -1711,6 +1718,23 @@ def resolve_member(
         return MemberResolution(member=exact[0])
     if len(exact) > 1:
         return MemberResolution(ambiguous=tuple(exact[:5]))
+
+    # 25/11/2026 : « ban pp » ne trouvait pas « pp fortnite » (ressemblance de
+    # 31 %, sous le seuil de 78 %). Un nom donné en MOTS ENTIERS au début du
+    # nom, ou égal à l'un de ses mots, désigne ce membre s'il est le seul.
+    mots_voulus = wanted.split()
+    if mots_voulus and len(wanted) >= 2:
+        par_mots: list[discord.Member] = []
+        for member in guild.members:
+            for name in _member_names(member):
+                mots = normalize_text(name).split()
+                if mots[:len(mots_voulus)] == mots_voulus or (len(mots_voulus) == 1 and wanted in mots):
+                    par_mots.append(member)
+                    break
+        if len(par_mots) == 1:
+            return MemberResolution(member=par_mots[0])
+        if len(par_mots) > 1:
+            return MemberResolution(ambiguous=tuple(par_mots[:5]))
 
     scored: list[tuple[float, discord.Member]] = []
     for member in guild.members:

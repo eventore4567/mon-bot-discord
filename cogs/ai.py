@@ -2258,6 +2258,31 @@ class Ai(commands.Cog, name="Ai"):
         # Une source unique pour les deux chemins : classer une action `high`
         # suffit maintenant à lui donner sa confirmation, sans revenir ici.
         if not confirmed and ai_actions.exige_confirmation(spec):
+            # 25/11/2026 : « ban pp » affichait « Confirmation requise
+            # (target=pp) » AVANT de chercher le membre ; le clic échouait
+            # ensuite. Le membre est cherché d'abord : trouvé, la carte le
+            # nomme et l'action vise sa mention ; introuvable ou ambigu, on
+            # passe par le chemin normal qui le dit ou demande lequel.
+            cible = str(action.slots.get("target") or "").strip()
+            # Revue Codex (PR #725) : seulement pour une action qui VISE un membre.
+            # Sinon (purge « de @x »), une cible introuvable faisait sauter la
+            # confirmation d'une action destructrice.
+            if (
+                cible and not cible.startswith("__") and message.guild is not None
+                and getattr(spec, "target_kind", None) == "member"
+            ):
+                trouve = ai_actions.resolve_member(
+                    message.guild, cible, message=message,
+                    bot_user_id=getattr(self.bot.user, "id", None),
+                )
+                if trouve.member is None:
+                    # Le chemin normal refait la même recherche, sans exécuter :
+                    # il cite le nom introuvable ou liste les candidats.
+                    return await self._handle_parsed_action(message, action, prefix, confirmed=True)
+                action = ai_actions.ParsedAction(
+                    intent=action.intent, slots={**action.slots, "target": trouve.member.mention},
+                    confidence=action.confidence, source=action.source,
+                )
             view = _NaturalPlanConfirmView(
                 self,
                 message=message,
@@ -2460,10 +2485,11 @@ class Ai(commands.Cog, name="Ai"):
             member = resolution.member
             if member is not None:
                 self._remember_recent_target(message, member)
-            if member is None and "target" in spec.required:
-                await self._ask_for_missing_action_slot(message, action, "target")
-                return True
-            if target_text and member is None:
+            # 25/11/2026 : un nom donné mais introuvable (« ban pp ») recevait
+            # « Quel membre voulez-vous viser ? », comme si aucun nom n'avait été
+            # donné. Le nom cherché est maintenant cité (hors marqueurs internes
+            # comme « __recent__ », qui ne sont pas des noms).
+            if target_text and not str(target_text).startswith("__") and member is None:
                 self._remember_pending(message, action)
                 await message.reply(
                     f"Je ne trouve pas de membre correspondant clairement à « {target_text} ». "
@@ -2471,6 +2497,9 @@ class Ai(commands.Cog, name="Ai"):
                     mention_author=False,
                     allowed_mentions=discord.AllowedMentions.none(),
                 )
+                return True
+            if member is None and "target" in spec.required:
+                await self._ask_for_missing_action_slot(message, action, "target")
                 return True
 
         missing = ai_actions.missing_slots(action)
@@ -2996,7 +3025,14 @@ class Ai(commands.Cog, name="Ai"):
             not reply_to_bot and id_cite and referenced is None and len(content) <= 200
             and (id_cite in self.__dict__.get("_images_generees", {}) or _RETOUCHE_RE.search(content))
         )
+        # Revue Codex (PR #725) : bot_experience_v5 ne traite plus les réponses à
+        # SentriX sur un serveur ; c'est donc ici que se récupère le message cité
+        # quand Discord ne l'a pas joint, pour une réponse texte ordinaire aussi.
         if bot_id is not None and (demande_retouche or (
+            not reply_to_bot
+            and referenced is None
+            and id_cite
+        ) or (
             image_attachments
             and not reply_to_bot
             and getattr(reference, "message_id", None)
@@ -3021,12 +3057,17 @@ class Ai(commands.Cog, name="Ai"):
         # 06/11/2026 : répondre à une réponse de SentriX continue la conversation,
         # même avec le ping de réponse désactivé. Seulement sur ses messages texte
         # (ses réponses IA) : répondre à un panneau ou à un log ne le déclenche pas.
-        reponse_a_l_ia = (
-            reply_to_bot
-            and isinstance(referenced, discord.Message)
-            and bool((referenced.content or "").strip())
-            and not referenced.embeds
-            and not getattr(referenced, "components", None)
+        from utils import reponses_ia
+
+        reponse_a_l_ia = reply_to_bot and isinstance(referenced, discord.Message) and (
+            (
+                bool((referenced.content or "").strip())
+                and not referenced.embeds
+                and not getattr(referenced, "components", None)
+            )
+            # Revue Codex (PR #725) : une longue réponse de l'IA est une carte ;
+            # y répondre continue aussi la conversation (utils/reponses_ia).
+            or reponses_ia.est_reponse_ia(referenced)
         )
         if not mentioned and not name_trigger and not reponse_a_l_ia and not (
             image_attachments and (pending or reply_to_bot)

@@ -79,7 +79,9 @@ def _labels(view):
 def test_la_confirmation_part_sans_notifier_personne():
     envois = []
 
-    async def _envoyer(_dest, _vue, **kwargs):
+    # 25/11/2026 : la confirmation est une phrase libre ; on capture l'envoi
+    # réel du texte pour vérifier qu'il ne notifie personne.
+    async def _envoyer(_dest, kwargs, **_options):
         envois.append(kwargs)
         return None
 
@@ -89,14 +91,14 @@ def test_la_confirmation_part_sans_notifier_personne():
         interaction = None
 
     cog = mod.Moderation.__new__(mod.Moderation)
-    origine = mod.panels.envoyer
-    mod.panels.envoyer = _envoyer
+    origine = mod.panels._envoyer_texte
+    mod.panels._envoyer_texte = _envoyer
     try:
         asyncio.run(
             cog._confirm_sanction(_Ctx(), "kick", _U(222, "cible"), "raison", 2)
         )
     finally:
-        mod.panels.envoyer = origine
+        mod.panels._envoyer_texte = origine
 
     assert envois, "la confirmation doit partir"
     autorisees = envois[0].get("allowed_mentions")

@@ -108,9 +108,10 @@ class KickCogWiringTests(unittest.IsolatedAsyncioTestCase):
         ctx.send.assert_awaited()
         # Succès : confirmation compacte, même après un échec de persistance.
         from discord import ui
-        view = ctx.send.await_args.kwargs.get("view")
-        self.assertIsInstance(view, ui.LayoutView)
-        self.assertIsNone(ctx.send.await_args.kwargs.get("content"))
+        # 25/11/2026 : la confirmation est une phrase libre (texte simple, sans carte).
+        _contenu = ctx.send.await_args.kwargs.get("content") or ""
+        self.assertIn("Dossier non enregistré", _contenu)
+        self.assertIsNone(ctx.send.await_args.kwargs.get("view"))
 
 
 if __name__ == "__main__":

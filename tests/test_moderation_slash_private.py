@@ -57,7 +57,9 @@ def test_moderation_et_roles_utilisent_la_decision_commune():
     moderation = (root / "cogs" / "moderation.py").read_text(encoding="utf-8")
     assert "ephemere = ephemere or reponse_privee(ctx)" in moderation
     assert "defer(ephemeral=reponse_privee(ctx))" in moderation
-    assert "ephemere=privee, allowed_mentions=_SANS_PING" in moderation
+    # 25/11/2026 : la confirmation est une phrase libre, privée en « / » ;
+    # phrase_libre (via texte_court) n'autorise aucune mention.
+    assert "panels.phrase_libre(ctx, texte, ephemere=privee)" in moderation
     roles = (root / "cogs" / "verification.py").read_text(encoding="utf-8")
     assert roles.count("ephemere=reponse_privee(ctx)") >= 4
     slow = (root / "sentrix_grouped_slash_fix.py").read_text(encoding="utf-8")

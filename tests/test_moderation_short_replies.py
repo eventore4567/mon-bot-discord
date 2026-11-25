@@ -126,13 +126,13 @@ async def test_ban_envoie_une_carte_compacte_et_journalise_la_fiche_complete():
 
     with patch.object(moderation_module.moderation_service, "ban", AsyncMock(return_value=outcome)), \
          patch.object(panels, "texte_court", AsyncMock()) as court, \
-         patch.object(panels, "envoyer", AsyncMock()) as envoyer:
+         patch.object(panels, "phrase_libre", AsyncMock()) as envoyer:
         await Moderation.ban.callback(cog, ctx, membre, raison="spam")
 
     cog.log_sanction.assert_awaited_once()
     court.assert_not_awaited()
     envoyer.assert_awaited_once()
-    assert isinstance(envoyer.await_args.args[1], discord.ui.LayoutView)
+    assert envoyer.await_args.args[1] == "🔨 <@7> a été banni. Motif : spam."
 
 
 @pytest.mark.asyncio
@@ -147,8 +147,9 @@ async def test_refus_hierarchie_est_une_erreur_courte_ephemere():
     membre.mention = "<@7>"
     outcome = SimpleNamespace(executed=False, hierarchy_error="Ce membre est au-dessus de vous.")
 
+    # 25/11/2026 : les réponses de modération sont des phrases libres.
     with patch.object(moderation_module.moderation_service, "kick", AsyncMock(return_value=outcome)), \
-         patch.object(panels, "texte_court", AsyncMock()) as court:
+         patch.object(panels, "phrase_libre", AsyncMock()) as court:
         await Moderation.kick.callback(cog, ctx, membre, raison="x")
 
     cog.log_sanction.assert_not_awaited()
