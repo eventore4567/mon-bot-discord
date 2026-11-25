@@ -123,6 +123,28 @@ class WarnOutcome:
     auto_ban_persistence_error: str | None = None
 
 
+#: Lien EXACT dossier -> avertissement, pour que « Annuler la sanction » (/case)
+#: supprime cet avertissement-là et jamais un voisin.
+SCHEMA_LIENS_AVERTISSEMENT = (
+    "CREATE TABLE IF NOT EXISTS sanction_avertissements ("
+    "guild_id INTEGER NOT NULL, case_number INTEGER NOT NULL, warning_id INTEGER NOT NULL, "
+    "PRIMARY KEY (guild_id, case_number))"
+)
+
+
+async def _lier_avertissement(bot: Any, guild_id: int, case_number: int | None, warning_id: Any) -> None:
+    if not isinstance(case_number, int) or not isinstance(warning_id, int):
+        return
+    try:
+        await bot.db.execute(SCHEMA_LIENS_AVERTISSEMENT)
+        await bot.db.execute(
+            "INSERT INTO sanction_avertissements (guild_id, case_number, warning_id) VALUES (?,?,?)",
+            (int(guild_id), case_number, warning_id),
+        )
+    except Exception:  # noqa: BLE001 — le lien n'empêche jamais l'avertissement
+        logger.debug("Lien dossier/avertissement non enregistré.", exc_info=True)
+
+
 async def persist_sanction(
     bot: Any,
     *,
@@ -691,10 +713,11 @@ async def warn(
     if hierarchy_error:
         return WarnOutcome(executed=False, hierarchy_error=hierarchy_error)
 
-    await bot.db.execute(
+    curseur = await bot.db.execute(
         "INSERT INTO warnings (guild_id, user_id, moderator_id, reason, timestamp) VALUES (?, ?, ?, ?, ?)",
         (guild.id, target.id, actor.id, reason, now()),
     )
+    warning_id = getattr(curseur, "lastrowid", None)
 
     # Le MP (deux appels Discord) part PENDANT les écritures du dossier au lieu
     # d'après : le membre reste sur le serveur, l'ordre n'importe pas, et
@@ -708,6 +731,7 @@ async def warn(
         )
     finally:
         dm_sent = await dm_task
+    await _lier_avertissement(bot, guild.id, case_number, warning_id)
 
     auto_ban_triggered = bool(ban_threshold) and total_warnings is not None and total_warnings >= ban_threshold
     auto_ban_hierarchy_error = None

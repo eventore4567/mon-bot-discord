@@ -939,6 +939,34 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         seuil_select.callback = regler_seuil
         container.add_item(discord.ui.ActionRow(seuil_select))
 
+        # 25/11/2026 : paliers avant le ban (mute 1 h, expulsion), un seul choix.
+        from . import moderation as moderation_cog
+
+        paliers = await moderation_cog.lire_paliers(self.bot, self.guild.id)
+        choix_paliers = {
+            "0-0": t("Paliers : aucun", "Steps: none"),
+            "2-0": t("Paliers : mute 1 h au 2e avertissement", "Steps: 1 h mute at 2nd warning"),
+            "2-4": t("Paliers : mute 1 h au 2e, expulsion au 4e", "Steps: mute at 2nd, kick at 4th"),
+            "3-5": t("Paliers : mute 1 h au 3e, expulsion au 5e", "Steps: mute at 3rd, kick at 5th"),
+            "0-3": t("Paliers : expulsion au 3e avertissement", "Steps: kick at 3rd warning"),
+        }
+        actuel = f"{paliers['mute']}-{paliers['kick']}"
+        palier_select = discord.ui.Select(
+            placeholder=choix_paliers.get(actuel, t("Paliers personnalisés", "Custom steps")),
+            options=[discord.SelectOption(label=libelle, value=cle, default=cle == actuel)
+                     for cle, libelle in choix_paliers.items()],
+        )
+
+        async def regler_palier(interaction: discord.Interaction):
+            if not interaction.response.is_done():
+                await interaction.response.defer()
+            mute, kick = (int(x) for x in palier_select.values[0].split("-"))
+            await moderation_cog.regler_paliers(self.bot, self.guild.id, mute, kick)
+            await self.refresh(interaction)
+
+        palier_select.callback = regler_palier
+        container.add_item(discord.ui.ActionRow(palier_select))
+
         # — Modération par IA (24/11/2026 : « mets l'IA de modération dans setup »)
         from . import sentrix_ultimate as ultimate
 
