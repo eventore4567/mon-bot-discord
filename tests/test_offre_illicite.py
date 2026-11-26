@@ -20,6 +20,12 @@ BLOQUES = [
     "10e le g de beuh",
     "je fais des dox mp moi pour les tarifs",
     "Je V3nds de la C0KE, DM moi",
+    # Revue Codex (PR #730)
+    "10 € le g de beuh",
+    "Je vends une fausse carte d'identité",
+    "Je vends une fausse carte d’identité",
+    "vends résine 10g pochon dispo",
+    "je vends une arme calibre 9 mm sans papiers",
 ]
 LAISSES = [
     "la coke dans le film scarface",
@@ -34,6 +40,12 @@ LAISSES = [
     "le crack de ma vitre",
     "je cherche à acheter un jeu",
     "qui veut jouer a la guerre des armes ?",
+    # Revue Codex (PR #730) : sens ordinaires
+    "Je vends des figurines en résine",
+    "Je vends un vase en cristal",
+    "je vends un pistolet à colle, dm moi",
+    "vends nerf gun dispo",
+    "vente de lean manufacturing en formation",
 ]
 
 

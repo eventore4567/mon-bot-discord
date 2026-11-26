@@ -394,18 +394,19 @@ _OFFRE_ILLICITE_RE = re.compile(
     r"\b(?:je\s+)?(?:vends?|vend|vente|a\s+vendre|dispo(?:nible)?s?|livraison|"
     r"qui\s+vend|cherche\s+(?:a\s+)?(?:acheter|vendeur|plug)|achete|plug|"
     r"selling|for\s+sale|wts|dm\s+(?:me|moi)|mp\s+(?:moi|pour)|prix\s+en\s+(?:mp|dm)|"
-    r"\d+\s*(?:euros?|eur|e|\$|usd)\s*(?:le|la|les|the)?\s*(?:g|gramme|grammes|pieces?|unites?))\b"
+    r"\d+\s*(?:euros?|eur|e|€|\$|usd)\s*(?:le|la|les|the)?\s*(?:g|gramme|grammes|pieces?|unites?))\b"
 )
 _PRODUITS_ILLICITES = (
     # stupéfiants
-    ("cocaine", "stupéfiants"), ("coke", "stupéfiants"), ("crack", "stupéfiants"), ("heroine", "stupéfiants"),
-    ("weed", "stupéfiants"), ("beuh", "stupéfiants"), ("resine", "stupéfiants"),
+    ("cocaine", "stupéfiants"), ("coke", "stupéfiants"), ("crack", "stupéfiants", "drogue"), ("heroine", "stupéfiants"),
+    ("weed", "stupéfiants"), ("beuh", "stupéfiants"), ("resine", "stupéfiants", "drogue"),
     ("ecsta", "stupéfiants"), ("mdma", "stupéfiants"), ("ketamine", "stupéfiants"), ("lsd", "stupéfiants"),
-    ("3mmc", "stupéfiants"), ("cristal", "stupéfiants"), ("meth", "stupéfiants"), ("xanax", "stupéfiants"),
-    ("lean", "stupéfiants"), ("codeine", "stupéfiants"), ("buvard", "stupéfiants"),
+    ("3mmc", "stupéfiants"), ("cristal", "stupéfiants", "drogue"), ("meth", "stupéfiants"), ("xanax", "stupéfiants"),
+    ("lean", "stupéfiants", "drogue"), ("codeine", "stupéfiants"), ("buvard", "stupéfiants", "drogue"),
     # armes
-    ("arme", "armes"), ("armes", "armes"), ("flingue", "armes"), ("glock", "armes"), ("kalash", "armes"),
-    ("pistolet", "armes"), ("munitions", "armes"), ("gun", "armes"), ("guns", "armes"),
+    ("arme", "armes", "arme"), ("armes", "armes", "arme"), ("flingue", "armes"), ("glock", "armes"),
+    ("kalash", "armes"), ("pistolet", "armes", "arme"), ("munitions", "armes"), ("gun", "armes", "arme"),
+    ("guns", "armes", "arme"),
     # faux documents, fraude
     ("faux billets", "faux documents ou fraude"), ("faux papiers", "faux documents ou fraude"),
     ("fausse carte d identite", "faux documents ou fraude"), ("faux permis", "faux documents ou fraude"),
@@ -416,9 +417,26 @@ _PRODUITS_ILLICITES = (
     ("dox", "atteinte aux personnes"), ("doxx", "atteinte aux personnes"), ("swat", "atteinte aux personnes"),
     ("tueur a gages", "atteinte aux personnes"), ("ddos", "atteinte aux personnes"),
 )
+# Revue Codex (PR #730) : résine, cristal, crack, lean, buvard, arme, pistolet,
+# gun ont un sens ordinaire (« figurines en résine », « vase en cristal »,
+# « pistolet à colle », « nerf gun »). Ils ne comptent qu'avec un indice propre
+# à la drogue ou aux vraies armes dans le même message.
+_CONTEXTE_AMBIGU = {
+    "drogue": re.compile(
+        r"\b(?:\d+\s*(?:g|gr|grammes?)|pochons?|plaquettes?|barrettes?|bonbonnes?|"
+        r"defonce|planer|fumer|sniff\w*|plug|stup\w*|drogues?|weed|beuh|coke|ecsta|mdma|ketamine)\b"
+    ),
+    "arme": re.compile(
+        r"\b(?:calibres?|\d+\s*mm|munitions?|chargeurs?|balles?|cartouches?|"
+        r"sans\s+papiers?|non\s+declare\w*|glock|kalash|flingue)\b"
+    ),
+}
 _PRODUITS_ILLICITES_RE = [
-    (re.compile(r"\b" + re.escape(mot).replace(r"\ ", r"\s+") + r"\b"), mot, famille)
-    for mot, famille in _PRODUITS_ILLICITES
+    # Séparateurs tolérés entre les mots : espaces, apostrophes droites ou
+    # typographiques, tirets (« fausse carte d’identité », revue Codex #730).
+    (re.compile(r"\b" + re.escape(entree[0]).replace(r"\ ", r"[\s'’-]+") + r"\b"),
+     entree[0], entree[1], entree[2] if len(entree) > 2 else None)
+    for entree in _PRODUITS_ILLICITES
 ]
 
 
@@ -437,9 +455,12 @@ def _offre_illicite(content: str) -> str | None:
     )
     if not texte or not _OFFRE_ILLICITE_RE.search(texte):
         return None
-    for motif, mot, famille in _PRODUITS_ILLICITES_RE:
-        if motif.search(texte):
-            return f"vente illicite : {famille} ({mot})"
+    for motif, mot, famille, contexte in _PRODUITS_ILLICITES_RE:
+        if not motif.search(texte):
+            continue
+        if contexte and not _CONTEXTE_AMBIGU[contexte].search(texte):
+            continue
+        return f"vente illicite : {famille} ({mot})"
     return None
 
 
