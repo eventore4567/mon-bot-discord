@@ -4846,11 +4846,21 @@ class AutoMod(commands.Cog, name="Automod"):
                 # commande isolée est retirée du compte, elle n'annule pas la
                 # fenêtre (revue Codex, PR #731).
                 recents = self.spam_tracker.valeurs(key, maintenant=instant, fenetre=fenetre_moyenne)
-                prefixe = str(getattr(self.bot, "prefix_cache", {}).get(message.guild.id, config.DEFAULT_PREFIX))
+                prefixes = {str(getattr(self.bot, "prefix_cache", {}).get(message.guild.id, config.DEFAULT_PREFIX)), "/"}
+                # Revue Codex (PR #731) : les commandes personnalisées ont leur
+                # propre préfixe (utils/command_prefixes), indépendant du préfixe officiel.
+                try:
+                    from utils import command_prefixes
+
+                    perso = await command_prefixes.get_custom_prefix(self.bot, message.guild.id)
+                    if perso:
+                        prefixes.add(str(perso))
+                except Exception:  # noqa: BLE001 — sans préfixe perso, on garde l'officiel
+                    pass
                 ordinaires = [
                     m for m in recents
                     if m is not None and not isinstance(m, _ReponseDeCommande)
-                    and not str(getattr(m, "content", "") or "").startswith((prefixe, "/"))
+                    and not str(getattr(m, "content", "") or "").startswith(tuple(p for p in prefixes if p))
                 ]
                 if len(ordinaires) >= seuils.messages + 1:
                     soutenu, fenetre_longue = True, fenetre_moyenne

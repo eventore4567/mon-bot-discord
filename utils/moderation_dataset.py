@@ -488,6 +488,9 @@ class MultilingualModerationDataset:
         # correspondance la PLUS forte du message ; une plaisanterie annoncée à
         # un endroit n'excuse pas une vraie insulte plus loin.
         meilleure: ModerationMatch | None = None
+        # Revue Codex (PR #731) : calculé UNE fois (il relit tout le message) ;
+        # dans la boucle, un message de 4000 caractères bloquait la boucle ~1,7 s.
+        reduit_message = should_downgrade_dataset_match(text, "mot")
         recolles = set(_tokens_candidats(tokens)) - set(tokens)
         positions = list(enumerate(tokens)) + [(None, t) for t in recolles]
         for index, brut in positions:
@@ -511,7 +514,7 @@ class MultilingualModerationDataset:
                     targeted, reason = False, "plaisanterie annoncée (« je rigole », « mdr »…)"
                 if token in _TERMES_ORDINAIRES_SAUF_SI_CIBLE and not _attribue_a_quelquun(voisinage):
                     continue
-                if should_downgrade_dataset_match(text, "mot"):
+                if reduit_message:
                     candidat = ModerationMatch(
                         "mot_contextuel", min(confidence, 0.30), targeted,
                         "contexte explicatif ou citation probable",
@@ -520,4 +523,6 @@ class MultilingualModerationDataset:
                     candidat = ModerationMatch("mot", confidence, targeted, reason)
                 if meilleure is None or candidat.confidence > meilleure.confidence:
                     meilleure = candidat
+                    if meilleure.confidence >= 0.94:
+                        return meilleure  # rien ne peut dépasser une attaque adressée
         return meilleure

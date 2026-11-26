@@ -49,3 +49,13 @@ def test_message_long_affiche_et_fichier_de_securite():
     assert "29. une ligne" in "\n".join(morceaux)
     assert all(len(v) < 1024 for v in morceaux)
     assert fichier is not None and texte in fichier.fp.read().decode("utf-8")
+
+
+def test_un_long_message_d_insultes_reste_rapide():
+    """Revue Codex (PR #731) : 4000 caractères analysés en millisecondes, pas en
+    secondes — l'analyse est synchrone et bloquait toute la boucle du bot."""
+    import time
+
+    debut = time.perf_counter()
+    DATASET.match("con " * 1000)
+    assert time.perf_counter() - debut < 0.25

@@ -88,6 +88,12 @@ async def main() -> int:
     check(reaction_mixte is not None and reaction_mixte <= 7,
           "une commande puis 6 messages ordinaires (1 / 1,5 s) : arrêté au 6e message ordinaire", str(reaction_mixte))
 
+    # Revue Codex (PR #731) : les commandes personnalisées ont leur propre préfixe.
+    from utils import command_prefixes
+    await command_prefixes.set_custom_prefix(bot, h.GID, "!")
+    perso = await serie(h.SECOND_ID + 7, 8, 1.7, texte="!regles {i}")
+    check(perso is None, "8 commandes personnalisées (préfixe !) ne sont pas prises pour du spam lent", str(perso))
+
     commandes = await serie(h.MOD_ID, 8, 1.8, texte="+balance {i}")
     check(commandes is None, "8 commandes à 1,8 s d'écart ne sont pas prises pour du spam lent", str(commandes))
 
