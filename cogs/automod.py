@@ -386,6 +386,63 @@ def _iter_link_hosts(content: str):
             yield raw
 
 
+# 26/11/2026 (Jayden : « que l'anti-pub bloque aussi le criminel ») : la pub
+# pour des produits ou services illégaux. Un mot seul ne suffit JAMAIS (« la
+# coke dans le film », « un glock dans Valorant ») : il faut une offre ou une
+# demande d'achat ET un produit illicite dans le même message.
+_OFFRE_ILLICITE_RE = re.compile(
+    r"\b(?:je\s+)?(?:vends?|vend|vente|a\s+vendre|dispo(?:nible)?s?|livraison|"
+    r"qui\s+vend|cherche\s+(?:a\s+)?(?:acheter|vendeur|plug)|achete|plug|"
+    r"selling|for\s+sale|wts|dm\s+(?:me|moi)|mp\s+(?:moi|pour)|prix\s+en\s+(?:mp|dm)|"
+    r"\d+\s*(?:euros?|eur|e|\$|usd)\s*(?:le|la|les|the)?\s*(?:g|gramme|grammes|pieces?|unites?))\b"
+)
+_PRODUITS_ILLICITES = (
+    # stupéfiants
+    ("cocaine", "stupéfiants"), ("coke", "stupéfiants"), ("crack", "stupéfiants"), ("heroine", "stupéfiants"),
+    ("weed", "stupéfiants"), ("beuh", "stupéfiants"), ("resine", "stupéfiants"),
+    ("ecsta", "stupéfiants"), ("mdma", "stupéfiants"), ("ketamine", "stupéfiants"), ("lsd", "stupéfiants"),
+    ("3mmc", "stupéfiants"), ("cristal", "stupéfiants"), ("meth", "stupéfiants"), ("xanax", "stupéfiants"),
+    ("lean", "stupéfiants"), ("codeine", "stupéfiants"), ("buvard", "stupéfiants"),
+    # armes
+    ("arme", "armes"), ("armes", "armes"), ("flingue", "armes"), ("glock", "armes"), ("kalash", "armes"),
+    ("pistolet", "armes"), ("munitions", "armes"), ("gun", "armes"), ("guns", "armes"),
+    # faux documents, fraude
+    ("faux billets", "faux documents ou fraude"), ("faux papiers", "faux documents ou fraude"),
+    ("fausse carte d identite", "faux documents ou fraude"), ("faux permis", "faux documents ou fraude"),
+    ("cvv", "faux documents ou fraude"), ("carding", "faux documents ou fraude"), ("cc fullz", "faux documents ou fraude"),
+    ("comptes bancaires", "faux documents ou fraude"), ("rib vole", "faux documents ou fraude"),
+    ("fake ids", "faux documents ou fraude"), ("counterfeit", "faux documents ou fraude"),
+    # atteintes aux personnes
+    ("dox", "atteinte aux personnes"), ("doxx", "atteinte aux personnes"), ("swat", "atteinte aux personnes"),
+    ("tueur a gages", "atteinte aux personnes"), ("ddos", "atteinte aux personnes"),
+)
+_PRODUITS_ILLICITES_RE = [
+    (re.compile(r"\b" + re.escape(mot).replace(r"\ ", r"\s+") + r"\b"), mot, famille)
+    for mot, famille in _PRODUITS_ILLICITES
+]
+
+
+_LEET = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s"})
+
+
+def _offre_illicite(content: str) -> str | None:
+    """« vente illicite : <famille> (<mot>) », ou None."""
+    texte = text_normalization.normaliser(content)
+    # « V3nds de la C0KE » : un mot qui mêle lettres et chiffres est lu en leet ;
+    # un prix (« 10e », « 20 € ») commence par un chiffre et reste tel quel.
+    texte = re.sub(
+        r"\b[a-z][a-z0-9@$]*[0-9@$][a-z0-9@$]*\b",
+        lambda m: m.group(0).translate(_LEET),
+        texte,
+    )
+    if not texte or not _OFFRE_ILLICITE_RE.search(texte):
+        return None
+    for motif, mot, famille in _PRODUITS_ILLICITES_RE:
+        if motif.search(texte):
+            return f"vente illicite : {famille} ({mot})"
+    return None
+
+
 def _trusted_scam_host(host: str) -> bool:
     host = str(host or "").casefold().strip(".")
     return any(host == domain or host.endswith("." + domain) for domain in _SCAM_TRUSTED_DOMAINS)
@@ -460,6 +517,10 @@ def _scam_hit(content: str) -> str | None:
     normalized = text_normalization.normaliser(content)
     if any(text_normalization.normaliser(marker) in normalized for marker in _SCAM_DISCUSSION_MARKERS):
         return None
+
+    illicite = _offre_illicite(content)
+    if illicite:
+        return illicite
 
     motif = text_normalization.contient(content, SCAM_KEYWORDS)
     if not motif:
