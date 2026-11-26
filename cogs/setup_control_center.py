@@ -859,9 +859,27 @@ class SetupView(discord.ui.LayoutView):
             self.ajouter(FieldRoleSelect(self, "mute_role", "Rôle mute", 3))
             self.ajouter(FieldRoleSelect(self, "warn_role", "Rôle warn", 4))
         elif self.category == "security":
-            self.ajouter(AutomodSelect(self))
+            security = discord.ui.Button(label="Configure AutoMod", style=discord.ButtonStyle.primary)
+
+            async def open_security(interaction):
+                from cogs.automod_center_v118 import AutoModCenterView
+                await AutoModCenterView(self.bot, self.guild, self.author_id).open(interaction)
+
+            security.callback = open_security
+            self.ajouter(security)
+            # Legacy bulk selector remains available under Advanced Settings.
+            if self.avance:
+                self.ajouter(AutomodSelect(self))
         elif self.category == "logs":
             self.ajouter(LogSelect(self))
+            security_logs = discord.ui.Button(label="AutoMod Logs & History", style=discord.ButtonStyle.primary)
+
+            async def open_security_logs(interaction):
+                from cogs.automod_center_v118 import AutoModLogsView
+                await AutoModLogsView(self.bot, self.guild, self.author_id).open(interaction)
+
+            security_logs.callback = open_security_logs
+            self.ajouter(security_logs)
             if self.selected_log:
                 self.ajouter(LogChannelSelect(self))
                 toggle = discord.ui.Button(
@@ -1099,23 +1117,21 @@ class SetupView(discord.ui.LayoutView):
             row = await self.bot.db.fetchone(
                 "SELECT * FROM automod_settings WHERE guild_id = ?", (self.guild.id,)
             )
-            actives = [label for field, label in AUTOMOD if _get(row, field, 0)]
-            inactives = [label for field, label in AUTOMOD if not _get(row, field, 0)]
-            sections = [
+            from cogs.automod_center_v118 import GROUPS
+            lines = []
+            total_active = 0
+            total = 0
+            for _key, label, _description, fields in GROUPS:
+                count = sum(bool(_get(row, field, 0)) for field in fields)
+                total_active += count
+                total += len(fields)
+                lines.append(panels.Ligne(label, f"{count}/{len(fields)} enabled"))
+            return [
                 panels.Section(
-                    f"Protections actives ({len(actives)}/{len(AUTOMOD)})",
-                    [panels.Ligne("Modules", " · ".join(actives) if actives else "Aucune")],
+                    f"AutoMod · {total_active}/{total} protections",
+                    lines,
                 )
             ]
-            if inactives:
-                sections.append(
-                    panels.Section(
-                        f"Désactivées ({len(inactives)})",
-                        [panels.Ligne("Modules", " · ".join(inactives),
-                                      indice="Le menu ci-dessous les active une par une.")],
-                    )
-                )
-            return sections
         if cle == "logs":
             actifs, inactifs = [], []
             for log_type, meta in log_service.LOG_TYPES.items():

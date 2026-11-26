@@ -127,6 +127,9 @@ class Invites(commands.Cog, name="Invites"):
         # invitation "réelle" d'une invitation "fake" sur /invites, sans jamais deviner.
         account_age_days = (discord.utils.utcnow() - member.created_at).days
         await self.bot.db.record_invite_join(guild.id, member.id, inviter_id, code, account_age_days)
+        # Publish only AFTER both detection (including V77 retries) and DB persistence.
+        # The public feed listens to this event instead of racing on_member_join.
+        self.bot.dispatch("sentrix_invite_recorded", member, inviter_id, code)
         await self._journaliser_arrivee(member, code, inviter_id)
 
         if not inviter_id:
