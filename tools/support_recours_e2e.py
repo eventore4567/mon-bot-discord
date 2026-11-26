@@ -120,6 +120,23 @@ async def main() -> int:
     check(bool(recours) and recours.get("token") and recours.get("appeal_id"),
           "recours actif : un recours et son lien sont créés", str(recours)[:200])
 
+    # Revue Codex (PR #728) : le lien part AVANT le ban (le membre partage encore
+    # le serveur), et on_member_ban n'en crée pas un second.
+    await bot.db.execute("DELETE FROM ban_appeals", ())
+    debut = len(h.CALLS)
+    await asyncio.wait_for(h.run_prefix(bot, guild, f"+ban <@{h.TARGET_ID}> test recours",
+                                        author_id=h.ADMIN_ID, author_roles=(h.ADMIN_ROLE_ID,)), 20)
+    await h.settle(idle=0.4, maximum=4)
+    appels = h.CALLS[debut:]
+    lien = next((i for i, (m, p, js) in enumerate(appels)
+                 if m == "POST" and p == "/channels/100000000000009001/messages" and "/appeal/" in str(js)), None)
+    ban = next((i for i, (m, p, _) in enumerate(appels) if m == "PUT" and "/bans/" in p), None)
+    check(lien is not None and ban is not None and lien < ban, "le lien de recours part avant le ban",
+          f"lien={lien} ban={ban}")
+    await support.on_member_ban(guild, await bot.fetch_user(h.TARGET_ID))
+    nb = await bot.db.fetchone("SELECT COUNT(*) AS n FROM ban_appeals WHERE status='awaiting_user'", ())
+    check(int(nb["n"]) == 1, "on_member_ban ne remplace pas le lien déjà envoyé", str(nb["n"]))
+
     # Base PostgreSQL : la sauvegarde toutes les 6 h ne lève plus d'erreur.
     erreurs = []
     original = support._record_error

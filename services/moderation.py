@@ -367,6 +367,13 @@ async def ban(
             executed=False,
             validation_error="Suppression invalide : aucune, 15 minutes, 1 heure ou 24 heures maximum.",
         )
+    async def executer():
+        await preparer_recours(bot, guild, target, reason)
+        return await guild.ban(
+            target, reason=f"{actor} : {reason}",
+            delete_message_seconds=delete_message_seconds,
+        )
+
     return await _run_sanction_pipeline(
         bot,
         guild=guild,
@@ -375,11 +382,21 @@ async def ban(
         reason=reason,
         dm_text=dm_text,
         action="ban",
-        execute=lambda: guild.ban(
-            target, reason=f"{actor} : {reason}",
-            delete_message_seconds=delete_message_seconds,
-        ),
+        execute=executer,
     )
+
+
+async def preparer_recours(bot: Any, guild: discord.Guild, target: Any, reason: str) -> None:
+    """Recours activé (/setup → Modération) : le lien part AVANT le ban, tant que
+    le membre partage encore le serveur avec SentriX (revue Codex, PR #728).
+    Jamais bloquant : 2,5 s au plus, toute erreur est ignorée."""
+    support = bot.get_cog("EnterpriseSuite") if hasattr(bot, "get_cog") else None
+    if support is None:
+        return
+    try:
+        await asyncio.wait_for(support.create_appeal_for_ban(guild, target, raison=reason), 2.5)
+    except Exception:  # noqa: BLE001 — le ban ne dépend jamais du recours
+        logger.debug("Recours pré-ban non préparé.", exc_info=True)
 
 
 async def kick(
@@ -551,6 +568,7 @@ async def tempban(
             dm_sent = False
 
     log_service.mark_sanction(guild.id, target.id, "ban")
+    await preparer_recours(bot, guild, target, reason)
     await guild.ban(target, reason=f"{actor} (temporaire {duree}) : {reason}", delete_message_seconds=0)
 
     tempaction_error = await persist_tempaction(

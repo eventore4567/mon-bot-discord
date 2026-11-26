@@ -1650,6 +1650,9 @@ class Database:
         # ne doivent jamais recevoir le même numéro.
         self._sanctions_lock = asyncio.Lock()
         self._cache_reglages: dict = {}
+        # Revue Codex (PR #728) : une lecture partie AVANT une écriture ne doit
+        # pas republier l'ancien résultat après coup.
+        self._generation_reglages = 0
         self._invite_join_lock = asyncio.Lock()
 
     @property
@@ -1983,18 +1986,23 @@ class Database:
             await self._conn.close()
 
     async def execute(self, query: str, params: tuple = ()):
-        if (
-            self._cache_reglages
-            and _table_lue_par_chaque_commande(query)
-            and not str(query).lstrip().lower().startswith(("select", "create table if not exists", "create index if not exists", "create unique index if not exists"))
-        ):
+        ecrit_reglages = _table_lue_par_chaque_commande(query) and not str(query).lstrip().lower().startswith(
+            ("select", "create table if not exists", "create index if not exists", "create unique index if not exists")
+        )
+        if ecrit_reglages:
+            self._generation_reglages += 1
             self._cache_reglages.clear()
-        fast = getattr(self._conn, "execute_and_commit", None)
-        if fast is not None:
-            cur = await fast(query, params)
-        else:
-            cur = await self._conn.execute(query, params)
-            await self._conn.commit()
+        try:
+            fast = getattr(self._conn, "execute_and_commit", None)
+            if fast is not None:
+                cur = await fast(query, params)
+            else:
+                cur = await self._conn.execute(query, params)
+                await self._conn.commit()
+        finally:
+            if ecrit_reglages:
+                self._generation_reglages += 1
+                self._cache_reglages.clear()
         if cur.rowcount != 0 and _is_configuration_write(query):
             self._schedule_config_snapshot()
         return cur
@@ -2005,10 +2013,11 @@ class Database:
             trouve = self._cache_reglages.get(cle)
             if trouve is not None and time.monotonic() - trouve[0] < _CACHE_REGLAGES_TTL:
                 return trouve[1]
+        generation = self._generation_reglages
         cur = await self._conn.execute(query, params)
         row = await cur.fetchone()
         await cur.close()
-        if cle is not None:
+        if cle is not None and generation == self._generation_reglages:
             self._cache_reglages[cle] = (time.monotonic(), row)
         return row
 
@@ -2018,10 +2027,11 @@ class Database:
             trouve = self._cache_reglages.get(cle)
             if trouve is not None and time.monotonic() - trouve[0] < _CACHE_REGLAGES_TTL:
                 return list(trouve[1])
+        generation = self._generation_reglages
         cur = await self._conn.execute(query, params)
         rows = await cur.fetchall()
         await cur.close()
-        if cle is not None:
+        if cle is not None and generation == self._generation_reglages:
             self._cache_reglages[cle] = (time.monotonic(), list(rows))
         return rows
 
@@ -3094,6 +3104,14 @@ class Database:
                 await self._conn.execute(
                     "DELETE FROM shop_role_purchases WHERE guild_id = ? AND user_id = ? AND role_id = ?",
                     (guild_id, user_id, item["role_id"]),
+                )
+            # Revue Codex (PR #728) : rien n'a été livré, l'exemplaire revient en stock
+            # (un stock illimité, -1, n'est pas touché).
+            if await self.regle_boutique(guild_id, int(item["id"])) is not None:
+                await self._conn.execute(
+                    "UPDATE v17_shop_rules SET stock = stock + 1, updated_at = ? "
+                    "WHERE guild_id = ? AND item_id = ? AND stock >= 0",
+                    (now(), guild_id, int(item["id"])),
                 )
             await self._conn.commit()
 

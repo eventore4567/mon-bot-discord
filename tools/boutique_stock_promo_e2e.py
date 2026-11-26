@@ -76,6 +76,16 @@ async def main() -> int:
     check("rupture" in texte and int(solde2["cash"]) == 950, "le stock épuisé bloque l'achat suivant sans débit",
           f"solde {solde2['cash']} — {texte[-160:]}")
 
+    # Revue Codex (PR #728) : un achat remboursé (rôle refusé par Discord,
+    # inventaire en échec) rend l'exemplaire au stock.
+    await bot.db.regler_boutique(h.GID, article, stock=1)
+    statut, achete = await bot.db.purchase_shop_item(h.GID, h.TARGET_ID, article)
+    apres_achat = (await bot.db.regle_boutique(h.GID, article))["stock"]
+    await bot.db.refund_shop_item(h.GID, h.TARGET_ID, achete, "test remboursement")
+    apres_remboursement = (await bot.db.regle_boutique(h.GID, article))["stock"]
+    check(statut == "ok" and apres_achat == 0 and apres_remboursement == 1,
+          "un achat remboursé rend l'exemplaire au stock", f"{statut} {apres_achat} -> {apres_remboursement}")
+
     failed = [r for r in RESULTS if not r[0]]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} étapes réussies.")
     sys.stdout.flush()

@@ -68,6 +68,23 @@ async def main() -> int:
     limite_admin = await ai_service.limite_quotidienne(bot, guild.id, h.ADMIN_ID, reglages)
     check(limite_admin == base, "un membre sans ce rôle garde la limite du serveur", str(limite_admin))
 
+    # Revue Codex (PR #728) : le pipeline texte réellement installé (community_v34)
+    # applique la limite du rôle. Usage du jour au-delà de la limite du serveur.
+    await bot.db.execute(
+        "INSERT INTO ai_usage (guild_id, user_id, day, requests, tokens_estimate) VALUES (?, ?, ?, ?, 0)",
+        (guild.id, h.TARGET_ID, ai_service._today_str(), base + 5),
+    )
+    ai_cog = bot.get_cog("Ai")
+    try:
+        resultat = await asyncio.wait_for(ai_cog._prepare_and_generate(
+            guild_id=guild.id, channel_id=h.CID, user_id=h.TARGET_ID, author_name="cible", question="bonjour",
+        ), 20)
+    except Exception as exc:  # noqa: BLE001 — sans clé, la génération échoue APRÈS les limites
+        resultat = {"ok": False, "error": repr(exc)}
+    erreur = str((resultat or {}).get("error") or "")
+    check("Limite quotidienne" not in erreur and "limite d'IA" not in erreur,
+          "au-delà de la limite du serveur, un membre du rôle à 200 n'est pas bloqué", erreur[:160])
+
     texte = " ".join(i.content for i in (await page()) if isinstance(i, discord.ui.TextDisplay))
     check(f"<@&{h.MEMBER_ROLE_ID}>" in texte and "200" in texte, "la page liste les limites par rôle")
 

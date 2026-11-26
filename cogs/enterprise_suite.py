@@ -392,9 +392,18 @@ class EnterpriseSuite(commands.Cog, name=_COG_NAME):
             return None, "Aucune raison fournie"
         return int(row["case_number"]) if row["case_number"] is not None else None, str(row["reason"] or "Aucune raison fournie")
 
-    async def create_appeal_for_ban(self, guild: discord.Guild, user: discord.User | discord.Member) -> dict[str, Any] | None:
+    async def create_appeal_for_ban(self, guild: discord.Guild, user: discord.User | discord.Member,
+                                    raison: str | None = None) -> dict[str, Any] | None:
         settings = await self.get_settings(guild.id)
         if not int(settings.get("appeals_enabled") or 0):
+            return None
+        # Le lien est envoyé avant le ban (services.moderation.preparer_recours) ;
+        # on_member_ban ne doit pas le remplacer par un second lien injoignable.
+        recent = await self.bot.db.fetchone(
+            "SELECT id FROM ban_appeals WHERE guild_id=? AND user_id=? AND status='awaiting_user' AND created_at>=?",
+            (guild.id, user.id, now() - 120),
+        )
+        if recent:
             return None
         await self.bot.db.execute(
             "UPDATE ban_appeals SET status='superseded', reviewed_at=? WHERE guild_id=? AND user_id=? AND status IN ('awaiting_user','open','more_info')",
@@ -402,6 +411,8 @@ class EnterpriseSuite(commands.Cog, name=_COG_NAME):
         )
         token = secrets.token_urlsafe(32)
         case_number, reason = await self._latest_ban_case(guild.id, user.id)
+        if raison:
+            reason = str(raison)
         cur = await self.bot.db.execute(
             "INSERT INTO ban_appeals (guild_id,user_id,token_hash,status,ban_reason,case_number,created_at) VALUES (?,?,?,?,?,?,?)",
             (guild.id, user.id, _token_hash(token), "awaiting_user", reason[:1500], case_number, now()),

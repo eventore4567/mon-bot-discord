@@ -51,3 +51,36 @@ def test_reglages_lus_une_fois_puis_oublies_a_l_ecriture(tmp_path):
             await db.close()
 
     asyncio.run(scenario())
+
+
+def test_lecture_en_vol_ne_republie_pas_l_ancien_reglage(tmp_path):
+    """Revue Codex (PR #728) : une lecture partie avant une écriture ne remet
+    pas l'ancien résultat en cache une fois l'écriture terminée."""
+
+    async def scenario():
+        db = Database(str(tmp_path / "t.db"))
+        await db.connect()
+        try:
+            q = "SELECT 1 FROM command_blocked_channels WHERE guild_id = ? AND channel_id = ? LIMIT 1"
+            original = db._conn.execute
+            lecture_partie = asyncio.Event()
+            reprendre = asyncio.Event()
+
+            async def execute_lent(sql, *a, **k):
+                cur = await original(sql, *a, **k)
+                if str(sql).startswith("SELECT 1 FROM command_blocked_channels") and not reprendre.is_set():
+                    lecture_partie.set()
+                    await reprendre.wait()
+                return cur
+
+            db._conn.execute = execute_lent
+            lecture = asyncio.create_task(db.fetchone(q, (1, 2)))
+            await lecture_partie.wait()
+            await db.execute("INSERT INTO command_blocked_channels (guild_id, channel_id) VALUES (?, ?)", (1, 2))
+            reprendre.set()
+            await lecture
+            assert await db.fetchone(q, (1, 2)) is not None, "le salon bloqué est ignoré : ancien résultat en cache"
+        finally:
+            await db.close()
+
+    asyncio.run(scenario())
