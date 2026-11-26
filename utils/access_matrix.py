@@ -112,7 +112,7 @@ OWNER_ONLY_COMMANDS = frozenset({
     "logs-diag", "reset-logs-all",
     # Diagnostic technique compact (+health, alias corediag) : métriques globales au
     # processus, jamais scopées par serveur.
-    "health", "corediag",
+    "health", "corediag", "panels",
     "dblstatus", "dblsync", "topggstatus", "topggsync",
 })
 
