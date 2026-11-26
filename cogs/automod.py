@@ -748,6 +748,11 @@ ESCALADE_MUTE_DURATIONS_SECONDS = SPAM_MUTE_DURATIONS_SECONDS
 SPAM_PREMIER_PALIER = 1
 #: Spam soutenu : messages ÷ fenêtre longue (2× le seuil de rafale en 20 s).
 SPAM_FENETRE_LONGUE = 20
+#: 26/11/2026 (« il a laissé passer ~10 messages ») : un spammeur à un message
+#: toutes les 1,5-2 s n'atteint jamais la rafale (5 en 6 s) et n'était pris
+#: qu'au 10e message (fenêtre longue). Palier intermédiaire : seuil + 1 messages
+#: en 10 s (normal : 6 en 10 s ; strict : 5 ; souple : 8).
+SPAM_FENETRE_MOYENNE = 10
 #: Majuscules : dès 5 lettres (« WWWWW », « # WWWWWW »), plus de 70 % en capitales.
 CAPS_LETTRES_MIN = 5
 CAPS_RATIO = 0.7
@@ -4828,10 +4833,37 @@ class AutoMod(commands.Cog, name="Automod"):
             self.spam_tracker.ajouter(key, message, maintenant=instant)
             rafale = self.spam_tracker.compter(key, maintenant=instant, fenetre=seuils.secondes) >= seuils.messages
             fenetre_longue = min(SPAM_FENETRE_LONGUE, self.spam_tracker.fenetre)
+            fenetre_moyenne = min(SPAM_FENETRE_MOYENNE, self.spam_tracker.fenetre)
             soutenu = (
                 not rafale
                 and self.spam_tracker.compter(key, maintenant=instant, fenetre=fenetre_longue) >= 2 * seuils.messages
             )
+            if not rafale and not soutenu and not commande and (
+                self.spam_tracker.compter(key, maintenant=instant, fenetre=fenetre_moyenne) >= seuils.messages + 1
+            ):
+                # Des commandes enchaînées (+daily, +work, jeux…) ne sont pas du
+                # spam lent : ce palier ne compte que les messages ordinaires. Une
+                # commande isolée est retirée du compte, elle n'annule pas la
+                # fenêtre (revue Codex, PR #731).
+                recents = self.spam_tracker.valeurs(key, maintenant=instant, fenetre=fenetre_moyenne)
+                prefixes = {str(getattr(self.bot, "prefix_cache", {}).get(message.guild.id, config.DEFAULT_PREFIX)), "/"}
+                # Revue Codex (PR #731) : les commandes personnalisées ont leur
+                # propre préfixe (utils/command_prefixes), indépendant du préfixe officiel.
+                try:
+                    from utils import command_prefixes
+
+                    perso = await command_prefixes.get_custom_prefix(self.bot, message.guild.id)
+                    if perso:
+                        prefixes.add(str(perso))
+                except Exception:  # noqa: BLE001 — sans préfixe perso, on garde l'officiel
+                    pass
+                ordinaires = [
+                    m for m in recents
+                    if m is not None and not isinstance(m, _ReponseDeCommande)
+                    and not str(getattr(m, "content", "") or "").startswith(tuple(p for p in prefixes if p))
+                ]
+                if len(ordinaires) >= seuils.messages + 1:
+                    soutenu, fenetre_longue = True, fenetre_moyenne
             if rafale or soutenu:
                 # La rafale entière part, pas seulement le message qui franchit le seuil :
                 # les premiers restaient affichés (4 par spammeur, mesuré).

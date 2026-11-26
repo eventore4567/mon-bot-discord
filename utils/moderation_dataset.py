@@ -132,6 +132,24 @@ _ATTRIBUTIONS = (
 )
 
 
+#: Mots autour d'un terme isolé pris en compte pour juger sa cible.
+_RAYON_CONTEXTE = 8
+_BLAGUES = ("je rigole", "jrigole", "jrg", "jdec", "je deconne", "mdr", "ptdr", "lol", "jk", "just kidding")
+
+
+def _voisinage(tokens: tuple[str, ...], terme: str) -> str:
+    """Les mots autour de la première occurrence du terme (tout le texte à défaut)."""
+    for index, token in enumerate(tokens):
+        if token == terme or _compacter_repetitions(token) == terme or token.translate(_LEET_TOKEN) == terme:
+            debut = max(0, index - _RAYON_CONTEXTE)
+            return " ".join(tokens[debut:index + _RAYON_CONTEXTE + 1])
+    return " ".join(tokens)
+
+
+def _blague_annoncee(texte: str) -> bool:
+    return any(f" {b} " in f" {texte} " for b in _BLAGUES)
+
+
 def _attribue_a_quelquun(normalized: str) -> bool:
     """Le mot est-il attribué à une personne, et pas seulement voisin d'un « ton » ?"""
     return any(f" {motif} " in f" {normalized} " for motif in _ATTRIBUTIONS)
@@ -463,20 +481,48 @@ class MultilingualModerationDataset:
                 confidence, targeted, reason = _context_confidence(normalized, kind)
                 return ModerationMatch(kind, confidence, targeted, reason)
 
-        for token in _tokens_candidats(tokens):
-            if token not in self._terms:
-                continue
-            if len(token) < _MIN_STANDALONE_LENGTH:
-                continue
-            if token in _AMBIGUOUS_STANDALONE_TERMS:
-                continue
-            confidence, targeted, reason = _context_confidence(normalized, "mot")
-            if token in _TERMES_ORDINAIRES_SAUF_SI_CIBLE and not _attribue_a_quelquun(normalized):
-                continue
-            if should_downgrade_dataset_match(text, "mot"):
-                return ModerationMatch(
-                    "mot_contextuel", min(confidence, 0.30), targeted,
-                    "contexte explicatif ou citation probable",
-                )
-            return ModerationMatch("mot", confidence, targeted, reason)
-        return None
+        # 26/11/2026 : le contexte d'un mot isolé se lit autour de CHAQUE
+        # occurrence (8 mots), pas dans tout le texte — une candidature contenant
+        # « fermer sa gueule (jrigole) » était jugée « attaque adressée » à cause
+        # d'un « tu » d'une autre ligne. Revue Codex (PR #731) : on garde la
+        # correspondance la PLUS forte du message ; une plaisanterie annoncée à
+        # un endroit n'excuse pas une vraie insulte plus loin.
+        meilleure: ModerationMatch | None = None
+        # Revue Codex (PR #731) : calculé UNE fois (il relit tout le message) ;
+        # dans la boucle, un message de 4000 caractères bloquait la boucle ~1,7 s.
+        reduit_message = should_downgrade_dataset_match(text, "mot")
+        recolles = set(_tokens_candidats(tokens)) - set(tokens)
+        positions = list(enumerate(tokens)) + [(None, t) for t in recolles]
+        for index, brut in positions:
+            variantes = {brut}
+            if index is not None:
+                compacte = _compacter_repetitions(brut)
+                variantes |= {compacte, brut.translate(_LEET_TOKEN), compacte.translate(_LEET_TOKEN)}
+            for token in variantes:
+                if token not in self._terms or len(token) < _MIN_STANDALONE_LENGTH:
+                    continue
+                if token in _AMBIGUOUS_STANDALONE_TERMS:
+                    continue
+                if index is None:
+                    voisinage = normalized
+                else:
+                    debut = max(0, index - _RAYON_CONTEXTE)
+                    voisinage = " ".join(tokens[debut:index + _RAYON_CONTEXTE + 1])
+                confidence, targeted, reason = _context_confidence(voisinage, "mot")
+                if _blague_annoncee(voisinage):
+                    confidence = min(confidence, 0.30)
+                    targeted, reason = False, "plaisanterie annoncée (« je rigole », « mdr »…)"
+                if token in _TERMES_ORDINAIRES_SAUF_SI_CIBLE and not _attribue_a_quelquun(voisinage):
+                    continue
+                if reduit_message:
+                    candidat = ModerationMatch(
+                        "mot_contextuel", min(confidence, 0.30), targeted,
+                        "contexte explicatif ou citation probable",
+                    )
+                else:
+                    candidat = ModerationMatch("mot", confidence, targeted, reason)
+                if meilleure is None or candidat.confidence > meilleure.confidence:
+                    meilleure = candidat
+                    if meilleure.confidence >= 0.94:
+                        return meilleure  # rien ne peut dépasser une attaque adressée
+        return meilleure

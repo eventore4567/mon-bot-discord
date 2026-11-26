@@ -53,10 +53,25 @@ def test_un_long_message_est_coupe_a_la_fin_d_une_phrase():
     assert len(coupe) <= 1502
     assert coupe.endswith("preuves. …") or coupe.endswith("preuves. …".strip())
     assert coupe[:-2].rstrip().endswith(".")
+    # 26/11/2026 (« fait que ça affiche tout ») : jusqu'à 3000 caractères le
+    # message s'affiche EN ENTIER, réparti en champs de moins de 1024 ; au-delà
+    # (message Nitro), l'aperçu coupé à la phrase + fichier joint demeure.
     champs, fichier = carte.champs(
         filter_name="antiinsult", reason="x", guild_id=1, channel_id=2, message_id=3,
         created_at=0, contenu=texte, deleted=1, deleted_ok=True, action=None, duree_s=None,
         infractions=0, spam_stage=0, memoire="", ref="SX-1",
     )
-    assert "preuves. …" in champs["Contenu"] and fichier is not None
-    assert len(champs["Contenu"]) < 1024  # champ d'embed
+    morceaux = [v for k, v in champs.items() if k.startswith("Contenu")]
+    # Revue Codex (PR #731) : au-delà de 900, le fichier complet reste joint
+    # même si la carte affiche tout (elle peut manquer de place).
+    assert fichier is not None and all(len(v) < 1024 for v in morceaux)
+    assert "\n".join(morceaux).count("preuves.") == 60
+    tres_long = phrase * 90  # ~3 700 caractères
+    champs, fichier = carte.champs(
+        filter_name="antiinsult", reason="x", guild_id=1, channel_id=2, message_id=3,
+        created_at=0, contenu=tres_long, deleted=1, deleted_ok=True, action=None, duree_s=None,
+        infractions=0, spam_stage=0, memoire="", ref="SX-1",
+    )
+    apercu = [v for k, v in champs.items() if k.startswith("Contenu")]
+    assert "preuves. …" in "".join(apercu) and fichier is not None
+    assert all(len(v) < 1024 for v in apercu)  # champs d'embed valides

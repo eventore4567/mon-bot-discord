@@ -998,6 +998,11 @@ def narrative_body(
         if any(detail):
             lines.append("\n".join(l for l in detail if l))
         contenu = _field_value_exact(embed, *alias["Contenu"])
+        # Un long message arrive en plusieurs champs (« Contenu (suite N) »,
+        # 1024 caractères chacun) : recollés ici, dans l'ordre, sans perte.
+        suites_contenu = [v for n, v in _field_map(embed) if _normalise_field_name(n).startswith("contenu suite")]
+        if contenu and suites_contenu:
+            contenu = "\n".join([contenu, *suites_contenu])
         if contenu:
             lines.append("**🗨️ Message**\n" + contenu)
         suites = [
@@ -1014,7 +1019,8 @@ def narrative_body(
             "Infractions (1 h)", "Récidive", "Membre", "Raison",
         )}
         autres = [f"**{nom}** · {valeur}" for nom, valeur in _field_map(embed)
-                  if _normalise_field_name(nom) not in connus]
+                  if _normalise_field_name(nom) not in connus
+                  and not _normalise_field_name(nom).startswith("contenu suite")]
         if autres:
             lines.append("**📎 Contexte**\n" + "\n".join(autres))
         return "\n\n".join(part for part in lines if part.strip())[:3900]
@@ -1497,6 +1503,17 @@ def _clean_role_positions(content: str) -> str:
     """
     return re.sub(r"`([0-9]{1,3})`", r"\1", str(content or ""))
 
+#: Discord limite le TEXTE d'un message Components V2 à 4000 caractères en tout.
+#: 26/11/2026 (« fait que ça affiche tout ») : les détails prennent ce que le
+#: résumé laisse, au lieu d'un plafond fixe de 2200 qui coupait un message
+#: supprimé de 2000 caractères. Marge pour l'en-tête, le titre et le pied.
+_TEXTE_CARTE_MAX = 3600
+
+
+def _budget_details(resume: str) -> int:
+    return max(2200, _TEXTE_CARTE_MAX - len(resume or ""))
+
+
 def _trace_body_parts(body: str) -> tuple[str, str]:
     """Sépare le résumé immédiat des détails longs.
 
@@ -1510,7 +1527,8 @@ def _trace_body_parts(body: str) -> tuple[str, str]:
     parts = [part.strip() for part in clean.split("\n\n") if part.strip()]
     if not parts:
         return "", ""
-    return parts[0][:1200], "\n\n".join(parts[1:])[:2200]
+    resume = parts[0][:1200]
+    return resume, "\n\n".join(parts[1:])[:_budget_details(resume)]
 
 
 def _trace_time_text(embed: discord.Embed) -> str:
@@ -1870,7 +1888,7 @@ class WideLogView(discord.ui.LayoutView):
                 # restent inchangées (elles sont créées par narrative_body).
                 container.add_item(discord.ui.TextDisplay(summary[:1600]))
             if details:
-                container.add_item(discord.ui.TextDisplay(details[:2200]))
+                container.add_item(discord.ui.TextDisplay(details[:_budget_details(summary)]))
 
         # Médias seulement après le contexte métier.
         if media_items:
