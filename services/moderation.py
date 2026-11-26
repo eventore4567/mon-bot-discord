@@ -166,6 +166,8 @@ async def persist_sanction(
         case_number = await bot.db.record_sanction(
             guild_id, target_id, actor_id, action, reason, duration_seconds
         )
+        if action in {"ban", "tempban"} and case_number is not None:
+            await _relier_recours_au_dossier(bot, guild_id, target_id, case_number)
         return case_number, None
     except Exception as exc:
         logger.exception(
@@ -384,6 +386,21 @@ async def ban(
         action="ban",
         execute=executer,
     )
+
+
+async def _relier_recours_au_dossier(bot: Any, guild_id: int, user_id: int, case_number: int) -> None:
+    """Le recours envoyé juste avant le ban porte le numéro du NOUVEAU dossier
+    (il ne pouvait pas le connaître) — revue Codex, PR #728."""
+    if not hasattr(bot, "get_cog") or bot.get_cog("EnterpriseSuite") is None:
+        return
+    try:
+        await bot.db.execute(
+            "UPDATE ban_appeals SET case_number=? WHERE guild_id=? AND user_id=? "
+            "AND status='awaiting_user' AND created_at>=?",
+            (int(case_number), int(guild_id), int(user_id), now() - 120),
+        )
+    except Exception:  # noqa: BLE001 — table absente ou base occupée : le recours reste valable
+        logger.debug("Recours non relié au dossier.", exc_info=True)
 
 
 async def preparer_recours(bot: Any, guild: discord.Guild, target: Any, reason: str) -> None:

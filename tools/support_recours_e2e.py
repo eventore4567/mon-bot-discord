@@ -137,6 +137,48 @@ async def main() -> int:
     nb = await bot.db.fetchone("SELECT COUNT(*) AS n FROM ban_appeals WHERE status='awaiting_user'", ())
     check(int(nb["n"]) == 1, "on_member_ban ne remplace pas le lien déjà envoyé", str(nb["n"]))
 
+    # Revue Codex (PR #728) : le recours porte le numéro du NOUVEAU dossier de ban.
+    dossier = await bot.db.fetchone(
+        "SELECT case_number FROM sanctions WHERE guild_id=? AND user_id=? AND action='ban' ORDER BY id DESC LIMIT 1",
+        (h.GID, h.TARGET_ID))
+    recours = await bot.db.fetchone(
+        "SELECT case_number FROM ban_appeals WHERE guild_id=? AND user_id=? AND status='awaiting_user'",
+        (h.GID, h.TARGET_ID))
+    check(dossier and recours and recours["case_number"] == dossier["case_number"],
+          "le recours est relié au dossier du ban qui vient d'avoir lieu",
+          f"recours={recours and recours['case_number']} dossier={dossier and dossier['case_number']}")
+
+    # Revue Codex (PR #728) : un lien jamais remis (envoi trop lent) ne laisse
+    # pas de recours « déjà envoyé » qui bloquerait on_member_ban.
+    from services import moderation as service_moderation
+
+    class Lent:
+        id = 123456789012345678
+        def __str__(self):
+            return "lent"
+        async def send(self, *a, **k):
+            await asyncio.sleep(5)
+
+    await service_moderation.preparer_recours(bot, guild, Lent(), "test délai")
+    reste = await bot.db.fetchone("SELECT COUNT(*) AS n FROM ban_appeals WHERE user_id=?", (Lent.id,))
+    check(int(reste["n"]) == 0, "un lien non remis à temps n'est pas compté comme envoyé", str(reste["n"]))
+
+    # Revue Codex (PR #728) : un MP pris par le modmail ne reçoit pas le refus
+    # « je ne discute qu'en serveur ».
+    from cogs import bot_experience_v5
+    await bot.db.execute("DELETE FROM sentrix_mp_ouvertes WHERE user_id=?", (h.TARGET_ID,))
+    debut = len(h.CALLS)
+    message = message_prive(bot, "bonjour, j'ai une question pour le staff")
+    for ecouteur in bot.extra_events.get("on_message", []):
+        try:
+            await asyncio.wait_for(ecouteur(message), 5)
+        except Exception:  # noqa: BLE001
+            pass
+    await h.settle(idle=0.3, maximum=3)
+    refus = bot_experience_v5.REFUS_MESSAGE_PRIVE[:40]
+    check(not any(refus in str(js) for _m, _p, js in h.CALLS[debut:]),
+          "un MP de modmail ne reçoit pas le refus de conversation privée")
+
     # Base PostgreSQL : la sauvegarde toutes les 6 h ne lève plus d'erreur.
     erreurs = []
     original = support._record_error

@@ -2989,8 +2989,6 @@ class Database:
             # jamais chargés en production depuis août), réglés dans /setup → Économie.
             regle = await self.regle_boutique(guild_id, item_id)
             if regle is not None:
-                if regle["stock"] == 0:
-                    return "out_of_stock", item
                 if regle["prix_promo"]:
                     item = dict(item)
                     item["price"] = price = min(price, regle["prix_promo"])
@@ -3004,6 +3002,16 @@ class Database:
                 )
                 if reservation.rowcount < 1:
                     return "already_owned", item
+            # Rupture vérifiée APRÈS « déjà acheté » : un rôle payé se restaure
+            # même stock épuisé (revue Codex, PR #728).
+            if regle is not None and regle["stock"] == 0:
+                if role_id:
+                    await self._conn.execute(
+                        "DELETE FROM shop_role_purchases WHERE guild_id = ? AND user_id = ? AND role_id = ?",
+                        (guild_id, user_id, role_id),
+                    )
+                    await self._conn.commit()
+                return "out_of_stock", item
             await self._conn.execute(
                 "INSERT OR IGNORE INTO economy (guild_id, user_id) VALUES (?, ?)",
                 (guild_id, user_id),

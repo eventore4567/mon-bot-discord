@@ -86,6 +86,19 @@ async def main() -> int:
     check(statut == "ok" and apres_achat == 0 and apres_remboursement == 1,
           "un achat remboursé rend l'exemplaire au stock", f"{statut} {apres_achat} -> {apres_remboursement}")
 
+    # Revue Codex (PR #728) : un rôle déjà payé se restaure même stock épuisé.
+    cur = await bot.db.execute(
+        "INSERT INTO shop_items (guild_id, name, price, description, role_id) VALUES (?, ?, ?, ?, ?)",
+        (h.GID, "Rôle VIP", 10, "", h.PING_ROLE_ID),
+    )
+    role_article = int(cur.lastrowid)
+    await bot.db.regler_boutique(h.GID, role_article, stock=1)
+    premier, _ = await bot.db.purchase_shop_item(h.GID, h.TARGET_ID, role_article)
+    second, _ = await bot.db.purchase_shop_item(h.GID, h.TARGET_ID, role_article)
+    autre, _ = await bot.db.purchase_shop_item(h.GID, h.SECOND_ID, role_article)
+    check(premier == "ok" and second == "already_owned" and autre == "out_of_stock",
+          "stock épuisé : l'acheteur restaure son rôle, un nouvel acheteur est refusé", f"{premier} {second} {autre}")
+
     failed = [r for r in RESULTS if not r[0]]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} étapes réussies.")
     sys.stdout.flush()

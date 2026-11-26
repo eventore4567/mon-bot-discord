@@ -418,6 +418,7 @@ class EnterpriseSuite(commands.Cog, name=_COG_NAME):
             (guild.id, user.id, _token_hash(token), "awaiting_user", reason[:1500], case_number, now()),
         )
         link = f"{config.DASHBOARD_PUBLIC_URL}/appeal/{token}"
+        remis = False
         try:
             await user.send(
                 f"Vous avez été banni de **{guild.name}**.\n"
@@ -425,8 +426,17 @@ class EnterpriseSuite(commands.Cog, name=_COG_NAME):
                 "Si vous souhaitez contester cette sanction, vous pouvez envoyer un recours privé ici :\n"
                 f"{link}\n\nCe lien est personnel. Ne le partagez pas."
             )
+            remis = True
         except (discord.Forbidden, discord.HTTPException):
             pass
+        finally:
+            # Revue Codex (PR #728) : lien jamais reçu (MP refusé, ou envoi
+            # interrompu par le délai d'avant-ban) → le recours est effacé ;
+            # on_member_ban pourra en recréer un au lieu de croire le lien remis.
+            if not remis:
+                await self.bot.db.execute("DELETE FROM ban_appeals WHERE id=?", (int(cur.lastrowid),))
+        if not remis:
+            return None
         payload = {"appeal_id": int(cur.lastrowid), "user_id": user.id, "case_number": case_number}
         await self.infra.mirror_event("ban_appeal_created", guild.id, payload, now())
         return {**payload, "token": token}
