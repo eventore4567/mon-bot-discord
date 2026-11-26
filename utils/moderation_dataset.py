@@ -132,6 +132,24 @@ _ATTRIBUTIONS = (
 )
 
 
+#: Mots autour d'un terme isolé pris en compte pour juger sa cible.
+_RAYON_CONTEXTE = 8
+_BLAGUES = ("je rigole", "jrigole", "jrg", "jdec", "je deconne", "mdr", "ptdr", "lol", "jk", "just kidding")
+
+
+def _voisinage(tokens: tuple[str, ...], terme: str) -> str:
+    """Les mots autour de la première occurrence du terme (tout le texte à défaut)."""
+    for index, token in enumerate(tokens):
+        if token == terme or _compacter_repetitions(token) == terme or token.translate(_LEET_TOKEN) == terme:
+            debut = max(0, index - _RAYON_CONTEXTE)
+            return " ".join(tokens[debut:index + _RAYON_CONTEXTE + 1])
+    return " ".join(tokens)
+
+
+def _blague_annoncee(texte: str) -> bool:
+    return any(f" {b} " in f" {texte} " for b in _BLAGUES)
+
+
 def _attribue_a_quelquun(normalized: str) -> bool:
     """Le mot est-il attribué à une personne, et pas seulement voisin d'un « ton » ?"""
     return any(f" {motif} " in f" {normalized} " for motif in _ATTRIBUTIONS)
@@ -470,8 +488,16 @@ class MultilingualModerationDataset:
                 continue
             if token in _AMBIGUOUS_STANDALONE_TERMS:
                 continue
-            confidence, targeted, reason = _context_confidence(normalized, "mot")
-            if token in _TERMES_ORDINAIRES_SAUF_SI_CIBLE and not _attribue_a_quelquun(normalized):
+            # 26/11/2026 : une candidature de 2900 caractères contenait « fermer sa
+            # gueule (jrigole) » ; le « ta » ou le « tu » d'une AUTRE ligne en
+            # faisait une « attaque adressée » (0,94) et le message était supprimé.
+            # Le contexte d'un mot isolé se lit autour de lui, pas dans tout le texte.
+            voisinage = _voisinage(tokens, token)
+            confidence, targeted, reason = _context_confidence(voisinage, "mot")
+            if _blague_annoncee(voisinage):
+                confidence = min(confidence, 0.30)
+                targeted, reason = False, "plaisanterie annoncée (« je rigole », « mdr »…)"
+            if token in _TERMES_ORDINAIRES_SAUF_SI_CIBLE and not _attribue_a_quelquun(voisinage):
                 continue
             if should_downgrade_dataset_match(text, "mot"):
                 return ModerationMatch(

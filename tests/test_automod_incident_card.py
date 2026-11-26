@@ -46,10 +46,13 @@ def test_chaque_information_a_son_champ():
 
 
 def test_contenu_long_en_fichier_joint_pas_tronque_en_silence():
-    long = "x " * 900
+    # 26/11/2026 : limite d'affichage 900 → 3000 (le message s'affiche en entier
+    # jusque-là) ; le cas « fichier joint » se teste donc au-delà de 3000.
+    long = "x " * 1700
     champs, fichier = _champs(contenu=long)
     assert fichier is not None and fichier.filename == "automod-SX-TEST.txt"
-    assert "Contenu complet" in champs["Contenu"] and len(champs["Contenu"]) < 1024
+    morceaux = [v for k, v in champs.items() if k.startswith("Contenu")]
+    assert "Contenu complet" in morceaux[-1] and all(len(v) < 1024 for v in morceaux)
     corps = fichier.fp.read().decode("utf-8")
     assert long.strip() in corps
 
