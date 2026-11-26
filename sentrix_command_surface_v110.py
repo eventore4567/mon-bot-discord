@@ -104,6 +104,7 @@ STANDARD_DIRECT_SLASH: dict[str, str] = {
 STANDARD_GROUPED_SLASH: dict[str, tuple[str, str]] = {
     "giverole": ("role", "give"),
     "removerole": ("role", "remove"),
+    "role mass": ("role", "mass"),
 }
 
 # /play est fourni par la commande top-level `play`, qui appelle déjà le même moteur que

@@ -402,6 +402,44 @@ class SentriXSetupV73(discord.ui.LayoutView):
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.TextDisplay("Aucun réglage supplémentaire n’est nécessaire sur cette page."))
 
+        if page == "levels":
+            # Direct import inside the active /setup and +setup Components V2 page.
+            # Discord 2.7 FileUpload keeps the JSON private in a modal; only the
+            # preview author can confirm, and editing requires Manage Server.
+            from . import import_data, language_runtime
+            english = (
+                await language_runtime.get_language(self.bot, self.guild.id)
+                == language_runtime.LANG_EN
+            )
+            importer = discord.ui.Button(
+                label="Import data" if english else "Importer des données",
+                style=discord.ButtonStyle.primary,
+            )
+
+            async def open_import(interaction: discord.Interaction):
+                if not await setup_ui._can_setup(self.bot, interaction.user, interaction.guild):
+                    return await interaction.response.send_message(
+                        "Manage Server required." if english
+                        else "Permission Gérer le serveur requise.",
+                        ephemeral=True,
+                    )
+                await interaction.response.send_modal(
+                    import_data.ImportFileModal(
+                        self.bot, self.guild.id, interaction.user.id, english,
+                    )
+                )
+
+            importer.callback = open_import
+            container.add_item(discord.ui.Separator())
+            container.add_item(discord.ui.Section(
+                discord.ui.TextDisplay(
+                    "**Import from another bot**\nUpload a JSON export to preview XP, levels and balances."
+                    if english else
+                    "**Importer depuis un autre bot**\nAjoutez un export JSON pour prévisualiser XP, niveaux et soldes."
+                ),
+                accessory=importer,
+            ))
+
         back = discord.ui.Button(label="Retour", style=discord.ButtonStyle.primary, emoji="↩️")
         refresh = discord.ui.Button(label="Actualiser", style=discord.ButtonStyle.secondary, emoji="🔄")
         close = discord.ui.Button(label="Fermer", style=discord.ButtonStyle.danger)
@@ -505,7 +543,7 @@ async def _send_setup_v73(self, target):
     guild = getattr(target, "guild", None)
     member = getattr(target, "author", None) or getattr(target, "user", None)
     if not await setup_ui._can_setup(self.bot, member, guild):
-        return await setup_ui._permission_error(target)
+        return await self.send_public_overview(target)
 
     view = SentriXSetupV73(self.bot, guild, member.id)
     await view.prepare()

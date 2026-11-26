@@ -144,6 +144,30 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         self.moderation_profile = "moderator"
         self.avance = False
 
+    async def rebuild(self) -> None:
+        await super().rebuild()
+        from . import language_runtime
+        if await language_runtime.get_language(self.bot, self.guild.id) != language_runtime.LANG_EN:
+            return
+        from .language_official_bridge import _english
+        # The active setup screen is Components V2, not the old SetupView embed.
+        # Translate its nested text, buttons and selects after every rebuild.
+        pending = list(self.children)
+        while pending:
+            item = pending.pop()
+            pending.extend(getattr(item, "children", ()) or ())
+            if isinstance(item, discord.ui.TextDisplay):
+                item.content = str(_english(item.content) or item.content)[:4000]
+            elif isinstance(item, discord.ui.Button) and item.label:
+                item.label = str(_english(item.label) or item.label)[:80]
+            elif isinstance(item, discord.ui.Select):
+                if item.placeholder:
+                    item.placeholder = str(_english(item.placeholder) or item.placeholder)[:150]
+                for option in getattr(item, "options", ()) or ():
+                    option.label = str(_english(option.label) or option.label)[:100]
+                    if option.description:
+                        option.description = str(_english(option.description) or option.description)[:100]
+
     async def _effective_states(self) -> dict[str, str]:
         states = await super()._effective_states()
 
@@ -772,7 +796,7 @@ async def _send_setup_v74(self, target):
     guild = getattr(target, "guild", None)
     member = getattr(target, "author", None) or getattr(target, "user", None)
     if not await setup_ui._can_setup(self.bot, member, guild):
-        return await setup_ui._permission_error(target)
+        return await self.send_public_overview(target)
 
     view = SentriXSetupV74(self.bot, guild, member.id)
     await view.prepare()
