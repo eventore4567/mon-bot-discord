@@ -53,11 +53,21 @@ async def main() -> int:
         await h.settle(idle=2.0, maximum=10)
         return cartes_de_logs(h.CALLS[debut:])
 
-    cartes = await supprimer(await poster(12))
+    ids = await poster(12)
+    # Deux messages avec une image (pièce jointe en cache).
+    for mid in ids[:2]:
+        await bot.db.execute(
+            "UPDATE message_log_cache SET attachments=? WHERE message_id=?",
+            ('["https://cdn.discordapp.com/attachments/1/2/photo-souvenir.png"]', mid),
+        )
+    cartes = await supprimer(ids)
     check(len(cartes) == 1, "12 messages supprimés d'un coup donnent UNE carte", f"{len(cartes)} carte(s)")
     texte = str(cartes[0]) if cartes else ""
-    check("Suppression multiple" in texte and "12" in texte, "la carte dit combien et quel salon", texte[:200])
+    check("Suppression multiple" in texte or "supprimé" in texte, "la carte est une suppression multiple", texte[:200])
+    check("12 message" in texte, "la carte affiche le nombre exact de messages (revue Codex #729)", texte[:300])
     check(f"<@{h.TARGET_ID}>" in texte and f"<@{h.SECOND_ID}>" in texte, "la carte liste les auteurs")
+    check("attachment://suppression-" in texte, "le transcript complet est visible dans la carte (revue Codex #729)")
+    check("photo-souvenir" in texte, "les pièces jointes du lot restent dans le log (revue Codex #729)")
 
     cartes = await supprimer(await poster(2))
     check(len(cartes) == 2, "2 messages gardent leur carte chacun (pas de regroupement inutile)",

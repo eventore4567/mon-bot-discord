@@ -1005,6 +1005,14 @@ class Logs(commands.Cog, name="Logs"):
         auteurs = "\n".join(
             f"{_user_ref(uid)} · {n} message(s)" for uid, n in par_auteur.most_common(5)
         ) + (f"\n+{len(par_auteur) - 5} autre(s)" if len(par_auteur) > 5 else "")
+        # Pièces jointes de tout le lot (revue Codex, PR #729) : noms, liens et
+        # boutons, comme pour une suppression isolée — le cache est oublié ensuite.
+        pieces = []
+        for r in rows:
+            try:
+                pieces.extend(_attachment_media(json.loads(r["attachments"] or "[]")))
+            except (TypeError, ValueError):
+                pass
         extraits = []
         for r in rows[:8]:
             texte = " ".join(str(r["content"] or "").split()) or "(pièce jointe ou message vide)"
@@ -1013,10 +1021,11 @@ class Logs(commands.Cog, name="Logs"):
         actor, _audit = await self._message_delete_actor(guild, premier, channel_id, message_id=int(rows[0]["message_id"]))
         fields = [
             ("Salon", _channel_ref(channel_id), True),
-            ("Messages", f"**{total}** supprimés d'un coup", True),
+            ("Messages supprimés", str(int(total)), True),
             ("Supprimé par", self._delete_actor_text(actor), True),
             ("Auteurs", auteurs, False),
             ("Aperçu", _short("\n".join(extraits), 1024), False),
+            ("Pièces jointes", _attachment_summary(pieces), False),
         ]
         panel = self._embed("Suppression multiple", fields=fields)
         sections = [
@@ -1024,16 +1033,25 @@ class Logs(commands.Cog, name="Logs"):
              str(r["content"] or ""))
             for r in rows
         ]
-        media_items, fichiers = [], []
-        if len(rows) > 8 or any(len(str(r["content"] or "")) > 90 for r in rows):
+        media_items, fichiers = list(pieces), []
+        if len(rows) > 8 or pieces or any(len(str(r["content"] or "")) > 90 for r in rows):
             # Tout le lot en fichier : l'aperçu n'en montre que 8, tronqués.
             import io
 
             texte = (f"SentriX — Suppression multiple\nServeur : {guild.id}\nSalon : {channel_id}\n"
                      f"Messages : {total}\n") + "".join(f"\n===== {t} =====\n{c}\n" for t, c in sections)
-            fichiers = [discord.File(io.BytesIO(texte.encode("utf-8")), filename=f"suppression-{channel_id}.txt")]
+            if pieces:
+                texte += "\n===== Pièces jointes (liens d’origine) =====\n"
+                texte += "".join(f"{nom}\n{url}\n" for url, nom, _k in pieces)
+            nom_fichier = f"suppression-{channel_id}.txt"
+            fichiers = [discord.File(io.BytesIO(texte.encode("utf-8")), filename=nom_fichier)]
+            # Composant fichier visible (Components V2) : sans cette entrée, le
+            # transcript partait sans être affiché (revue Codex, PR #729).
+            media_items = [(f"attachment://{nom_fichier}", nom_fichier, "text/plain"), *media_items]
+            panel.add_field(name="Transcript", value="Tout le lot dans le fichier joint, sans coupure.", inline=False)
         view = log_service.log_actions(ids=[("Copier l'ID du salon", channel_id)],
-                                       links=[("Accéder au salon", _discord_channel_url(guild.id, channel_id))])
+                                       links=[("Accéder au salon", _discord_channel_url(guild.id, channel_id)),
+                                              *_attachment_links(pieces)])
         key = log_service.make_event_key(guild.id, "message_bulk", target_id=channel_id,
                                          message_id=int(rows[0]["message_id"]))
         return await self._send(guild, "message_delete", panel, view=view, event_key=key,
