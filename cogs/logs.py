@@ -187,6 +187,8 @@ def _est_categorie(salon) -> bool:
 #: catégorie récente, donc il garde la sienne. Le biais est volontaire : jamais
 #: perdre un événement, quitte à en afficher un de trop.
 _FENETRE_PROPAGATION_SECONDES = 15.0
+#: Au-delà de ce nombre, une suppression multiple devient une seule carte.
+SEUIL_REGROUPEMENT = 3
 _CATEGORIES_PERMS_RECENTES: dict[tuple[int, int], float] = {}
 
 
@@ -995,6 +997,66 @@ class Logs(commands.Cog, name="Logs"):
         )
         await self._send(guild, "message_delete", panel, view=view, event_key=key)
 
+    async def _log_bulk_summary(self, guild: discord.Guild, rows, channel_id: int, total: int) -> bool:
+        """Une carte pour tout le lot : nombre, auteurs, extraits, transcript complet."""
+        from collections import Counter
+
+        par_auteur = Counter(int(r["author_id"]) for r in rows)
+        auteurs = "\n".join(
+            f"{_user_ref(uid)} · {n} message(s)" for uid, n in par_auteur.most_common(5)
+        ) + (f"\n+{len(par_auteur) - 5} autre(s)" if len(par_auteur) > 5 else "")
+        # Pièces jointes de tout le lot (revue Codex, PR #729) : noms, liens et
+        # boutons, comme pour une suppression isolée — le cache est oublié ensuite.
+        pieces = []
+        for r in rows:
+            try:
+                pieces.extend(_attachment_media(json.loads(r["attachments"] or "[]")))
+            except (TypeError, ValueError):
+                pass
+        extraits = []
+        for r in rows[:8]:
+            texte = " ".join(str(r["content"] or "").split()) or "(pièce jointe ou message vide)"
+            extraits.append(f"<@{int(r['author_id'])}> : {_short(texte, 90)}")
+        premier = int(rows[0]["author_id"])
+        actor, _audit = await self._message_delete_actor(guild, premier, channel_id, message_id=int(rows[0]["message_id"]))
+        fields = [
+            ("Salon", _channel_ref(channel_id), True),
+            ("Messages supprimés", str(int(total)), True),
+            ("Supprimé par", self._delete_actor_text(actor), True),
+            ("Auteurs", auteurs, False),
+            ("Aperçu", _short("\n".join(extraits), 1024), False),
+            ("Pièces jointes", _attachment_summary(pieces), False),
+        ]
+        panel = self._embed("Suppression multiple", fields=fields)
+        sections = [
+            (f"{r['author_name'] or r['author_id']} ({int(r['author_id'])}) — message {int(r['message_id'])}",
+             str(r["content"] or ""))
+            for r in rows
+        ]
+        media_items, fichiers = list(pieces), []
+        if len(rows) > 8 or pieces or any(len(str(r["content"] or "")) > 90 for r in rows):
+            # Tout le lot en fichier : l'aperçu n'en montre que 8, tronqués.
+            import io
+
+            texte = (f"SentriX — Suppression multiple\nServeur : {guild.id}\nSalon : {channel_id}\n"
+                     f"Messages : {total}\n") + "".join(f"\n===== {t} =====\n{c}\n" for t, c in sections)
+            if pieces:
+                texte += "\n===== Pièces jointes (liens d’origine) =====\n"
+                texte += "".join(f"{nom}\n{url}\n" for url, nom, _k in pieces)
+            nom_fichier = f"suppression-{channel_id}.txt"
+            fichiers = [discord.File(io.BytesIO(texte.encode("utf-8")), filename=nom_fichier)]
+            # Composant fichier visible (Components V2) : sans cette entrée, le
+            # transcript partait sans être affiché (revue Codex, PR #729).
+            media_items = [(f"attachment://{nom_fichier}", nom_fichier, "text/plain"), *media_items]
+            panel.add_field(name="Transcript", value="Tout le lot dans le fichier joint, sans coupure.", inline=False)
+        view = log_service.log_actions(ids=[("Copier l'ID du salon", channel_id)],
+                                       links=[("Accéder au salon", _discord_channel_url(guild.id, channel_id)),
+                                              *_attachment_links(pieces)])
+        key = log_service.make_event_key(guild.id, "message_bulk", target_id=channel_id,
+                                         message_id=int(rows[0]["message_id"]))
+        return await self._send(guild, "message_delete", panel, view=view, event_key=key,
+                                media_items=media_items, media_files=fichiers)
+
     @commands.Cog.listener()
     async def on_raw_bulk_message_delete(self, payload: discord.RawBulkMessageDeleteEvent):
         if payload.guild_id is None:
@@ -1002,6 +1064,28 @@ class Logs(commands.Cog, name="Logs"):
         guild = self.bot.get_guild(payload.guild_id)
         if guild is None:
             return
+
+        # 26/11/2026 (« rendre les logs intelligents ») : un lot de plus de
+        # SEUIL_REGROUPEMENT messages devient UNE carte récapitulative au lieu
+        # d'une carte par message (ban avec effacement, purge d'un autre bot…).
+        a_journaliser = [m for m in payload.message_ids if not log_service.is_purged(m)]
+        if len(a_journaliser) > SEUIL_REGROUPEMENT:
+            lignes = []
+            for message_id in a_journaliser:
+                try:
+                    row = await self._cached_message_row(payload.guild_id, message_id)
+                except Exception:
+                    row = None
+                if row is not None:
+                    lignes.append(row)
+            if len(lignes) > SEUIL_REGROUPEMENT:
+                try:
+                    if await self._log_bulk_summary(guild, lignes, payload.channel_id, len(a_journaliser)):
+                        for row in lignes:
+                            await self._forget_cached_message(int(row["message_id"]))
+                        return
+                except Exception:
+                    logger.exception("Récapitulatif de suppression multiple impossible ; cartes individuelles.")
 
         for message_id in payload.message_ids:
             # Un lot peut mélanger des messages supprimés par +clear et d'autres

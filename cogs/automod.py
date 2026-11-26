@@ -1599,6 +1599,15 @@ def _peut_encore_mentionner_tout_le_monde(membre) -> bool:
     return False
 
 
+#: Noms des règles prédéfinies de Discord, en clair pour le staff.
+REGLES_NATIVES_FR = {
+    "Block Commonly Flagged Words": "Mots couramment signalés (liste intégrée de Discord)",
+    "Block Mention Spam": "Spam de mentions (règle Discord)",
+    "Block Suspected Spam Content": "Contenu suspecté de spam (règle Discord)",
+    "Block Words in Member Profile Names": "Mots interdits dans les pseudos (règle Discord)",
+}
+
+
 class AutoMod(commands.Cog, name="Automod"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -1943,25 +1952,31 @@ class AutoMod(commands.Cog, name="Automod"):
 
         # Discord bloque certains messages AVANT on_message : sans événement
         # AutoMod natif, le staff ne voit ni la règle ni le salon concernés.
-        # Ne JAMAIS recopier execution.content, matched_content ou les pièces
-        # jointes : ces informations peuvent être privées et ne sont pas
-        # nécessaires à l'audit d'un blocage natif.
+        # 26/11/2026 (Jayden : « mets la vraie raison ») : le mot détecté et le
+        # message bloqué sont montrés dans le salon de logs, réservé au staff —
+        # sans eux, impossible de juger un blocage (faux positif ou non).
+        # Le titre est court : l'ancien (« Blocage du message (autre sanction
+        # non confirmée) ») était coupé par Discord.
         if guild is None:
             return
         channel_id = int(getattr(execution, "channel_id", 0) or 0)
         rule_name = str(details[0] or "Règle inconnue")[:90]
-        panel = embeds.canonical_log_embed(
-            "Discord AutoMod · message bloqué",
-            fields=[
-                ("Membre", f"<@{user_id}>", False),
-                ("Protection", "AutoMod natif Discord", True),
-                ("Statut", "Message bloqué par Discord", False),
-                ("Règle", f"{rule_name} (ID : {rule_id})", False),
-                ("Salon", f"<#{channel_id}>" if channel_id else "Non communiqué", False),
-                ("Source", "Discord AutoMod", True),
-                ("Action", "Blocage du message (autre sanction non confirmée)", False),
-            ],
-        )
+        regle_lisible = REGLES_NATIVES_FR.get(rule_name, rule_name)
+        detecte = str(getattr(execution, "matched_keyword", None) or getattr(execution, "matched_content", None) or "").strip()
+        contenu = str(getattr(execution, "content", None) or "").strip()
+        champs = [
+            ("Membre", f"<@{user_id}>", False),
+            ("Protection", "AutoMod natif Discord", True),
+            ("Statut", "Message bloqué par Discord", False),
+            ("Règle", regle_lisible, False),
+        ]
+        if detecte:
+            champs.append(("Élément détecté", f"`{detecte[:80].replace('`', 'ʼ')}`", False))
+        champs.append(("Salon", f"<#{channel_id}>" if channel_id else "Non communiqué", False))
+        if contenu:
+            champs.append(("Contenu", "> " + contenu[:500].replace("\n", "\n> "), False))
+        champs.append(("Action", "Message bloqué", False))
+        panel = embeds.canonical_log_embed("Discord AutoMod · message bloqué", fields=champs)
         actions = discord.ui.View(timeout=None)
         if channel_id:
             actions.add_item(discord.ui.Button(

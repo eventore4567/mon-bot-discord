@@ -1,4 +1,11 @@
-"""Discord AutoMod native blocking is visible to staff without content leaks."""
+"""Discord AutoMod native blocking is visible to staff.
+
+26/11/2026 : comportement changé à la demande de Jayden (« mets la vraie
+raison »). Avant, le contenu bloqué n'était jamais lu ; désormais le mot
+détecté et le message bloqué sont montrés dans le salon de logs (staff
+seulement), sinon le staff ne peut pas juger un blocage. Le test vérifie le
+nouveau contrat au lieu de l'ancien.
+"""
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -11,21 +18,16 @@ from cogs import live_log_delivery_v5 as delivery
 
 
 class RestrictedExecution:
-    """The content of a blocked message must never be read by SentriX logs."""
+    """Blocage natif avec le mot détecté et le message bloqué."""
     guild_id = 123
     rule_id = 456
     user_id = 789
     channel_id = 321
     message_id = 987
     action = SimpleNamespace(type=discord.AutoModRuleActionType.block_message)
-
-    @property
-    def content(self):
-        raise AssertionError("Blocked content was read")
-
-    @property
-    def matched_content(self):
-        raise AssertionError("Matched content was read")
+    content = "rejoins discord.gg/pub"
+    matched_keyword = "discord.gg"
+    matched_content = "discord.gg/pub"
 
 
 @pytest.mark.asyncio
@@ -49,9 +51,10 @@ async def test_native_block_creates_one_staff_log_with_rule_channel_and_member()
     assert fields["Membre"] == "<@789>"
     assert fields["Salon"] == "<#321>"
     assert "SentriX anti-invitations" in fields["Règle"]
-    assert fields["Source"] == "Discord AutoMod"
+    assert "Source" not in fields  # doublon de « Protection », retiré le 26/11/2026
     assert "bloqué" in fields["Statut"]
-    assert not any("content" in field.name.casefold() for field in args[1].fields)
+    assert fields["Élément détecté"] == "`discord.gg`"
+    assert "rejoins discord.gg/pub" in fields["Contenu"]
     buttons = audit.await_args.kwargs["suites"].children
     assert len(buttons) == 1
     assert buttons[0].label == "Accéder au salon"
