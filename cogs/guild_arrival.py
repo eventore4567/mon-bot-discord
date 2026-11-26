@@ -239,7 +239,7 @@ class GuildArrivalView(discord.ui.View):
     @discord.ui.button(
         label="English",
         emoji="🇬🇧",
-        style=discord.ButtonStyle.secondary,
+        style=discord.ButtonStyle.primary,
         custom_id="sentrix:guild-arrival:language:en:v3",
         row=1,
     )
