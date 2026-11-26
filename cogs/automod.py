@@ -4838,10 +4838,19 @@ class AutoMod(commands.Cog, name="Automod"):
                 not rafale
                 and self.spam_tracker.compter(key, maintenant=instant, fenetre=fenetre_longue) >= 2 * seuils.messages
             )
-            if not rafale and not soutenu and (
+            if not rafale and not soutenu and not commande and (
                 self.spam_tracker.compter(key, maintenant=instant, fenetre=fenetre_moyenne) >= seuils.messages + 1
             ):
-                soutenu, fenetre_longue = True, fenetre_moyenne
+                # Des commandes enchaînées (+daily, +work, jeux…) ne sont pas du
+                # spam lent : ce palier ne compte que les messages ordinaires.
+                recents = self.spam_tracker.valeurs(key, maintenant=instant, fenetre=fenetre_moyenne)
+                prefixe = str(getattr(self.bot, "prefix_cache", {}).get(message.guild.id, config.DEFAULT_PREFIX))
+                if not any(
+                    m is None or isinstance(m, _ReponseDeCommande)
+                    or str(getattr(m, "content", "") or "").startswith((prefixe, "/"))
+                    for m in recents
+                ):
+                    soutenu, fenetre_longue = True, fenetre_moyenne
             if rafale or soutenu:
                 # La rafale entière part, pas seulement le message qui franchit le seuil :
                 # les premiers restaient affichés (4 par spammeur, mesuré).

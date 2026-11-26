@@ -38,12 +38,12 @@ async def main() -> int:
     automod = bot.get_cog("Automod")
     automod.automod_cache.clear()
 
-    async def serie(auteur, n, ecart):
+    async def serie(auteur, n, ecart, texte="pub serveur numero {i} rejoins vite"):
         debut = dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=n * ecart)
         reaction = None
         for i in range(n):
             avant = len(h.CALLS)
-            message = message_a(bot, guild, f"pub serveur numero {i} rejoins vite", auteur,
+            message = message_a(bot, guild, texte.format(i=i), auteur,
                                 debut + dt.timedelta(seconds=i * ecart))
             await automod.on_message(message)
             await h.settle(idle=0.2, maximum=2)
@@ -58,6 +58,9 @@ async def main() -> int:
           f"réaction au message {reaction}")
     calme = await serie(h.SECOND_ID, 6, 3.5)
     check(calme is None, "une conversation à 1 message / 3,5 s n'est jamais prise pour du spam", str(calme))
+
+    commandes = await serie(h.MOD_ID, 8, 1.8, texte="+balance {i}")
+    check(commandes is None, "8 commandes à 1,8 s d'écart ne sont pas prises pour du spam lent", str(commandes))
 
     failed = [r for r in RESULTS if not r[0]]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} étapes réussies.")
