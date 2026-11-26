@@ -481,28 +481,43 @@ class MultilingualModerationDataset:
                 confidence, targeted, reason = _context_confidence(normalized, kind)
                 return ModerationMatch(kind, confidence, targeted, reason)
 
-        for token in _tokens_candidats(tokens):
-            if token not in self._terms:
-                continue
-            if len(token) < _MIN_STANDALONE_LENGTH:
-                continue
-            if token in _AMBIGUOUS_STANDALONE_TERMS:
-                continue
-            # 26/11/2026 : une candidature de 2900 caractères contenait « fermer sa
-            # gueule (jrigole) » ; le « ta » ou le « tu » d'une AUTRE ligne en
-            # faisait une « attaque adressée » (0,94) et le message était supprimé.
-            # Le contexte d'un mot isolé se lit autour de lui, pas dans tout le texte.
-            voisinage = _voisinage(tokens, token)
-            confidence, targeted, reason = _context_confidence(voisinage, "mot")
-            if _blague_annoncee(voisinage):
-                confidence = min(confidence, 0.30)
-                targeted, reason = False, "plaisanterie annoncée (« je rigole », « mdr »…)"
-            if token in _TERMES_ORDINAIRES_SAUF_SI_CIBLE and not _attribue_a_quelquun(voisinage):
-                continue
-            if should_downgrade_dataset_match(text, "mot"):
-                return ModerationMatch(
-                    "mot_contextuel", min(confidence, 0.30), targeted,
-                    "contexte explicatif ou citation probable",
-                )
-            return ModerationMatch("mot", confidence, targeted, reason)
-        return None
+        # 26/11/2026 : le contexte d'un mot isolé se lit autour de CHAQUE
+        # occurrence (8 mots), pas dans tout le texte — une candidature contenant
+        # « fermer sa gueule (jrigole) » était jugée « attaque adressée » à cause
+        # d'un « tu » d'une autre ligne. Revue Codex (PR #731) : on garde la
+        # correspondance la PLUS forte du message ; une plaisanterie annoncée à
+        # un endroit n'excuse pas une vraie insulte plus loin.
+        meilleure: ModerationMatch | None = None
+        recolles = set(_tokens_candidats(tokens)) - set(tokens)
+        positions = list(enumerate(tokens)) + [(None, t) for t in recolles]
+        for index, brut in positions:
+            variantes = {brut}
+            if index is not None:
+                compacte = _compacter_repetitions(brut)
+                variantes |= {compacte, brut.translate(_LEET_TOKEN), compacte.translate(_LEET_TOKEN)}
+            for token in variantes:
+                if token not in self._terms or len(token) < _MIN_STANDALONE_LENGTH:
+                    continue
+                if token in _AMBIGUOUS_STANDALONE_TERMS:
+                    continue
+                if index is None:
+                    voisinage = normalized
+                else:
+                    debut = max(0, index - _RAYON_CONTEXTE)
+                    voisinage = " ".join(tokens[debut:index + _RAYON_CONTEXTE + 1])
+                confidence, targeted, reason = _context_confidence(voisinage, "mot")
+                if _blague_annoncee(voisinage):
+                    confidence = min(confidence, 0.30)
+                    targeted, reason = False, "plaisanterie annoncée (« je rigole », « mdr »…)"
+                if token in _TERMES_ORDINAIRES_SAUF_SI_CIBLE and not _attribue_a_quelquun(voisinage):
+                    continue
+                if should_downgrade_dataset_match(text, "mot"):
+                    candidat = ModerationMatch(
+                        "mot_contextuel", min(confidence, 0.30), targeted,
+                        "contexte explicatif ou citation probable",
+                    )
+                else:
+                    candidat = ModerationMatch("mot", confidence, targeted, reason)
+                if meilleure is None or candidat.confidence > meilleure.confidence:
+                    meilleure = candidat
+        return meilleure

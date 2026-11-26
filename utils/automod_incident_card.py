@@ -62,6 +62,8 @@ SANCTIONS = frozenset({"mute", "warn", "kick", "ban", "derank"})
 # d'embed limité à 1024 : un message normal (2000 max, 4000 Nitro) s'affiche
 # en entier, seul un très long message Nitro garde l'aperçu + fichier.
 LIMITE_CONTENU = 3000
+#: Au-delà, le fichier complet est TOUJOURS joint, même si la carte affiche tout.
+LIMITE_FICHIER_SECURITE = 900
 
 _URL_RE = re.compile(r"\b((?:https?|hxxps?)://)([^\s/<>()]+)([^\s<>()]*)", re.IGNORECASE)
 _INVITE_RE = re.compile(
@@ -208,6 +210,14 @@ def champs(*, filter_name: str, reason: str, guild_id: int, channel_id: int, mes
             fichier = discord.File(io.BytesIO(corps.encode("utf-8")), filename=nom)
         else:
             bloc = f"```\n{propre}\n```"
+            # Revue Codex (PR #731) : selon les autres détails de l'incident, la
+            # carte peut encore manquer de place ; au-delà de l'ancienne limite
+            # (900), le fichier complet reste joint par sécurité.
+            if len(propre) > LIMITE_FICHIER_SECURITE:
+                nom = f"automod-{ref or message_id or ts}.txt"
+                corps = (f"Incident AutoMod {ref}\nProtection : {protection}\nRègle : {regle}\n"
+                         f"Motif : {reason}\nSalon : {channel_id}\nMessage : {message_id}\n\n{propre}\n")
+                fichier = discord.File(io.BytesIO(corps.encode("utf-8")), filename=nom)
         # Champ d'embed : 1024 caractères. Le contenu (ou l'aperçu) est découpé en
         # champs « Contenu », « Contenu (suite 2) »… que la carte recolle en un bloc.
         morceaux = _decouper_en_champs(bloc)

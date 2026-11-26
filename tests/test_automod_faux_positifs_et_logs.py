@@ -62,7 +62,9 @@ def test_un_long_message_est_coupe_a_la_fin_d_une_phrase():
         infractions=0, spam_stage=0, memoire="", ref="SX-1",
     )
     morceaux = [v for k, v in champs.items() if k.startswith("Contenu")]
-    assert fichier is None and all(len(v) < 1024 for v in morceaux)
+    # Revue Codex (PR #731) : au-delà de 900, le fichier complet reste joint
+    # même si la carte affiche tout (elle peut manquer de place).
+    assert fichier is not None and all(len(v) < 1024 for v in morceaux)
     assert "\n".join(morceaux).count("preuves.") == 60
     tres_long = phrase * 90  # ~3 700 caractères
     champs, fichier = carte.champs(
