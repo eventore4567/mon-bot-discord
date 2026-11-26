@@ -251,9 +251,12 @@ async def main():
     )
 
     home = await EconomySetupView(bot, guild, h.ADMIN_ID).build()
+    # 25/11/2026 : troisième bouton « Boutique : stock et promos » — le stock et
+    # les promotions (ex-+shopstock/+shoppromo, dormants depuis août) se règlent
+    # ici, sans nouvelle commande. Le contrôle reste : aucun doublon.
     assert [
         i.label for i in home.walk_children() if isinstance(i, discord.ui.Button)
-    ] == ["Créer un panneau", "Régler l'économie"]
+    ] == ["Créer un panneau", "Régler l'économie", "Boutique : stock et promos"]
     composer = EconomyPanelBuilder(bot, guild, h.ADMIN_ID)
     picker = next(
         i for i in composer.walk_children() if isinstance(i, discord.ui.Select)

@@ -288,10 +288,11 @@ class EnterpriseSuite(commands.Cog, name=_COG_NAME):
         self._backup_lock = asyncio.Lock()
         self._automation_locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._canary_ran = False
-        self.metrics_loop.start()
+        # 25/11/2026 : rechargé pour les recours et le modmail seulement. Les
+        # boucles de métriques, d'analyses et de sauvegarde (mortes depuis
+        # août) ne repartent pas : elles écriraient en base toutes les minutes
+        # et feraient doublon avec la supervision actuelle.
         self.automation_loop.start()
-        self.analytics_loop.start()
-        self.backup_loop.start()
 
     def cog_unload(self):
         for loop in (self.metrics_loop, self.automation_loop, self.analytics_loop, self.backup_loop):
@@ -303,8 +304,17 @@ class EnterpriseSuite(commands.Cog, name=_COG_NAME):
 
     # ----------------------------------------------------------- settings / permissions
     async def ensure_settings(self, guild_id: int) -> None:
+        # Une seule écriture par serveur et par démarrage : get_settings est relu
+        # à chaque commande (automatisations) et à chaque MP.
+        connus = self.__dict__.setdefault("_reglages_assures", set())
+        if int(guild_id) in connus:
+            return
+        connus.add(int(guild_id))
+        # 25/11/2026 : recours et modmail se choisissent dans /setup → Modération ;
+        # rien ne s'active tout seul sur un serveur.
         await self.bot.db.execute(
-            "INSERT OR IGNORE INTO enterprise_guild_settings (guild_id, updated_at) VALUES (?, ?)",
+            "INSERT OR IGNORE INTO enterprise_guild_settings (guild_id, appeals_enabled, modmail_enabled, updated_at) "
+            "VALUES (?, 0, 0, ?)",
             (guild_id, now()),
         )
 
@@ -382,9 +392,18 @@ class EnterpriseSuite(commands.Cog, name=_COG_NAME):
             return None, "Aucune raison fournie"
         return int(row["case_number"]) if row["case_number"] is not None else None, str(row["reason"] or "Aucune raison fournie")
 
-    async def create_appeal_for_ban(self, guild: discord.Guild, user: discord.User | discord.Member) -> dict[str, Any] | None:
+    async def create_appeal_for_ban(self, guild: discord.Guild, user: discord.User | discord.Member,
+                                    raison: str | None = None) -> dict[str, Any] | None:
         settings = await self.get_settings(guild.id)
-        if not int(settings.get("appeals_enabled", 1)):
+        if not int(settings.get("appeals_enabled") or 0):
+            return None
+        # Le lien est envoyé avant le ban (services.moderation.preparer_recours) ;
+        # on_member_ban ne doit pas le remplacer par un second lien injoignable.
+        recent = await self.bot.db.fetchone(
+            "SELECT id FROM ban_appeals WHERE guild_id=? AND user_id=? AND status='awaiting_user' AND created_at>=?",
+            (guild.id, user.id, now() - 120),
+        )
+        if recent:
             return None
         await self.bot.db.execute(
             "UPDATE ban_appeals SET status='superseded', reviewed_at=? WHERE guild_id=? AND user_id=? AND status IN ('awaiting_user','open','more_info')",
@@ -392,11 +411,14 @@ class EnterpriseSuite(commands.Cog, name=_COG_NAME):
         )
         token = secrets.token_urlsafe(32)
         case_number, reason = await self._latest_ban_case(guild.id, user.id)
+        if raison:
+            reason = str(raison)
         cur = await self.bot.db.execute(
             "INSERT INTO ban_appeals (guild_id,user_id,token_hash,status,ban_reason,case_number,created_at) VALUES (?,?,?,?,?,?,?)",
             (guild.id, user.id, _token_hash(token), "awaiting_user", reason[:1500], case_number, now()),
         )
         link = f"{config.DASHBOARD_PUBLIC_URL}/appeal/{token}"
+        remis = False
         try:
             await user.send(
                 f"Vous avez été banni de **{guild.name}**.\n"
@@ -404,8 +426,17 @@ class EnterpriseSuite(commands.Cog, name=_COG_NAME):
                 "Si vous souhaitez contester cette sanction, vous pouvez envoyer un recours privé ici :\n"
                 f"{link}\n\nCe lien est personnel. Ne le partagez pas."
             )
+            remis = True
         except (discord.Forbidden, discord.HTTPException):
             pass
+        finally:
+            # Revue Codex (PR #728) : lien jamais reçu (MP refusé, ou envoi
+            # interrompu par le délai d'avant-ban) → le recours est effacé ;
+            # on_member_ban pourra en recréer un au lieu de croire le lien remis.
+            if not remis:
+                await self.bot.db.execute("DELETE FROM ban_appeals WHERE id=?", (int(cur.lastrowid),))
+        if not remis:
+            return None
         payload = {"appeal_id": int(cur.lastrowid), "user_id": user.id, "case_number": case_number}
         await self.infra.mirror_event("ban_appeal_created", guild.id, payload, now())
         return {**payload, "token": token}
@@ -527,7 +558,9 @@ class EnterpriseSuite(commands.Cog, name=_COG_NAME):
             if guild.get_member(user_id) is None:
                 continue
             settings = await self.get_settings(guild.id)
-            if int(settings.get("modmail_enabled", 1)):
+            # Sans salon modmail choisi, un MP n'est jamais détourné.
+            salon = guild.get_channel(int(settings.get("modmail_channel_id") or 0))
+            if int(settings.get("modmail_enabled") or 0) and isinstance(salon, discord.TextChannel):
                 result.append(guild)
         return result
 
@@ -810,7 +843,8 @@ class EnterpriseSuite(commands.Cog, name=_COG_NAME):
         if message.author.bot:
             return
         if message.guild is not None:
-            self._message_counters[(message.guild.id, message.channel.id, _hour_bucket())] += 1
+            if self.metrics_loop.is_running():
+                self._message_counters[(message.guild.id, message.channel.id, _hour_bucket())] += 1
             if isinstance(message.channel, discord.Thread):
                 row = await self.bot.db.fetchone(
                     "SELECT * FROM modmail_threads WHERE thread_id=? AND status='open' ORDER BY id DESC LIMIT 1",
@@ -830,6 +864,17 @@ class EnterpriseSuite(commands.Cog, name=_COG_NAME):
             return
 
         if not isinstance(message.channel, discord.DMChannel):
+            return
+        try:
+            from utils import mp_ouvertes
+
+            # Une conversation privée ouverte avec l'IA (« mp moi ») reste à l'IA.
+            if await mp_ouvertes.est_ouverte(self.bot, message.author.id):
+                return
+            ctx = await self.bot.get_context(message)
+            if ctx.valid:  # une vraie commande en MP n'est pas un message au staff
+                return
+        except Exception:  # noqa: BLE001 — en cas de doute, on ne détourne pas le MP
             return
         try:
             mutual = await self._mutual_modmail_guilds(message.author.id)
@@ -1298,6 +1343,8 @@ class EnterpriseSuite(commands.Cog, name=_COG_NAME):
 
     @tasks.loop(hours=6)
     async def backup_loop(self):
+        if getattr(self.bot.db, "backend", "sqlite") == "postgres":
+            return  # sauvegardes côté PostgreSQL (Railway) : rien à faire, pas d'erreur
         try:
             # Lease Redis : un seul shard/process crée le backup partagé.
             lease = secrets.token_hex(8)
@@ -1315,12 +1362,26 @@ class EnterpriseSuite(commands.Cog, name=_COG_NAME):
         await asyncio.sleep(90)
 
 
+#: 25/11/2026 : le module dormait depuis août. Les réglages d'avant ce jour
+#: (colonne à 1 par défaut) ne réactivent rien : on repart désactivé.
+_REPRISE_SUPPORT = 1795564800
+
+
 async def setup(bot: commands.Bot) -> None:
     await _ensure_tables(bot)
+    await bot.db.execute(
+        "UPDATE enterprise_guild_settings SET appeals_enabled=0, modmail_enabled=0 WHERE updated_at < ?",
+        (_REPRISE_SUPPORT,),
+    )
+    if bot.get_cog(_COG_NAME) is not None:
+        return  # déjà installé par un autre chemin de démarrage : un seul module
     infra = getattr(bot, "sentrix_infra", None)
     if infra is None:
+        # 25/11/2026 : PAS de connexion — elle ouvrait une seconde réserve de
+        # connexions PostgreSQL (POSTGRES_URL) pour un simple miroir
+        # d'évènements. Sans connexion, EnterpriseInfra ne fait rien (repli
+        # prévu) et tout passe par la base de SentriX.
         infra = EnterpriseInfra()
-        await infra.connect()
         bot.sentrix_infra = infra
     service = EnterpriseSuite(bot, infra)
     await bot.add_cog(service)

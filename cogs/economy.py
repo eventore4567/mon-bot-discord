@@ -103,6 +103,13 @@ class ShopRoleSelect(discord.ui.Select):
         await cog.handle_shop_selection(interaction, self.values[0])
 
 
+LIBELLES_TRANSACTION = {
+    "buy": "Achat", "sell": "Vente", "pay": "Paiement", "daily": "Récompense quotidienne",
+    "weekly": "Récompense hebdomadaire", "work": "Travail", "admin_grant": "Ajout du staff",
+    "daily_streak_bonus": "Bonus de série", "mission": "Mission", "rob": "Vol", "gamble": "Pari",
+}
+
+
 class ShopRoleView(discord.ui.View):
     def __init__(
         self,
@@ -366,10 +373,31 @@ class Economy(commands.Cog, name="Economy"):
             except Exception:
                 pass
 
+        # 25/11/2026 : l'historique (+transactions, jamais chargé en production
+        # depuis août) est relogé ici, sans nouvelle commande : les derniers
+        # mouvements, visibles par le membre lui-même ou par le staff.
+        mouvements: list[sx_panels.Ligne] = []
+        perms = getattr(ctx.author, "guild_permissions", None)
+        if membre.id == ctx.author.id or getattr(perms, "manage_guild", False):
+            try:
+                lignes = await self.bot.db.get_transactions(ctx.guild.id, membre.id, limit=5)
+            except Exception:
+                lignes = []
+            for ligne in lignes or []:
+                entree = ligne["receiver_id"] is not None and int(ligne["receiver_id"]) == membre.id
+                libelle = str(ligne["reason"] or "").strip() or LIBELLES_TRANSACTION.get(
+                    str(ligne["transaction_type"]), str(ligne["transaction_type"])
+                )
+                mouvements.append(sx_panels.Ligne(
+                    f"{'+' if entree else '−'}{nombre(int(ligne['amount'] or 0))} {emoji}",
+                    f"{libelle[:80]} · <t:{int(ligne['created_at'] or 0)}:R>",
+                ))
+
         sections = [
             sx_panels.Section("Avoirs", avoirs, aligne=True),
             sx_panels.Section("Sur ce serveur", situation, aligne=True),
             *([sx_panels.Section("Progression", carriere)] if carriere else []),
+            *([sx_panels.Section("Derniers mouvements", mouvements)] if mouvements else []),
             *boost_section,
             sx_panels.Section(
                 "Gagner plus",
@@ -992,9 +1020,17 @@ class Economy(commands.Cog, name="Economy"):
                 suffix = f" — {item['description']}" if item["description"] else ""
                 if item["role_id"] and role is None:
                     suffix += " — indisponible"
-                lines.append(
-                    f"**#{item['id']}** {name} • **{stats_service.format_number(item['price'])} pièces**{suffix}"
-                )
+                prix = f"**{stats_service.format_number(item['price'])} pièces**"
+                regle = await self.bot.db.regle_boutique(ctx.guild.id, int(item["id"]))
+                if regle and regle["prix_promo"]:
+                    prix = (f"~~{stats_service.format_number(item['price'])}~~ "
+                            f"**{stats_service.format_number(regle['prix_promo'])} pièces** "
+                            f"(promo, fin <t:{regle['fin_promo']}:R>)")
+                if regle and regle["stock"] == 0:
+                    suffix += " — rupture de stock"
+                elif regle and regle["stock"] > 0:
+                    suffix += f" — {regle['stock']} en stock"
+                lines.append(f"**#{item['id']}** {name} • {prix}{suffix}")
             embed = design_system.create_embed(
                 title="Boutique",
                 description="\n".join(lines) + "\n\nAcheter : +buy <id>",
@@ -1031,6 +1067,8 @@ class Economy(commands.Cog, name="Economy"):
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(result))
 
         status, purchased_item = await self.bot.db.purchase_shop_item(ctx.guild.id, ctx.author.id, item["id"])
+        if status == "out_of_stock":
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Cet article est en rupture de stock.')))
         if status == "not_found":
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Article introuvable ou prix invalide.')))
         if status == "insufficient_funds":
@@ -1053,6 +1091,8 @@ class Economy(commands.Cog, name="Economy"):
             return embeds.info("Vous possédez déjà ce rôle. Aucun argent n'a été retiré.")
 
         status, purchased_item = await self.bot.db.purchase_shop_item(guild.id, member.id, item["id"])
+        if status == "out_of_stock":
+            return embeds.error("Cet article est en rupture de stock.")
         if status == "not_found":
             return embeds.error("Ce rôle n'est plus disponible dans la boutique.")
         if status == "insufficient_funds":
@@ -1386,4 +1426,10 @@ Economy.gamble.callback._sentrix_all_amount_parser = True
 
 
 async def setup(bot: commands.Bot):
+    # Stock et promotions de la boutique : table créée au chargement, jamais
+    # pendant un achat (une création de table ralentit PostgreSQL).
+    try:
+        await bot.db.execute(bot.db.SCHEMA_REGLES_BOUTIQUE)
+    except Exception:
+        __import__("logging").getLogger("bot.economy").warning("Table des règles de boutique non créée.", exc_info=True)
     await bot.add_cog(Economy(bot))

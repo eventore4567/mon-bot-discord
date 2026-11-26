@@ -430,6 +430,15 @@ def _install_reply_and_dm_conversations(bot: commands.Bot) -> None:
                     except Exception:
                         logger.exception("Conversation privée ouverte : réponse impossible.")
                     return
+            # Revue Codex (PR #728) : un MP pris en charge par le modmail (salon
+            # choisi dans /setup) n'est pas refusé — le membre parle au staff.
+            support = bot.get_cog("EnterpriseSuite")
+            if support is not None:
+                try:
+                    if await support._mutual_modmail_guilds(message.author.id):
+                        return
+                except Exception:
+                    logger.debug("Modmail : vérification impossible.", exc_info=True)
             try:
                 await message.channel.send(REFUS_MESSAGE_PRIVE)
             except discord.HTTPException:

@@ -33,6 +33,14 @@ async def main() -> int:
     guild = await h.setup_world(bot)
     cog = bot.get_cog("Moderation")
 
+    # Alerte « Base de données lente » (25/11/2026) : les tables existent dès le
+    # démarrage, aucune commande ne paie leur création.
+    tables = await bot.db.fetchall(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
+        "('sanction_paliers','sanction_annulations','sanction_avertissements')", ())
+    check(len(tables) == 3, "les tables de modération sont créées au démarrage, pas pendant un +warn",
+          str([t["name"] for t in tables]))
+
     async def commande(texte):
         debut = len(h.CALLS)
         await asyncio.wait_for(h.run_prefix(bot, guild, texte, **ADMIN), 20)

@@ -129,6 +129,9 @@ async def _audit_preban_appeal_delivery(bot, service) -> None:
         author = FakeAuthor()
 
     target = FakeTarget()
+    # 25/11/2026 : les recours sont désactivés par défaut (activés dans
+    # /setup → Modération) ; l'audit les active comme le ferait le staff.
+    await service.update_settings(FakeGuild.id, appeals_enabled=1)
     delivered = await moderation._send_sanction_dm(
         FakeContext(), target, "ban", "Test lien de recours"
     )

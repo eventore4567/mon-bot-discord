@@ -1006,6 +1006,65 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             accessory=bouton_ia,
         ))
 
+        # — Recours et modmail (25/11/2026 : venaient de l'Enterprise Suite,
+        # jamais chargée en production depuis août).
+        support = self.bot.get_cog("EnterpriseSuite")
+        if support is not None:
+            reglages = await support.get_settings(self.guild.id)
+            recours = bool(int(reglages.get("appeals_enabled") or 0))
+            salon_modmail = self.guild.get_channel(int(reglages.get("modmail_channel_id") or 0))
+            modmail = bool(int(reglages.get("modmail_enabled") or 0)) and salon_modmail is not None
+            container.add_item(discord.ui.Separator())
+            bouton_recours = discord.ui.Button(
+                label=t("Désactiver", "Turn off") if recours else t("Activer", "Turn on"),
+                style=discord.ButtonStyle.secondary if recours else discord.ButtonStyle.success,
+            )
+
+            async def basculer_recours(interaction: discord.Interaction):
+                if not interaction.response.is_done():
+                    await interaction.response.defer()
+                await support.update_settings(self.guild.id, appeals_enabled=0 if recours else 1)
+                await self.refresh(interaction)
+
+            bouton_recours.callback = basculer_recours
+            container.add_item(discord.ui.Section(
+                discord.ui.TextDisplay(
+                    f"### 📨 {t('Recours de bannissement', 'Ban appeals')}\n"
+                    + (t("🟢 Actif", "🟢 On") if recours else t("⚪ Désactivé", "⚪ Off"))
+                    + "\n-# " + t(
+                        "Un membre banni reçoit en MP un lien pour contester ; le staff tranche sur le dashboard.",
+                        "A banned member gets a DM link to appeal; staff decides on the dashboard.",
+                    )
+                ),
+                accessory=bouton_recours,
+            ))
+            container.add_item(discord.ui.TextDisplay(
+                f"### 📬 {t('Modmail', 'Modmail')}\n"
+                + (f"🟢 {salon_modmail.mention}" if modmail else t("⚪ Désactivé", "⚪ Off"))
+                + "\n-# " + t(
+                    "Les MP envoyés à SentriX arrivent dans un fil de ce salon ; le staff répond dans le fil. "
+                    "Videz le choix pour désactiver.",
+                    "DMs sent to SentriX open a thread in this channel; staff replies in the thread. "
+                    "Clear the choice to turn it off.",
+                )
+            ))
+            salon_select = discord.ui.ChannelSelect(
+                channel_types=[discord.ChannelType.text], min_values=0, max_values=1,
+                placeholder=t("Salon du modmail", "Modmail channel"),
+            )
+
+            async def regler_modmail(interaction: discord.Interaction):
+                if not interaction.response.is_done():
+                    await interaction.response.defer()
+                choix = salon_select.values[0].id if salon_select.values else None
+                await support.update_settings(
+                    self.guild.id, modmail_channel_id=choix, modmail_enabled=1 if choix else 0,
+                )
+                await self.refresh(interaction)
+
+            salon_select.callback = regler_modmail
+            container.add_item(discord.ui.ActionRow(salon_select))
+
         # — Logs
         container.add_item(discord.ui.Separator())
         reglages = {
@@ -1771,6 +1830,65 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         toggle.callback = toggle_ai
         limits.callback = edit_limits
         container.add_item(discord.ui.ActionRow(toggle, limits))
+
+        # 25/11/2026 : quotas par rôle (venaient de +airolequota, jamais chargé
+        # en production depuis août). Un rôle, puis sa limite par jour.
+        quotas = await ai_service.quotas_par_role(self.bot, self.guild.id)
+        lignes = [
+            f"• <@&{rid}> : **{lim}/{'day' if english else 'jour'}**"
+            for rid, lim in sorted(quotas.items(), key=lambda x: -x[1])[:10]
+        ]
+        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.TextDisplay(
+            ("### 🎚️ Limits per role\n" if english else "### 🎚️ Limites par rôle\n")
+            + ("\n".join(lignes) if lignes else (
+                "-# No role has its own limit." if english else "-# Aucun rôle n'a de limite propre."
+            ))
+            + ("\n-# The highest limit among a member's roles applies." if english
+               else "\n-# La plus haute limite parmi les rôles d'un membre s'applique.")
+        ))
+        role_choisi = getattr(self, "_role_quota_ia", None)
+        role_select = discord.ui.RoleSelect(
+            placeholder=("Role to set" if english else "Rôle à régler") if role_choisi is None
+            else f"@{getattr(self.guild.get_role(role_choisi), 'name', role_choisi)}",
+            min_values=1, max_values=1,
+        )
+
+        async def choisir_role(interaction: discord.Interaction):
+            self._role_quota_ia = role_select.values[0].id
+            await self.refresh(interaction)
+
+        role_select.callback = choisir_role
+        container.add_item(discord.ui.ActionRow(role_select))
+        if role_choisi is not None:
+            actuelle = quotas.get(int(role_choisi))
+            limite_select = discord.ui.Select(
+                placeholder=("Daily limit for this role" if english else "Limite par jour pour ce rôle"),
+                options=[
+                    discord.SelectOption(label=f"{n}/{'day' if english else 'jour'}", value=str(n), default=actuelle == n)
+                    for n in (10, 25, 50, 100, 200, 500)
+                ] + [discord.SelectOption(
+                    label="Remove this role's limit" if english else "Retirer la limite de ce rôle", value="0",
+                )],
+            )
+
+            async def choisir_limite(interaction: discord.Interaction):
+                valeur = int(limite_select.values[0])
+                if valeur:
+                    await self.bot.db.execute(
+                        "INSERT INTO v17_ai_role_quotas (guild_id, role_id, daily_limit, priority) VALUES (?,?,?,0) "
+                        "ON CONFLICT(guild_id, role_id) DO UPDATE SET daily_limit=excluded.daily_limit",
+                        (self.guild.id, int(role_choisi), valeur),
+                    )
+                else:
+                    await self.bot.db.execute(
+                        "DELETE FROM v17_ai_role_quotas WHERE guild_id=? AND role_id=?", (self.guild.id, int(role_choisi)),
+                    )
+                self._role_quota_ia = None
+                await self.refresh(interaction)
+
+            limite_select.callback = choisir_limite
+            container.add_item(discord.ui.ActionRow(limite_select))
         self._add_navigation(container)
         self.add_item(container)
 

@@ -1253,12 +1253,46 @@ async def get_global_usage(bot, user_id: int) -> int:
     return int((row["total"] if row else 0) or 0)
 
 
+#: 25/11/2026 : quotas IA par rôle (venaient de +airolequota, jamais chargé en
+#: production depuis août), réglés dans /setup → IA. Table créée au chargement
+#: du cog IA, jamais pendant une demande.
+SCHEMA_QUOTAS_PAR_ROLE = (
+    "CREATE TABLE IF NOT EXISTS v17_ai_role_quotas (guild_id INTEGER NOT NULL, role_id INTEGER NOT NULL, "
+    "daily_limit INTEGER NOT NULL, priority INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (guild_id, role_id))"
+)
+
+
+async def quotas_par_role(bot, guild_id: int) -> dict[int, int]:
+    try:
+        lignes = await bot.db.fetchall(
+            "SELECT role_id, daily_limit FROM v17_ai_role_quotas WHERE guild_id = ?", (int(guild_id),)
+        )
+    except Exception:  # noqa: BLE001 — table absente : aucun quota par rôle
+        return {}
+    return {int(l["role_id"]): int(l["daily_limit"]) for l in lignes or []}
+
+
+async def limite_quotidienne(bot, guild_id: int | None, user_id: int, settings: dict) -> int:
+    """Limite du jour de ce membre : la plus haute de ses rôles à quota, sinon celle du serveur."""
+    base = int(settings.get("daily_limit") or 50)
+    if not guild_id:
+        return base
+    quotas = await quotas_par_role(bot, guild_id)
+    if not quotas:
+        return base
+    guild = bot.get_guild(int(guild_id))
+    membre = guild.get_member(int(user_id)) if guild else None
+    siens = [quotas[r.id] for r in getattr(membre, "roles", []) if r.id in quotas]
+    return max(siens) if siens else base
+
+
 async def limite_atteinte(bot, guild_id: int | None, user_id: int, settings: dict, *, image: bool = False) -> str | None:
     """Le message à afficher si ce membre a atteint une limite, sinon None."""
-    retour = f"Réessaie <t:{prochaine_remise_a_zero()}:R>."
+    retour = f"Réessayez <t:{prochaine_remise_a_zero()}:R>."
     if guild_id:
-        if await get_daily_usage(bot, guild_id, user_id) >= int(settings.get("daily_limit") or 50):
-            return f"📅 Tu as atteint ta limite d'IA sur ce serveur ({settings.get('daily_limit')} demandes par jour). {retour}"
+        limite = await limite_quotidienne(bot, guild_id, user_id, settings)
+        if await get_daily_usage(bot, guild_id, user_id) >= limite:
+            return f"📅 Vous avez atteint votre limite d'IA sur ce serveur ({limite} demandes par jour). {retour}"
         if image and await get_image_usage(bot, guild_id, user_id) >= IMAGES_PAR_JOUR:
             return f"🖼️ Tu as atteint ta limite d'images ({IMAGES_PAR_JOUR} par jour). {retour}"
     if await get_global_usage(bot, user_id) >= LIMITE_GLOBALE_PAR_JOUR:

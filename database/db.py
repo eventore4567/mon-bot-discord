@@ -49,6 +49,24 @@ _CONFIG_PERSISTENCE_MARKERS = (
 )
 
 
+#: 25/11/2026 (« chaque commande se lance en retard ») : réglages relus par
+#: CHAQUE commande avant sa réponse (salons bloqués, salons autorisés, règles
+#: par rôle). Ils changent rarement : lus une fois puis gardés en mémoire, et
+#: oubliés dès qu'une écriture touche l'une de ces tables (ou après 60 s).
+_TABLES_LUES_PAR_CHAQUE_COMMANDE = (
+    "command_blocked_channels",
+    "command_channel_blocks",
+    "category_allowed_channels",
+    "command_role_permissions",
+)
+_CACHE_REGLAGES_TTL = 60.0
+
+
+def _table_lue_par_chaque_commande(query: str) -> bool:
+    texte = str(query or "").lower()
+    return any(table in texte for table in _TABLES_LUES_PAR_CHAQUE_COMMANDE)
+
+
 def _is_configuration_write(query: str) -> bool:
     normalized = " ".join(str(query or "").strip().lower().split())
     if not normalized.startswith(("insert ", "update ", "delete ", "replace ")):
@@ -1631,6 +1649,10 @@ class Database:
         # au même moment sur le même serveur (deux modérateurs qui agissent en même temps)
         # ne doivent jamais recevoir le même numéro.
         self._sanctions_lock = asyncio.Lock()
+        self._cache_reglages: dict = {}
+        # Revue Codex (PR #728) : une lecture partie AVANT une écriture ne doit
+        # pas republier l'ancien résultat après coup.
+        self._generation_reglages = 0
         self._invite_join_lock = asyncio.Lock()
 
     @property
@@ -1964,27 +1986,67 @@ class Database:
             await self._conn.close()
 
     async def execute(self, query: str, params: tuple = ()):
-        fast = getattr(self._conn, "execute_and_commit", None)
-        if fast is not None:
-            cur = await fast(query, params)
-        else:
-            cur = await self._conn.execute(query, params)
-            await self._conn.commit()
+        ecrit_reglages = _table_lue_par_chaque_commande(query) and not str(query).lstrip().lower().startswith(
+            ("select", "create table if not exists", "create index if not exists", "create unique index if not exists")
+        )
+        if ecrit_reglages:
+            self._generation_reglages += 1
+            self._cache_reglages.clear()
+        try:
+            fast = getattr(self._conn, "execute_and_commit", None)
+            if fast is not None:
+                cur = await fast(query, params)
+            else:
+                cur = await self._conn.execute(query, params)
+                await self._conn.commit()
+        finally:
+            if ecrit_reglages:
+                self._generation_reglages += 1
+                self._cache_reglages.clear()
         if cur.rowcount != 0 and _is_configuration_write(query):
             self._schedule_config_snapshot()
         return cur
 
     async def fetchone(self, query: str, params: tuple = ()):
+        cle = self._cle_reglages("one", query, params)
+        if cle is not None:
+            trouve = self._cache_reglages.get(cle)
+            if trouve is not None and time.monotonic() - trouve[0] < _CACHE_REGLAGES_TTL:
+                return trouve[1]
+        generation = self._generation_reglages
         cur = await self._conn.execute(query, params)
         row = await cur.fetchone()
         await cur.close()
+        if cle is not None and generation == self._generation_reglages:
+            self._cache_reglages[cle] = (time.monotonic(), row)
         return row
 
     async def fetchall(self, query: str, params: tuple = ()):
+        cle = self._cle_reglages("all", query, params)
+        if cle is not None:
+            trouve = self._cache_reglages.get(cle)
+            if trouve is not None and time.monotonic() - trouve[0] < _CACHE_REGLAGES_TTL:
+                return list(trouve[1])
+        generation = self._generation_reglages
         cur = await self._conn.execute(query, params)
         rows = await cur.fetchall()
         await cur.close()
+        if cle is not None and generation == self._generation_reglages:
+            self._cache_reglages[cle] = (time.monotonic(), list(rows))
         return rows
+
+    def _cle_reglages(self, sorte: str, query: str, params) -> tuple | None:
+        """Clé de cache pour une LECTURE des réglages relus par chaque commande."""
+        if not _table_lue_par_chaque_commande(query):
+            return None
+        if not str(query).lstrip().lower().startswith("select"):
+            return None
+        if len(self._cache_reglages) > 5000:
+            self._cache_reglages.clear()
+        try:
+            return (sorte, query, tuple(params or ()))
+        except TypeError:
+            return None
 
     # ---------- Créateur(s) officiel(s) du bot ----------
 
@@ -2923,6 +2985,13 @@ class Database:
             price = int(item["price"] or 0)
             if price <= 0:
                 return "not_found", None
+            # 25/11/2026 : stock et promotion (venaient de +shopstock/+shoppromo,
+            # jamais chargés en production depuis août), réglés dans /setup → Économie.
+            regle = await self.regle_boutique(guild_id, item_id)
+            if regle is not None:
+                if regle["prix_promo"]:
+                    item = dict(item)
+                    item["price"] = price = min(price, regle["prix_promo"])
             role_id = item["role_id"]
             if role_id:
                 reservation = await self._conn.execute(
@@ -2933,6 +3002,16 @@ class Database:
                 )
                 if reservation.rowcount < 1:
                     return "already_owned", item
+            # Rupture vérifiée APRÈS « déjà acheté » : un rôle payé se restaure
+            # même stock épuisé (revue Codex, PR #728).
+            if regle is not None and regle["stock"] == 0:
+                if role_id:
+                    await self._conn.execute(
+                        "DELETE FROM shop_role_purchases WHERE guild_id = ? AND user_id = ? AND role_id = ?",
+                        (guild_id, user_id, role_id),
+                    )
+                    await self._conn.commit()
+                return "out_of_stock", item
             await self._conn.execute(
                 "INSERT OR IGNORE INTO economy (guild_id, user_id) VALUES (?, ?)",
                 (guild_id, user_id),
@@ -2959,8 +3038,55 @@ class Database:
                 "VALUES (?, ?, NULL, 'buy', ?, ?, ?)",
                 (guild_id, user_id, price, now(), f"Achat : {item['name']}"),
             )
+            if regle is not None and regle["stock"] > 0:
+                await self._conn.execute(
+                    "UPDATE v17_shop_rules SET stock = stock - 1, updated_at = ? "
+                    "WHERE guild_id = ? AND item_id = ? AND stock > 0",
+                    (now(), guild_id, item_id),
+                )
             await self._conn.commit()
             return "ok", item
+
+    SCHEMA_REGLES_BOUTIQUE = (
+        "CREATE TABLE IF NOT EXISTS v17_shop_rules (guild_id INTEGER NOT NULL, item_id INTEGER NOT NULL, "
+        "stock INTEGER NOT NULL DEFAULT -1, sale_price INTEGER, sale_ends_at INTEGER, "
+        "available_from INTEGER, available_until INTEGER, updated_at INTEGER, PRIMARY KEY (guild_id, item_id))"
+    )
+
+    async def regle_boutique(self, guild_id: int, item_id: int) -> dict | None:
+        """Stock (-1 = illimité) et prix promo en cours d'un article, ou None."""
+        try:
+            row = await self.fetchone(
+                "SELECT stock, sale_price, sale_ends_at FROM v17_shop_rules WHERE guild_id = ? AND item_id = ?",
+                (guild_id, item_id),
+            )
+        except Exception:  # table absente : aucune règle
+            return None
+        if not row:
+            return None
+        promo = int(row["sale_price"] or 0)
+        fin = int(row["sale_ends_at"] or 0)
+        if promo and fin and fin < now():
+            promo = 0
+        return {"stock": int(row["stock"] if row["stock"] is not None else -1), "prix_promo": promo, "fin_promo": fin}
+
+    async def regler_boutique(self, guild_id: int, item_id: int, *, stock: int | None = None,
+                              prix_promo: int | None = None, fin_promo: int | None = None) -> None:
+        await self.execute(self.SCHEMA_REGLES_BOUTIQUE)
+        await self.execute(
+            "INSERT OR IGNORE INTO v17_shop_rules (guild_id, item_id, stock, updated_at) VALUES (?, ?, -1, ?)",
+            (guild_id, item_id, now()),
+        )
+        if stock is not None:
+            await self.execute(
+                "UPDATE v17_shop_rules SET stock = ?, updated_at = ? WHERE guild_id = ? AND item_id = ?",
+                (int(stock), now(), guild_id, item_id),
+            )
+        if prix_promo is not None:
+            await self.execute(
+                "UPDATE v17_shop_rules SET sale_price = ?, sale_ends_at = ?, updated_at = ? WHERE guild_id = ? AND item_id = ?",
+                (int(prix_promo) or None, int(fin_promo or 0) or None, now(), guild_id, item_id),
+            )
 
     async def refund_shop_item(self, guild_id: int, user_id: int, item, reason: str):
         """Rembourse un achat si Discord refuse ensuite l'attribution du rôle."""
@@ -2986,6 +3112,14 @@ class Database:
                 await self._conn.execute(
                     "DELETE FROM shop_role_purchases WHERE guild_id = ? AND user_id = ? AND role_id = ?",
                     (guild_id, user_id, item["role_id"]),
+                )
+            # Revue Codex (PR #728) : rien n'a été livré, l'exemplaire revient en stock
+            # (un stock illimité, -1, n'est pas touché).
+            if await self.regle_boutique(guild_id, int(item["id"])) is not None:
+                await self._conn.execute(
+                    "UPDATE v17_shop_rules SET stock = stock + 1, updated_at = ? "
+                    "WHERE guild_id = ? AND item_id = ? AND stock >= 0",
+                    (now(), guild_id, int(item["id"])),
                 )
             await self._conn.commit()
 

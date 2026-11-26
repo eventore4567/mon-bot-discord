@@ -212,7 +212,11 @@ async def main() -> int:
     view.clear_items()
     await view._build_page(view.page)
 
-    tous = control(view, lambda i: isinstance(i, discord.ui.ChannelSelect))
+    # 25/11/2026 : la section a aussi le menu du salon modmail ; on vise celui des logs.
+    def menu_logs(i):
+        return isinstance(i, discord.ui.ChannelSelect) and "sans salon" in str(i.placeholder or "")
+
+    tous = control(view, menu_logs)
     check(tous is not None, "la section propose d'envoyer les logs sans salon dans un salon")
     tous._values = [guild.get_channel(h.LOGCID)]
     await cliquer(bot, tous)
@@ -226,7 +230,7 @@ async def main() -> int:
           "une catégorie coupée volontairement n'est ni réactivée ni redirigée", str(messages))
     check(await core.module_enabled(bot, guild.id, "logs"),
           "l'envoi groupé rallume le module Logs (sinon aucun journal ne part)")
-    check(control(view, lambda i: isinstance(i, discord.ui.ChannelSelect)) is None,
+    check(control(view, menu_logs) is None,
           "une fois tout configuré, le sélecteur disparaît")
 
     await cliquer(bot, bouton(view, "Réglages détaillés"))

@@ -96,6 +96,8 @@ def _install_economy(bot: commands.Bot) -> bool:
             status, purchased = await bot.db.purchase_shop_item(
                 ctx.guild.id, ctx.author.id, item["id"]
             )
+            if status == "out_of_stock":
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cet article est en rupture de stock.')))
             if status == "not_found":
                 return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Article introuvable ou prix invalide.')))
             if status == "insufficient_funds":

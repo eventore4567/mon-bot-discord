@@ -166,6 +166,8 @@ async def persist_sanction(
         case_number = await bot.db.record_sanction(
             guild_id, target_id, actor_id, action, reason, duration_seconds
         )
+        if action in {"ban", "tempban"} and case_number is not None:
+            await _relier_recours_au_dossier(bot, guild_id, target_id, case_number)
         return case_number, None
     except Exception as exc:
         logger.exception(
@@ -367,6 +369,13 @@ async def ban(
             executed=False,
             validation_error="Suppression invalide : aucune, 15 minutes, 1 heure ou 24 heures maximum.",
         )
+    async def executer():
+        await preparer_recours(bot, guild, target, reason)
+        return await guild.ban(
+            target, reason=f"{actor} : {reason}",
+            delete_message_seconds=delete_message_seconds,
+        )
+
     return await _run_sanction_pipeline(
         bot,
         guild=guild,
@@ -375,11 +384,36 @@ async def ban(
         reason=reason,
         dm_text=dm_text,
         action="ban",
-        execute=lambda: guild.ban(
-            target, reason=f"{actor} : {reason}",
-            delete_message_seconds=delete_message_seconds,
-        ),
+        execute=executer,
     )
+
+
+async def _relier_recours_au_dossier(bot: Any, guild_id: int, user_id: int, case_number: int) -> None:
+    """Le recours envoyé juste avant le ban porte le numéro du NOUVEAU dossier
+    (il ne pouvait pas le connaître) — revue Codex, PR #728."""
+    if not hasattr(bot, "get_cog") or bot.get_cog("EnterpriseSuite") is None:
+        return
+    try:
+        await bot.db.execute(
+            "UPDATE ban_appeals SET case_number=? WHERE guild_id=? AND user_id=? "
+            "AND status='awaiting_user' AND created_at>=?",
+            (int(case_number), int(guild_id), int(user_id), now() - 120),
+        )
+    except Exception:  # noqa: BLE001 — table absente ou base occupée : le recours reste valable
+        logger.debug("Recours non relié au dossier.", exc_info=True)
+
+
+async def preparer_recours(bot: Any, guild: discord.Guild, target: Any, reason: str) -> None:
+    """Recours activé (/setup → Modération) : le lien part AVANT le ban, tant que
+    le membre partage encore le serveur avec SentriX (revue Codex, PR #728).
+    Jamais bloquant : 2,5 s au plus, toute erreur est ignorée."""
+    support = bot.get_cog("EnterpriseSuite") if hasattr(bot, "get_cog") else None
+    if support is None:
+        return
+    try:
+        await asyncio.wait_for(support.create_appeal_for_ban(guild, target, raison=reason), 2.5)
+    except Exception:  # noqa: BLE001 — le ban ne dépend jamais du recours
+        logger.debug("Recours pré-ban non préparé.", exc_info=True)
 
 
 async def kick(
@@ -551,6 +585,7 @@ async def tempban(
             dm_sent = False
 
     log_service.mark_sanction(guild.id, target.id, "ban")
+    await preparer_recours(bot, guild, target, reason)
     await guild.ban(target, reason=f"{actor} (temporaire {duree}) : {reason}", delete_message_seconds=0)
 
     tempaction_error = await persist_tempaction(

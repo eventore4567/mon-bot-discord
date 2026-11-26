@@ -368,8 +368,10 @@ def _install_fast_ai(bot: commands.Bot) -> None:
 
         if guild_id:
             used_today = await ai_service.get_daily_usage(bot, guild_id, user_id)
-            if used_today >= settings["daily_limit"]:
-                return {"ok": False, "error": f"Limite quotidienne atteinte ({settings['daily_limit']} demandes/jour)."}
+            # Limite par rôle (/setup → IA) : revue Codex, PR #728.
+            limite = await ai_service.limite_quotidienne(bot, guild_id, user_id, settings)
+            if used_today >= limite:
+                return {"ok": False, "error": f"Limite quotidienne atteinte ({limite} demandes/jour)."}
 
         # Speed-first : Luna pour les demandes ordinaires, Terra seulement si la demande est
         # réellement complexe, Sol uniquement lorsqu'une route avancée le demande.
