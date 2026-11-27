@@ -63,6 +63,24 @@ async def main() -> int:
     _mute2, texte2 = await serie(100000000000000501, 5, 0.2)
     check("mute de 10 min" in texte2, "un 2e flood massif donne un mute plus long (10 min)", texte2[-200:])
 
+    # Revue Codex (PR #734) : après un flood massif, une rafale ORDINAIRE n'est
+    # plus traitée comme une première fois (messages laissés) : elle est supprimée.
+    automod.incidents.clear()
+    debut_ord = dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=7)
+    await serie(100000000000000503, 5, 0.2)  # d'abord un flood massif
+    automod.incidents.clear()
+    ordinaire_avant = len(h.CALLS)
+    ids = []
+    for i in range(5):
+        msg = message_a(bot, guild, f"encore {i}", 100000000000000503, debut_ord + dt.timedelta(seconds=i * 1.1))
+        ids.append(msg.id)
+        await automod.on_message(msg)
+    await h.settle(idle=1.5, maximum=6)
+    supprimes = sum(1 for m, p, js in h.CALLS[ordinaire_avant:]
+                    if (m == "DELETE" and any(p.endswith(f"/messages/{i}") for i in ids))
+                    or (p.endswith("bulk-delete") and any(str(i) in map(str, (js or {}).get("messages", [])) for i in ids)))
+    check(supprimes > 0, "après un flood massif, la rafale suivante n'est plus laissée", str(supprimes))
+
     mute, texte = await serie(100000000000000502, 5, 1.1)
     check(not mute, "5 messages en 5 s (rafale ordinaire) : rappel d'abord, pas de mute", texte[-200:])
 

@@ -4914,6 +4914,9 @@ class AutoMod(commands.Cog, name="Automod"):
                 )
                 if massif:
                     self.__dict__.setdefault("_spam_massifs", {})[key] = time.monotonic()
+                    # Revue Codex (PR #734) : ce flood EST la 1re rafale du membre ;
+                    # la suivante ne doit pas repartir du « rappel, messages laissés ».
+                    self.__dict__.setdefault("_spam_rappels", {})[key] = time.monotonic()
                 self.spam_tracker.reinitialiser(key)
                 # 07/11/2026 : « qu'il ne supprime pas les messages au premier
                 # avertissement ». 1re rafale : rappel seul, messages laissés ; la suite
