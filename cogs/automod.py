@@ -1157,7 +1157,9 @@ def _que_des_gifs(contenu: str) -> bool:
     from urllib.parse import urlsplit
 
     for lien in liens:
-        brut = lien.strip("<>()[]{}.,;!?").casefold()
+        # Revue Codex (PR #735) : un navigateur lit « \\ » comme « / » :
+        # « evil.com\\@tenor.com » mène à evil.com. On lit le lien comme lui.
+        brut = lien.strip("<>()[]{}.,;!?").casefold().replace("\\", "/")
         if not re.match(r"^[a-z][a-z0-9+.-]*://", brut):
             brut = "https://" + brut
         # Revue Codex (PR #735) : le VRAI hôte, lu par urlsplit. Couper sur « / »

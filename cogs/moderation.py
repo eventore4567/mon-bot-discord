@@ -2104,8 +2104,11 @@ class Moderation(commands.Cog):
         total, touches = 0, 0
         for salon in salons:
             cibles = []
+            # Revue Codex (PR #735) : le message de la commande ne prend pas une
+            # place des « n derniers » (comme pour un +clear ordinaire).
+            limite = requested + (1 if invocation_id is not None and salon.id == ctx.channel.id else 0)
             try:
-                async for message in salon.history(limit=requested):
+                async for message in salon.history(limit=limite):
                     if message.id == invocation_id or message.pinned:
                         continue
                     if LINK_RE.search(str(message.content or "")):

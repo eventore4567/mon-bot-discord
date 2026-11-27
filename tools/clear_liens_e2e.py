@@ -75,6 +75,44 @@ async def main() -> int:
     check(action is not None and action.intent == "moderation.purge_links", "l'IA comprend « sup les lien qui son dans se serv »",
           str(getattr(action, "intent", None)))
 
+    # Revue Codex (PR #735) : « +clear 2 liens » examine les 2 messages AVANT la
+    # commande (le message de la commande ne prend pas une des deux places).
+    from types import SimpleNamespace
+
+    deux = []
+    for i in range(2):
+        m = h.build_message(bot, guild, f"pub https://autre{i}.example", author_id=h.TARGET_ID, author_name="m")
+        deux.append(m)
+
+    def history_avec_commande(self, *, limit=100, **kwargs):
+        async def gen():
+            commande = SimpleNamespace(id=h.STATE["last_cmd_id"], pinned=False, content="+clear 2 liens",
+                                       created_at=discord.utils.utcnow())
+            for message in [commande, *reversed(deux)][:limit]:
+                yield message
+        return gen()
+
+    sys.modules["cogs.moderation"]._CLEAR_COOLDOWNS.clear()  # délai entre deux +clear
+    discord.abc.Messageable.history = history_avec_commande
+    debut = len(h.CALLS)
+    try:
+        await asyncio.wait_for(h.run_prefix(bot, guild, "+clear 2 liens", author_id=h.ADMIN_ID,
+                                            author_roles=(h.ADMIN_ROLE_ID,)), 20)
+    finally:
+        discord.abc.Messageable.history = original_history
+    await h.settle(idle=1.0, maximum=6)
+    effaces = set()
+    for m, p, js in h.CALLS[debut:]:
+        if p.endswith("bulk-delete"):
+            effaces |= {int(x) for x in (js or {}).get("messages", [])}
+        elif m == "DELETE" and "/messages/" in p:
+            try:
+                effaces.add(int(p.rsplit("/", 1)[-1]))
+            except ValueError:
+                pass
+    check({m.id for m in deux} <= effaces, "+clear 2 liens supprime les 2 messages avec un lien avant la commande",
+          f"{len({m.id for m in deux} & effaces)}/2")
+
     # Revue Codex (PR #735) : le nombre demandé est gardé ; la portée survit à l'IA.
     borne = await ai_actions.parse_action("supprime les messages avec des liens parmi les 20 derniers messages",
                                           guild_id=guild.id, channel_id=h.CID, user_id=h.ADMIN_ID)

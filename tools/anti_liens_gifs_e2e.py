@@ -72,7 +72,7 @@ async def main() -> int:
 
     # Revue Codex (PR #735) : le vrai hôte, pas ce qui suit un « @ » de la requête.
     for piege in ("https://evil.com?@tenor.com", "https://evil.com#@giphy.com", "https://tenor.com.evil.com/x",
-                  "https://t\u0435nor.com/view/123", "https://g\u00edphy.com/page"):
+                  "https://t\u0435nor.com/view/123", "https://g\u00edphy.com/page", "https://evil.com\\@tenor.com"):
         check(await poster(f"clique {piege}", 100000000000000610 + len(piege)),
               f"mode GIFs : « {piege} » (pas un vrai GIF) est supprimé")
 
