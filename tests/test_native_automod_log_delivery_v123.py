@@ -53,7 +53,9 @@ async def test_native_block_creates_one_staff_log_with_rule_channel_and_member()
     assert "SentriX anti-invitations" in fields["Règle"]
     assert "Source" not in fields  # doublon de « Protection », retiré le 26/11/2026
     assert "bloqué" in fields["Statut"]
-    assert fields["Élément détecté"] == "`discord.gg`"
+    # 27/11/2026 : le texte réellement écrit (matched_content), pas le mot-clé
+    # de la règle — sur une règle regex, ce dernier est le motif lui-même.
+    assert fields["Élément détecté"] == "`discord.gg/pub`"
     assert "rejoins discord.gg/pub" in fields["Contenu"]
     buttons = audit.await_args.kwargs["suites"].children
     assert len(buttons) == 1
