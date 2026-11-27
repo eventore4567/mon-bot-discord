@@ -66,6 +66,10 @@ async def main() -> int:
     texte = h.visible_text(h.CALLS[debut:])
     check("`enfoire`" in texte and "(?i)" not in texte,
           "règle regex : la carte montre le mot écrit, pas l'expression", texte[-200:])
+    # 27/11/2026 (« y a trop de trucs ») : rien ne répète le titre.
+    check("Message supprimé" not in texte and "**Protection**" not in texte and "**Action**" not in texte
+          and "bloqué par Discord" not in texte,
+          "la carte ne répète pas son titre (Protection, Action, statut)", texte[:400])
 
     failed = [r for r in RESULTS if not r[0]]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} étapes réussies.")

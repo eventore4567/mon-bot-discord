@@ -982,7 +982,18 @@ def narrative_body(
         # ÉTÉ FAIT, en titre, puis le motif encadré, puis le détail ligne à ligne.
         statut = _field_value_exact(embed, "Statut")
         action_txt = _field_value_exact(embed, *alias["Action"])
-        lines.append(_titre_incident(statut, action_txt, _field_value_exact(embed, "Durée")))
+        # 27/11/2026 (« y a trop de trucs ») : sur la carte d'un blocage par
+        # l'AutoMod NATIF de Discord, le titre affiché est déjà « AutoMod natif
+        # Discord · Message bloqué » ; le second titre, la ligne Protection et la
+        # ligne Action ne faisaient que le répéter. Les cartes SentriX gardent
+        # tout : leur titre affiché (« Lien bloqué ») ne porte pas la sanction.
+        natif = _field_value_exact(embed, "Protection").casefold() == "automod natif discord"
+
+        def deja_dans_le_titre(_valeur: str) -> bool:
+            return natif
+
+        if not natif:
+            lines.append(_titre_incident(statut, action_txt, _field_value_exact(embed, "Durée")))
         motif = _field_value_exact(embed, "Motif") or reason
         if motif:
             lines.append("**📝 Motif**\n```\n" + motif.replace("```", "ʼʼʼ")[:900] + "\n```")
@@ -992,7 +1003,8 @@ def narrative_body(
             return f"{emoji} {valeur}" if valeur else None
 
         detail = [
-            pastille("🛡️", "Protection"), pastille("📏", "Règle"), pastille("🔎", "Élément détecté"),
+            None if deja_dans_le_titre(_field_value_exact(embed, "Protection")) else pastille("🛡️", "Protection"),
+            pastille("📏", "Règle"), pastille("🔎", "Élément détecté"),
             pastille("👤", "Compte"), pastille("💬", "Salon"), pastille("🕒", "Date"),
         ]
         if any(detail):
@@ -1006,7 +1018,7 @@ def narrative_body(
         if contenu:
             lines.append("**🗨️ Message**\n" + contenu)
         suites = [
-            pastille("⚙️", "Action"), pastille("⏱️", "Durée"), pastille("🗑️", "Messages supprimés"),
+            None if deja_dans_le_titre(action_txt) else pastille("⚙️", "Action"), pastille("⏱️", "Durée"), pastille("🗑️", "Messages supprimés"),
             pastille("📶", "Niveau anti-spam"), pastille("📈", "Infractions (1 h)"), pastille("🔁", "Récidive"),
         ]
         if any(suites):
