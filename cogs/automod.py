@@ -4675,7 +4675,7 @@ class AutoMod(commands.Cog, name="Automod"):
             and conf.get("antilink")
             and conf.get("antilink_strict")
             and LINK_RE.search(link_content)
-            and not (conf.get("antilink_gifs") and _que_des_gifs(link_content))
+            and not (conf.get("antilink_gifs") and _que_des_gifs(link_content) and _que_des_gifs(message.content))
             and await self.security_filter_applies_to(message, "antilink")
         ):
             return await self._delete_and_warn(
@@ -4827,8 +4827,11 @@ class AutoMod(commands.Cog, name="Automod"):
             and LINK_RE.search(link_content)
         ):
             allowed = await self.get_whitelist_domains_cached(message.guild.id)
+            # Revue Codex (PR #735) : l'exemption GIF se vérifie AUSSI sur le texte
+            # d'origine — la normalisation replie « tеnor.com » (е cyrillique) en
+            # « tenor.com », un tout autre domaine.
             if not _domain_allowed(link_content, allowed) and not (
-                conf.get("antilink_gifs") and _que_des_gifs(link_content)
+                conf.get("antilink_gifs") and _que_des_gifs(link_content) and _que_des_gifs(message.content)
             ):
                 return await self._delete_and_warn(
                     message,

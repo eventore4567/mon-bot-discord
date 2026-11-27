@@ -1092,7 +1092,12 @@ def local_parse(question: str) -> ParsedAction | None:
     question = _SUPPRIME_ABREGE.sub("supprime", question)
     if _LIENS_EXISTANTS.search(normalized) and not _extract_link_or_domain(question):
         portee = "serveur" if re.search(r"\b(?:serv|serveur|partout|tous les salons)\b", normalized) else "salon"
-        return ParsedAction("moderation.purge_links", {"scope": portee}, 99, "local")
+        emplacement = {"scope": portee}
+        # Revue Codex (PR #735) : « parmi les 20 derniers messages » limite la purge.
+        nombre = re.search(r"\b(\d{1,3})\b", normalized)
+        if nombre:
+            emplacement["count"] = max(2, min(int(nombre.group(1)), 100))
+        return ParsedAction("moderation.purge_links", emplacement, 99, "local")
 
     # -------- actions Discord natives fréquentes --------
     # Les fautes usuelles sont volontairement tolérées ici : le modèle reste le repli.
@@ -1404,11 +1409,14 @@ def _validate_ai_payload(payload: dict[str, Any] | None) -> ParsedAction | None:
         "target", "reason", "duration", "query", "app", "state", "section",
         "log_category", "channel", "user_id", "name", "category", "role",
         "text", "nickname", "color", "link", "title", "mention_everyone",
-        "image", "thumbnail", "footer", "button_label", "button_url",
+        "image", "thumbnail", "footer", "button_label", "button_url", "scope",
     ):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
             slots[key] = value.strip()[:500]
+    # Revue Codex (PR #735) : portée d'une suppression de liens, « salon » ou « serveur ».
+    if "scope" in slots:
+        slots["scope"] = "serveur" if slots["scope"].casefold() in {"serveur", "server", "guild", "partout"} else "salon"
     if "duration" in slots:
         normalized = normalize_duration(slots["duration"])
         if normalized:
@@ -1461,7 +1469,7 @@ async def classify_with_ai(
         "SentriX claire, retourne {\"intent\": null, \"confidence\": 0}. "
         "N'invente jamais un utilisateur, un ID, une durée, une raison ou un nombre. "
         "Préserve le texte de la cible tel que l'utilisateur l'a écrit. "
-        "Champs autorisés: intent, target, user_id, duration, reason, count, query, app, state, section, log_category, channel, name, category, role, text, nickname, color, link, title, mention_everyone, color, image, thumbnail, footer, fields, button_label, button_url, confidence.\n"
+        "Champs autorisés: intent, target, user_id, duration, reason, count, scope (salon|serveur), query, app, state, section, log_category, channel, name, category, role, text, nickname, color, link, title, mention_everyone, color, image, thumbnail, footer, fields, button_label, button_url, confidence.\n"
         "Actions autorisées:\n" + catalog
     )
     result = await ai_service.generate(
@@ -1531,7 +1539,7 @@ async def parse_action_plan(
         "Maximum 8 actions. N'invente jamais un membre, rôle, salon, catégorie, ID, nom, couleur, durée ou raison. "
         "Les noms créés dans une étape peuvent être réutilisés mot pour mot dans les étapes suivantes. "
         "Si la demande ne contient pas au moins deux actions claires, retourne {\"actions\":[]}. "
-        "Champs autorisés par action: intent,target,user_id,duration,reason,count,query,state,section,"
+        "Champs autorisés par action: intent,target,user_id,duration,reason,count,scope,query,state,section,"
         "log_category,channel,name,category,role,text,nickname,color,link,title,mention_everyone,color,image,thumbnail,footer,fields,button_label,button_url,confidence.\n"
         "ACTIONS AUTORISÉES:\n" + catalog
     )
@@ -1831,7 +1839,8 @@ def build_command_line(
         return f"{command} {int(slots['count'])}" if slots.get("count") else None
 
     if action.intent == "moderation.purge_links":
-        return f"{command} 100 liens" + (" serveur" if slots.get("scope") == "serveur" else "")
+        nombre = max(2, min(int(slots.get("count") or 100), 100))
+        return f"{command} {nombre} liens" + (" serveur" if slots.get("scope") == "serveur" else "")
 
     if action.intent == "music.play":
         query = str(slots.get("query") or "").strip()

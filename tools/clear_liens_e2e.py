@@ -75,6 +75,15 @@ async def main() -> int:
     check(action is not None and action.intent == "moderation.purge_links", "l'IA comprend « sup les lien qui son dans se serv »",
           str(getattr(action, "intent", None)))
 
+    # Revue Codex (PR #735) : le nombre demandé est gardé ; la portée survit à l'IA.
+    borne = await ai_actions.parse_action("supprime les messages avec des liens parmi les 20 derniers messages",
+                                          guild_id=guild.id, channel_id=h.CID, user_id=h.ADMIN_ID)
+    commande = ai_actions.build_command_line(borne, prefix="+", member=None) if borne else None
+    check(commande is not None and "20 liens" in commande, "« parmi les 20 derniers » donne +clear 20 liens", str(commande))
+    valide = ai_actions._validate_ai_payload({"intent": "moderation.purge_links", "scope": "serveur", "confidence": 95})
+    check(valide is not None and valide.slots.get("scope") == "serveur",
+          "la portée « serveur » survit à la classification IA", str(getattr(valide, "slots", None)))
+
     failed = [r for r in RESULTS if not r[0]]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} étapes réussies.")
     sys.stdout.flush()
