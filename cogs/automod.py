@@ -1143,6 +1143,29 @@ def _canonical_whitelist_domain(value: str) -> str | None:
     return host
 
 
+#: 27/11/2026 : hôtes de GIF laissés passer quand l'anti-liens est réglé
+#: « sauf GIFs ». Les fichiers Discord ne comptent que s'ils finissent en .gif.
+GIF_HOTES = ("tenor.com", "giphy.com", "gfycat.com", "klipy.com")
+GIF_HOTES_DISCORD = ("cdn.discordapp.com", "media.discordapp.net")
+
+
+def _que_des_gifs(contenu: str) -> bool:
+    """Vrai si TOUS les liens du message sont des GIFs (aucun autre lien)."""
+    liens = [m.group(0) for m in LINK_RE.finditer(str(contenu or ""))]
+    if not liens:
+        return False
+    for lien in liens:
+        brut = re.sub(r"^(?:https?://)?", "", lien.strip("<>()[]{}.,;!?").casefold())
+        hote, _, chemin = brut.partition("/")
+        hote = hote.rsplit("@", 1)[-1].split(":", 1)[0]
+        if any(hote == d or hote.endswith("." + d) for d in GIF_HOTES):
+            continue
+        if hote in GIF_HOTES_DISCORD and chemin.split("?", 1)[0].endswith(".gif"):
+            continue
+        return False
+    return True
+
+
 def _domain_allowed(content_lower: str, allowed_domains: list[str]) -> bool:
     """Autorise un message SEULEMENT si TOUS ses liens ont un hôte autorisé.
 
@@ -4640,6 +4663,7 @@ class AutoMod(commands.Cog, name="Automod"):
             and conf.get("antilink")
             and conf.get("antilink_strict")
             and LINK_RE.search(link_content)
+            and not (conf.get("antilink_gifs") and _que_des_gifs(link_content))
             and await self.security_filter_applies_to(message, "antilink")
         ):
             return await self._delete_and_warn(
@@ -4791,7 +4815,9 @@ class AutoMod(commands.Cog, name="Automod"):
             and LINK_RE.search(link_content)
         ):
             allowed = await self.get_whitelist_domains_cached(message.guild.id)
-            if not _domain_allowed(link_content, allowed):
+            if not _domain_allowed(link_content, allowed) and not (
+                conf.get("antilink_gifs") and _que_des_gifs(link_content)
+            ):
                 return await self._delete_and_warn(
                     message,
                     "Lien non autorisé.",
