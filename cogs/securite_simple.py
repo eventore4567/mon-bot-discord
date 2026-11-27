@@ -189,6 +189,25 @@ def _raid_arme(view) -> bool:
         return False
 
 
+async def _desarmer_mode_raid(view, interaction: discord.Interaction) -> None:
+    """Désarme, et rien d'autre (revue Codex, PR #734).
+
+    Le bouton « Désarmer le mode raid » appelait la bascule : deux panneaux
+    ouverts, le second clic RÉARMAIT le mode qu'un autre admin venait de couper.
+    """
+    from cogs import raid_mode
+
+    if not interaction.response.is_done():
+        await interaction.response.defer()
+    if raid_mode.est_manuel(view.guild.id):
+        await raid_mode.desarmer_manuel(view.bot, view.guild)
+    await view.refresh(interaction)
+    try:
+        await interaction.followup.send("**Mode raid désarmé.** Les arrivées redeviennent normales.", ephemeral=True)
+    except discord.HTTPException:
+        pass
+
+
 async def _basculer_mode_raid(view, interaction: discord.Interaction) -> None:
     """Ferme ou rouvre la porte du serveur, en un clic.
 
@@ -270,7 +289,7 @@ async def ecran_simple(view) -> discord.ui.Container:
         await mots_bloques.ouvrir(interaction, view.guild)
 
     async def basculer_raid(interaction):
-        await _basculer_mode_raid(view, interaction)
+        await _desarmer_mode_raid(view, interaction)
 
     # 27/11/2026 (Jayden : « remplacer par l'automatique ») : plus de bouton
     # manuel « Mode raid ». L'anti-raid automatique (« Raids », plus haut)

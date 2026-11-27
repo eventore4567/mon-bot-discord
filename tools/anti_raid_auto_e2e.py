@@ -52,6 +52,16 @@ async def main() -> int:
     libelles = [b.label for b in await boutons()]
     check("Désarmer le mode raid" not in libelles, "désarmé, le bouton disparaît", str(libelles))
 
+    # Revue Codex (PR #734) : un second panneau resté ouvert ne réarme jamais.
+    await raid_mode.armer_manuel(bot, guild, h.ADMIN_ID)
+    vieux = [b for b in await boutons() if b.label == "Désarmer le mode raid"]
+    for bouton in (vieux[0], vieux[0]) if vieux else ():
+        try:
+            await bouton.callback(admin_interaction(bot))
+        except Exception:  # noqa: BLE001
+            pass
+    check(not raid_mode.est_manuel(guild.id), "deux clics sur « Désarmer » (deux panneaux) ne réarment jamais")
+
     failed = [r for r in RESULTS if not r[0]]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} étapes réussies.")
     sys.stdout.flush()

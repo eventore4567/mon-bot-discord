@@ -809,7 +809,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         )
 
         async def basculer_raid(interaction: discord.Interaction):
-            await securite_simple._basculer_mode_raid(self, interaction)
+            await securite_simple._desarmer_mode_raid(self, interaction)
 
         raid.callback = basculer_raid
         mots = discord.ui.Button(label="Blocked words" if english else "Mots bloqués", style=discord.ButtonStyle.secondary)
