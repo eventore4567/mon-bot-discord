@@ -55,6 +55,18 @@ async def main() -> int:
     check("autre sanction non confirmée" not in texte and "Source" not in texte,
           "plus de doublons (Source, « autre sanction non confirmée »)")
 
+    # 27/11/2026 : règle à expression régulière — le mot écrit, pas le motif.
+    cog._native_block_last_seen.clear()
+    cog._native_rule_details[(guild.id, 556)] = ("Block Custom Words", None)
+    regex = SimpleNamespace(**{**vars(execution), "rule_id": 556, "content": "T'es bien enfoire",
+                                 "matched_keyword": r"(?i)\b(connard|connasse|enfoir[eé])", "matched_content": "enfoire"})
+    debut = len(h.CALLS)
+    await cog.on_automod_action(regex)
+    await h.settle(idle=2.0, maximum=8)
+    texte = h.visible_text(h.CALLS[debut:])
+    check("`enfoire`" in texte and "(?i)" not in texte,
+          "règle regex : la carte montre le mot écrit, pas l'expression", texte[-200:])
+
     failed = [r for r in RESULTS if not r[0]]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} étapes réussies.")
     sys.stdout.flush()

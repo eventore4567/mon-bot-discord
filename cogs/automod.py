@@ -2049,7 +2049,10 @@ class AutoMod(commands.Cog, name="Automod"):
         channel_id = int(getattr(execution, "channel_id", 0) or 0)
         rule_name = str(details[0] or "Règle inconnue")[:90]
         regle_lisible = REGLES_NATIVES_FR.get(rule_name, rule_name)
-        detecte = str(getattr(execution, "matched_keyword", None) or getattr(execution, "matched_content", None) or "").strip()
+        # 27/11/2026 : sur une règle à expression régulière, Discord met le MOTIF
+        # dans matched_keyword (« (?i)\b(connard|…) ») et le mot réellement écrit
+        # dans matched_content (« enfoire ») : c'est ce dernier qui parle au staff.
+        detecte = str(getattr(execution, "matched_content", None) or getattr(execution, "matched_keyword", None) or "").strip()
         contenu = str(getattr(execution, "content", None) or "").strip()
         champs = [
             ("Membre", f"<@{user_id}>", False),
