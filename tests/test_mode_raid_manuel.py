@@ -123,15 +123,16 @@ async def test_une_base_indisponible_n_empeche_pas_d_armer():
 
 
 def test_le_bouton_est_dans_l_ecran_securite():
-    """Il devait être dans Setup → Sécurité, pas dans une commande."""
+    """27/11/2026 (Jayden : « remplacer par l'automatique ») : l'écran Sécurité
+    n'offre plus d'ARMER le mode raid à la main — l'anti-raid automatique s'en
+    charge. Un mode manuel déjà armé garde un bouton rouge pour le désarmer."""
     import inspect
 
     from cogs import securite_simple
 
     source = inspect.getsource(securite_simple.ecran_simple)
-    assert "Mode raid" in source
+    assert "Désarmer le mode raid" in source and "if _raid_arme(view)" in source
     assert "_basculer_mode_raid" in inspect.getsource(securite_simple)
-    # Rouge quand il est armé : l'état doit se voir sans cliquer.
     assert "ButtonStyle.danger" in source
 
 

@@ -800,9 +800,11 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             await securite_simple._activer(self, interaction)
 
         tout.callback = tout_activer
+        # 27/11/2026 (« remplacer par l'automatique ») : le bouton manuel disparaît ;
+        # il ne reste que pour DÉSARMER un mode manuel déjà armé.
         raid = discord.ui.Button(
-            label=("Raid mode: ARMED" if english else "Mode raid : ARMÉ") if arme else ("Raid mode" if english else "Mode raid"),
-            style=discord.ButtonStyle.danger if arme else discord.ButtonStyle.secondary,
+            label="Disarm raid mode" if english else "Désarmer le mode raid",
+            style=discord.ButtonStyle.danger,
             emoji=icons.partiel("shield") or None,
         )
 
@@ -818,7 +820,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             await mots_bloques.ouvrir(interaction, self.guild)
 
         mots.callback = ouvrir_mots
-        container.add_item(discord.ui.ActionRow(tout, raid, mots))
+        container.add_item(discord.ui.ActionRow(*((tout, raid, mots) if arme else (tout, mots))))
 
         avance = discord.ui.Button(
             label="Advanced settings" if english else "Réglages avancés",
