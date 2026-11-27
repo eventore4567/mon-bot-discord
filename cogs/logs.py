@@ -744,6 +744,14 @@ class Logs(commands.Cog, name="Logs"):
                             compteurs[key] = max(count, precedent or 0)
                             continue
                         compteurs[key] = count
+                        # Revue Codex (PR #733) : les suppressions de SentriX sont
+                        # attribuées par son propre marquage, AVANT l'audit. Une
+                        # hausse du compteur d'une entrée SentriX est donc déjà
+                        # traitée : s'en servir désignerait SentriX pour une
+                        # suppression faite ensuite par l'auteur lui-même.
+                        moi = getattr(getattr(self.bot, "user", None), "id", None)
+                        if moi is not None and getattr(entry.user, "id", None) == moi:
+                            continue
                         return entry.user, entry
                     if abs((now - entry.created_at).total_seconds()) > 4:
                         continue
@@ -766,6 +774,17 @@ class Logs(commands.Cog, name="Logs"):
         """
         if guild.me is None or not guild.me.guild_permissions.view_audit_log:
             return None
+        # Revue Codex (PR #733) : une entrée déjà utilisée pour un AUTRE lot du
+        # même salon ne désigne jamais ce lot-ci ; on attend la suivante.
+        utilisees = getattr(self, "_bulk_audit_utilisees", None)
+        if utilisees is None:
+            utilisees = set()
+            try:
+                self._bulk_audit_utilisees = utilisees
+            except AttributeError:
+                pass
+        if len(utilisees) > 2000:
+            utilisees.clear()
         for delay in (0.3, 0.8, 1.5):
             await asyncio.sleep(delay)
             maintenant = discord.utils.utcnow()
@@ -778,6 +797,10 @@ class Logs(commands.Cog, name="Logs"):
                     compte = getattr(getattr(entry, "extra", None), "count", None)
                     if compte is not None and int(compte) < max(1, int(nombre) // 2):
                         continue  # un autre lot, plus petit, dans le même salon
+                    marque = (int(guild.id), int(getattr(entry, "id", 0) or 0), int(compte or 0))
+                    if marque in utilisees:
+                        continue
+                    utilisees.add(marque)
                     return entry.user
             except (discord.Forbidden, discord.HTTPException):
                 return None
