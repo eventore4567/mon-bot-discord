@@ -4954,6 +4954,30 @@ class AutoMod(commands.Cog, name="Automod"):
             motif_repete = self._detecter_repetition(message, key, seuil=seuils.repetitions)
             if motif_repete:
                 self.repeat_tracker.reinitialiser(key)
+                # Revue Codex (PR #734) : un copier-coller À TOUTE VITESSE est aussi
+                # un flood massif (le seuil de répétition atteint en moins de la
+                # moitié de la fenêtre) : mute immédiat et tout le flood supprimé,
+                # comme des messages différents envoyés aussi vite.
+                recents = [
+                    m for m in self.spam_tracker.valeurs(key, maintenant=instant, fenetre=seuils.secondes)
+                    if m is not None and m is not message
+                ]
+                debut_copie = min((_instant_message(m) for m in recents), default=instant)
+                if (
+                    len(recents) + 1 >= seuils.repetitions
+                    and instant - debut_copie <= seuils.secondes / 2
+                    and not _is_discord_administrator(_as_member(message.author, message.guild))
+                ):
+                    self.__dict__.setdefault("_spam_massifs", {})[key] = time.monotonic()
+                    self.__dict__.setdefault("_spam_rappels", {})[key] = time.monotonic()
+                    self.spam_tracker.reinitialiser(key)
+                    earlier = self._delete_burst(message.guild.id, recents)
+                    result = await self._delete_and_warn(message, motif_repete, "antispam")
+                    incident = self.incidents.get(key)
+                    if incident is not None and earlier:
+                        incident.deleted += len(earlier)
+                    await asyncio.gather(*earlier, return_exceptions=True)
+                    return result
                 return await self._delete_and_warn(message, motif_repete, "antispam")
 
     def _pings_repetes(self, message) -> str | None:

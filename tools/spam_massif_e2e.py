@@ -38,11 +38,11 @@ async def main() -> int:
     automod = bot.get_cog("Automod")
     automod.automod_cache.clear()
 
-    async def serie(auteur, n, ecart):
+    async def serie(auteur, n, ecart, texte="flood {i} lol"):
         debut = dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=n * ecart + 1)
         avant = len(h.CALLS)
         for i in range(n):
-            await automod.on_message(message_a(bot, guild, f"flood {i} lol", auteur, debut + dt.timedelta(seconds=i * ecart)))
+            await automod.on_message(message_a(bot, guild, texte.format(i=i), auteur, debut + dt.timedelta(seconds=i * ecart)))
         await h.settle(idle=1.5, maximum=6)
         appels = h.CALLS[avant:]
         mute = any(m == "PATCH" and p.endswith(f"/members/{auteur}") and (js or {}).get("communication_disabled_until")
@@ -80,6 +80,11 @@ async def main() -> int:
                     if (m == "DELETE" and any(p.endswith(f"/messages/{i}") for i in ids))
                     or (p.endswith("bulk-delete") and any(str(i) in map(str, (js or {}).get("messages", [])) for i in ids)))
     check(supprimes > 0, "après un flood massif, la rafale suivante n'est plus laissée", str(supprimes))
+
+    # Revue Codex (PR #734) : le même message copié-collé à toute vitesse aussi.
+    automod.incidents.clear()
+    mute, texte = await serie(100000000000000504, 5, 0.2, texte="rejoignez mon serveur discord maintenant")
+    check(mute and "spam massif" in texte, "un copier-coller à toute vitesse est muté tout de suite", texte[-200:])
 
     mute, texte = await serie(100000000000000502, 5, 1.1)
     check(not mute, "5 messages en 5 s (rafale ordinaire) : rappel d'abord, pas de mute", texte[-200:])
