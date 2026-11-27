@@ -189,6 +189,25 @@ def _raid_arme(view) -> bool:
         return False
 
 
+async def _desarmer_mode_raid(view, interaction: discord.Interaction) -> None:
+    """Désarme, et rien d'autre (revue Codex, PR #734).
+
+    Le bouton « Désarmer le mode raid » appelait la bascule : deux panneaux
+    ouverts, le second clic RÉARMAIT le mode qu'un autre admin venait de couper.
+    """
+    from cogs import raid_mode
+
+    if not interaction.response.is_done():
+        await interaction.response.defer()
+    if raid_mode.est_manuel(view.guild.id):
+        await raid_mode.desarmer_manuel(view.bot, view.guild)
+    await view.refresh(interaction)
+    try:
+        await interaction.followup.send("**Mode raid désarmé.** Les arrivées redeviennent normales.", ephemeral=True)
+    except discord.HTTPException:
+        pass
+
+
 async def _basculer_mode_raid(view, interaction: discord.Interaction) -> None:
     """Ferme ou rouvre la porte du serveur, en un clic.
 
@@ -270,23 +289,20 @@ async def ecran_simple(view) -> discord.ui.Container:
         await mots_bloques.ouvrir(interaction, view.guild)
 
     async def basculer_raid(interaction):
-        await _basculer_mode_raid(view, interaction)
+        await _desarmer_mode_raid(view, interaction)
 
-    box.add_item(discord.ui.ActionRow(
+    # 27/11/2026 (Jayden : « remplacer par l'automatique ») : plus de bouton
+    # manuel « Mode raid ». L'anti-raid automatique (« Raids », plus haut)
+    # s'arme et se désarme seul. Un mode manuel DÉJÀ armé garde un bouton
+    # rouge pour le désarmer, et seulement tant qu'il l'est.
+    boutons = [
         _bouton("Sécurité active" if not manquantes else "Activer la sécurité", activer,
                 discord.ButtonStyle.success, icone="security", disabled=not manquantes),
-        # 21/11/2026 : « un raid mode dans sécurité qui kick les nouveaux », sans
-        # passer par une commande. Rouge quand il est armé : on doit voir d'un
-        # coup d'œil que la porte est fermée, et pouvoir la rouvrir du même clic.
-        _bouton(
-            "Mode raid : ARMÉ" if _raid_arme(view) else "Mode raid",
-            basculer_raid,
-            discord.ButtonStyle.danger if _raid_arme(view) else discord.ButtonStyle.secondary,
-            icone="shield",
-        ),
-        _bouton("Personnaliser", personnaliser, icone="settings"),
-        _bouton("Mots bloqués", mots),
-    ))
+    ]
+    if _raid_arme(view):
+        boutons.append(_bouton("Désarmer le mode raid", basculer_raid, discord.ButtonStyle.danger, icone="shield"))
+    boutons += [_bouton("Personnaliser", personnaliser, icone="settings"), _bouton("Mots bloqués", mots)]
+    box.add_item(discord.ui.ActionRow(*boutons))
     return box
 
 

@@ -161,12 +161,14 @@ async def main() -> int:
     automod._renfort_jusqua[h.GID] = 0
     check(await burst(4) == 0, "à la fin du renfort, le serveur revient à son niveau (4 messages passent)")
 
-    # Membre établi (arrivé il y a plus de 24 h) : 1re rafale laissée avec un rappel,
-    # la récidive est supprimée.
+    # Membre établi (arrivé il y a plus de 24 h). 27/11/2026 (« un vrai gros
+    # spam, mute instantané ») : 5 messages envoyés d'un coup (0,05 s d'écart)
+    # sont un flood massif — supprimés dès la 1re fois, sans rappel. Le rappel
+    # seul d'une rafale ORDINAIRE (5 messages en 5 s) est vérifié par
+    # tools/spam_massif_e2e.py.
     automod_module.SPAM_ETABLI_SECONDES = etabli_defaut
     habitue = BASE_ID + next(counter)
-    check(await burst(5, author=habitue) == 0, "membre établi : 1re rafale laissée (rappel seul)")
-    check(await burst(5, author=habitue) == 5, "membre établi : la récidive est supprimée")
+    check(await burst(5, author=habitue) == 5, "membre établi : un flood massif est supprimé dès la 1re fois")
 
     failed = [r for r in RESULTS if not r[0]]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} étapes réussies.")

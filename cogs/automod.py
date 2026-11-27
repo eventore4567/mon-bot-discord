@@ -2983,6 +2983,33 @@ class AutoMod(commands.Cog, name="Automod"):
             # Un admin n'est jamais sanctionné pour du spam : messages supprimés, rappel.
             return ("warning_ping", 0, None, "⚠️ doucement sur le spam.")
         cle = (int(guild.id), int(member.id))
+        # 27/11/2026 (« un vrai gros spam, mute instantané ») : un flood massif
+        # (2× le seuil de rafale dans la même fenêtre) saute le rappel et
+        # l'avertissement — comme Raid Protect, le membre est muté tout de suite.
+        massifs = self.__dict__.setdefault("_spam_massifs", {})
+        if time.monotonic() - massifs.pop(cle, -9999.0) < 30:
+            stage = max(await self._next_spam_stage(guild.id, member.id) + (SPAM_PREMIER_PALIER - 1), 3)
+            # Revue Codex (PR #734) : le palier APPLIQUÉ est enregistré, sinon le
+            # flood suivant repartait du rappel (même mute de 5 min à chaque fois).
+            try:
+                await self.bot.db.execute(
+                    "UPDATE sentrix_spam_escalation SET stage=? WHERE guild_id=? AND user_id=?",
+                    (int(stage - (SPAM_PREMIER_PALIER - 1)), int(guild.id), int(member.id)),
+                )
+            except Exception:  # noqa: BLE001 — la sanction passe avant sa trace
+                logger.debug("Palier anti-spam non enregistré guild=%s", guild.id, exc_info=True)
+            duree = SPAM_MUTE_DURATIONS_SECONDS[min(stage - 3, len(SPAM_MUTE_DURATIONS_SECONDS) - 1)]
+            resultat = await self._muter(guild, member, duree, f"spam massif — {reason}")
+            if resultat == "mute_failed":
+                return ("mute_failed", stage, duree,
+                        f"⚠️ spam massif : mute de {helpers.format_duration(duree)} impossible "
+                        "(le propriétaire a été prévenu).")
+            await self._mp_sanction_automod(
+                member, guild,
+                f"Vous avez été rendu muet sur {guild.name} pendant {helpers.format_duration(duree)}.\n"
+                f"Raison : spam massif — {reason}",
+            )
+            return ("mute", stage, duree, f"🔇 spam massif : mute de {helpers.format_duration(duree)}.")
         averti = self.__dict__.setdefault("_spam_dernier_avertissement", {})
         depuis = averti.get(cle)
         if depuis is not None and time.monotonic() - depuis < SPAM_GRACE_APRES_AVERTISSEMENT:
@@ -4876,11 +4903,25 @@ class AutoMod(commands.Cog, name="Automod"):
                     )
                     if m is not None and m is not message
                 ]
+                # 27/11/2026 : flood massif — le seuil de rafale atteint en MOINS DE
+                # LA MOITIÉ de sa fenêtre (normal : 5 messages en moins de 3 s). Tout
+                # part et le membre est muté sans rappel (_spam_progressive_action).
+                debut_rafale = min((_instant_message(m) for m in burst), default=instant)
+                massif = (
+                    rafale and len(burst) + 1 >= seuils.messages
+                    and instant - debut_rafale <= seuils.secondes / 2
+                    and not _is_discord_administrator(_as_member(message.author, message.guild))
+                )
+                if massif:
+                    self.__dict__.setdefault("_spam_massifs", {})[key] = time.monotonic()
+                    # Revue Codex (PR #734) : ce flood EST la 1re rafale du membre ;
+                    # la suivante ne doit pas repartir du « rappel, messages laissés ».
+                    self.__dict__.setdefault("_spam_rappels", {})[key] = time.monotonic()
                 self.spam_tracker.reinitialiser(key)
                 # 07/11/2026 : « qu'il ne supprime pas les messages au premier
                 # avertissement ». 1re rafale : rappel seul, messages laissés ; la suite
                 # (récidive, messages après le rappel) est supprimée comme avant.
-                if self._premier_rappel_spam(message):
+                if not massif and self._premier_rappel_spam(message):
                     self._spam_garder().add(int(message.id))
                     self._noter_laisses(message.guild.id, [*burst, message])
                     earlier = []
@@ -4913,6 +4954,30 @@ class AutoMod(commands.Cog, name="Automod"):
             motif_repete = self._detecter_repetition(message, key, seuil=seuils.repetitions)
             if motif_repete:
                 self.repeat_tracker.reinitialiser(key)
+                # Revue Codex (PR #734) : un copier-coller À TOUTE VITESSE est aussi
+                # un flood massif (le seuil de répétition atteint en moins de la
+                # moitié de la fenêtre) : mute immédiat et tout le flood supprimé,
+                # comme des messages différents envoyés aussi vite.
+                recents = [
+                    m for m in self.spam_tracker.valeurs(key, maintenant=instant, fenetre=seuils.secondes)
+                    if m is not None and m is not message
+                ]
+                debut_copie = min((_instant_message(m) for m in recents), default=instant)
+                if (
+                    len(recents) + 1 >= seuils.repetitions
+                    and instant - debut_copie <= seuils.secondes / 2
+                    and not _is_discord_administrator(_as_member(message.author, message.guild))
+                ):
+                    self.__dict__.setdefault("_spam_massifs", {})[key] = time.monotonic()
+                    self.__dict__.setdefault("_spam_rappels", {})[key] = time.monotonic()
+                    self.spam_tracker.reinitialiser(key)
+                    earlier = self._delete_burst(message.guild.id, recents)
+                    result = await self._delete_and_warn(message, motif_repete, "antispam")
+                    incident = self.incidents.get(key)
+                    if incident is not None and earlier:
+                        incident.deleted += len(earlier)
+                    await asyncio.gather(*earlier, return_exceptions=True)
+                    return result
                 return await self._delete_and_warn(message, motif_repete, "antispam")
 
     def _pings_repetes(self, message) -> str | None:
