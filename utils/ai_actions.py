@@ -165,6 +165,12 @@ ACTIONS: dict[str, ActionSpec] = {
         "moderation.purge", "clear", ("count",), (), None, "high",
         description="supprimer les derniers messages du salon",
     ),
+    # 27/11/2026 : « supprime les liens qui sont dans ce serveur » — les MESSAGES
+    # déjà envoyés qui contiennent un lien (+clear <n> liens [serveur]).
+    "moderation.purge_links": ActionSpec(
+        "moderation.purge_links", "clear", (), ("scope",), None, "high",
+        description="supprimer les messages déjà envoyés qui contiennent un lien (salon ou tout le serveur)",
+    ),
     "moderation.warnings": ActionSpec(
         "moderation.warnings", "warnings", ("target",), (), "member", "low",
         description="afficher les avertissements d'un membre",
@@ -1054,10 +1060,39 @@ def _gestes_courants(question: str, normalized: str) -> ParsedAction | None:
     return None
 
 
+#: Fautes et abréviations courantes de « supprime » (« sup les lien », « suprime tout »).
+_SUPPRIME_ABREGE = re.compile(r"\b(?:sup|supp|suppr|suprime|suprimer|supprimme|suprimme|suprimes|suprimez)\b")
+#: « les liens qui sont dans le serveur », « les messages avec des liens » : des
+#: messages EXISTANTS, pas un réglage pour l'avenir.
+_LIENS_VERBE = re.compile(r"\b(?:supprime|supprimer|efface|effacer|enleve|enlever|nettoie|nettoyer|vire|virer)\b")
+_LIENS_MOT = re.compile(r"\b(?:lien|liens|link|links)\b")
+_LIENS_EXISTANTS_CONTEXTE = re.compile(
+    r"\b(?:qui sont|qui son|qu il y a|presents?|existants?|messages?|deja|partout|"
+    r"(?:dans|de|du) (?:le |ce |se |du )?(?:serv|serveur|salon))\b"
+)
+
+
+class _LiensExistants:
+    """Verbe de suppression + mot « lien » + indice de messages EXISTANTS."""
+
+    @staticmethod
+    def search(texte: str) -> bool:
+        return bool(_LIENS_VERBE.search(texte) and _LIENS_MOT.search(texte)
+                    and _LIENS_EXISTANTS_CONTEXTE.search(texte))
+
+
+_LIENS_EXISTANTS = _LiensExistants()
+
+
 def local_parse(question: str) -> ParsedAction | None:
     normalized = normalize_text(question)
     if not normalized:
         return None
+    normalized = _SUPPRIME_ABREGE.sub("supprime", normalized)
+    question = _SUPPRIME_ABREGE.sub("supprime", question)
+    if _LIENS_EXISTANTS.search(normalized) and not _extract_link_or_domain(question):
+        portee = "serveur" if re.search(r"\b(?:serv|serveur|partout|tous les salons)\b", normalized) else "salon"
+        return ParsedAction("moderation.purge_links", {"scope": portee}, 99, "local")
 
     # -------- actions Discord natives fréquentes --------
     # Les fautes usuelles sont volontairement tolérées ici : le modèle reste le repli.
@@ -1794,6 +1829,9 @@ def build_command_line(
 
     if action.intent == "moderation.purge":
         return f"{command} {int(slots['count'])}" if slots.get("count") else None
+
+    if action.intent == "moderation.purge_links":
+        return f"{command} 100 liens" + (" serveur" if slots.get("scope") == "serveur" else "")
 
     if action.intent == "music.play":
         query = str(slots.get("query") or "").strip()
