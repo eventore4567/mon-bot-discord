@@ -593,6 +593,12 @@ def narrative_body(
             sentence += f" dans {channel}"
         if actor:
             sentence += f" par {actor}"
+        else:
+            # 27/11/2026 : sans mention identifiée, le texte de « Supprimé par »
+            # (« un bot ou un modérateur… ») est dit plutôt que rien.
+            par = _field_value_exact(embed, "Supprimé par")
+            if par:
+                sentence += f" par {par[:1].lower()}{par[1:]}"
         lines.append(sentence + ".")
         if command:
             lines.append(f"**Commande :** {command}")
