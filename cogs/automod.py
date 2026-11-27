@@ -1143,6 +1143,43 @@ def _canonical_whitelist_domain(value: str) -> str | None:
     return host
 
 
+#: 27/11/2026 : hôtes de GIF laissés passer quand l'anti-liens est réglé
+#: « sauf GIFs ». Les fichiers Discord ne comptent que s'ils finissent en .gif.
+GIF_HOTES = ("tenor.com", "giphy.com", "gfycat.com", "klipy.com")
+GIF_HOTES_DISCORD = ("cdn.discordapp.com", "media.discordapp.net")
+
+
+def _que_des_gifs(contenu: str) -> bool:
+    """Vrai si TOUS les liens du message sont des GIFs (aucun autre lien)."""
+    liens = [m.group(0) for m in LINK_RE.finditer(str(contenu or ""))]
+    if not liens:
+        return False
+    from urllib.parse import urlsplit
+
+    for lien in liens:
+        # Revue Codex (PR #735) : un navigateur lit « \\ » comme « / » :
+        # « evil.com\\@tenor.com » mène à evil.com. On lit le lien comme lui.
+        brut = lien.strip("<>()[]{}.,;!?").casefold().replace("\\", "/")
+        if not re.match(r"^[a-z][a-z0-9+.-]*://", brut):
+            brut = "https://" + brut
+        # Revue Codex (PR #735) : le VRAI hôte, lu par urlsplit. Couper sur « / »
+        # puis prendre ce qui suit « @ » faisait de « evil.com?@tenor.com » un
+        # lien Tenor alors qu'il mène à evil.com.
+        try:
+            morceaux = urlsplit(brut)
+            hote = (morceaux.hostname or "").strip(".")
+        except ValueError:
+            return False
+        if not hote:
+            return False
+        if any(hote == d or hote.endswith("." + d) for d in GIF_HOTES):
+            continue
+        if hote in GIF_HOTES_DISCORD and morceaux.path.endswith(".gif"):
+            continue
+        return False
+    return True
+
+
 def _domain_allowed(content_lower: str, allowed_domains: list[str]) -> bool:
     """Autorise un message SEULEMENT si TOUS ses liens ont un hôte autorisé.
 
@@ -4640,6 +4677,7 @@ class AutoMod(commands.Cog, name="Automod"):
             and conf.get("antilink")
             and conf.get("antilink_strict")
             and LINK_RE.search(link_content)
+            and not (conf.get("antilink_gifs") and _que_des_gifs(link_content) and _que_des_gifs(message.content))
             and await self.security_filter_applies_to(message, "antilink")
         ):
             return await self._delete_and_warn(
@@ -4791,7 +4829,12 @@ class AutoMod(commands.Cog, name="Automod"):
             and LINK_RE.search(link_content)
         ):
             allowed = await self.get_whitelist_domains_cached(message.guild.id)
-            if not _domain_allowed(link_content, allowed):
+            # Revue Codex (PR #735) : l'exemption GIF se vérifie AUSSI sur le texte
+            # d'origine — la normalisation replie « tеnor.com » (е cyrillique) en
+            # « tenor.com », un tout autre domaine.
+            if not _domain_allowed(link_content, allowed) and not (
+                conf.get("antilink_gifs") and _que_des_gifs(link_content) and _que_des_gifs(message.content)
+            ):
                 return await self._delete_and_warn(
                     message,
                     "Lien non autorisé.",

@@ -1879,11 +1879,14 @@ class Moderation(commands.Cog):
     # ---------------------------------------------------------------- SALON
 
     @commands.hybrid_command(name="clear", description="Supprimer un nombre de messages dans le salon.")
-    @app_commands.describe(nombre="Nombre de messages à supprimer (2 à 100)")
+    @app_commands.describe(
+        nombre="Nombre de messages à supprimer (2 à 100)",
+        filtre="« liens » : seulement les messages avec un lien ; « liens serveur » : dans tous les salons",
+    )
     # AUTORISATION -> utils/access_matrix.py (matrice unique).
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("manage_messages",), target="channel_target")
-    async def clear(self, ctx: commands.Context, nombre: commands.Range[int, 2, 100]):
+    async def clear(self, ctx: commands.Context, nombre: commands.Range[int, 2, 100], *, filtre: str = ""):
         """Implémentation UNIQUE de +clear / /clear.
 
         Historique : trois implémentations coexistaient (ce corps, cogs/help_clear_fix_v80
@@ -1894,6 +1897,7 @@ class Moderation(commands.Cog):
         pas N cartes individuelles avant le récapitulatif.
         """
         requested = max(2, min(int(nombre), 100))
+        filtre_bas = str(filtre or "").casefold()
         retry_after = _claim_clear_cooldown(ctx.guild.id, ctx.author.id)
         if retry_after > 0:
             message = f"Réessaie dans {retry_after:.1f} s."
@@ -1904,6 +1908,11 @@ class Moderation(commands.Cog):
                     supprimer_apres=3,
                 )
             return await panels.texte_court(ctx, message, ephemere=True)
+
+        if "lien" in filtre_bas or "link" in filtre_bas:
+            return await self._clear_liens(
+                ctx, requested, serveur=any(m in filtre_bas for m in ("serveur", "serv", "partout", "server")),
+            )
 
         is_prefix = ctx.interaction is None
         protected_ids: set[int] = set()
@@ -2069,6 +2078,74 @@ class Moderation(commands.Cog):
             pass
 
         return candidates
+
+    async def _clear_liens(self, ctx: commands.Context, requested: int, *, serveur: bool) -> None:
+        """27/11/2026 : « supprime les liens qui sont dans ce serveur ».
+
+        Parmi les ``requested`` derniers messages du salon (ou de CHAQUE salon où
+        SentriX peut gérer les messages, avec « serveur »), seuls ceux qui
+        contiennent un lien sont supprimés. Les messages épinglés sont gardés.
+        """
+        from types import SimpleNamespace
+
+        from cogs.automod import LINK_RE
+
+        if ctx.interaction is not None and not ctx.interaction.response.is_done():
+            await ctx.interaction.response.defer(ephemeral=True, thinking=True)
+        invocation_id = getattr(getattr(ctx, "message", None), "id", None) if ctx.interaction is None else None
+        moi = ctx.guild.me
+        salons = [ctx.channel]
+        if serveur:
+            salons = [
+                salon for salon in ctx.guild.text_channels
+                if moi is not None and salon.permissions_for(moi).manage_messages
+                and salon.permissions_for(moi).read_message_history
+            ]
+        total, touches = 0, 0
+        for salon in salons:
+            cibles = []
+            # Revue Codex (PR #735) : le message de la commande ne prend pas une
+            # place des « n derniers » (comme pour un +clear ordinaire).
+            limite = requested + (1 if invocation_id is not None and salon.id == ctx.channel.id else 0)
+            try:
+                async for message in salon.history(limit=limite):
+                    if message.id == invocation_id or message.pinned:
+                        continue
+                    if LINK_RE.search(str(message.content or "")):
+                        cibles.append(message)
+            except (discord.Forbidden, discord.HTTPException):
+                continue
+            if not cibles:
+                continue
+            log_service.mark_purged(int(m.id) for m in cibles)
+            try:
+                supprimes = await self._purge_messages(SimpleNamespace(channel=salon), cibles)
+            except (discord.Forbidden, discord.HTTPException):
+                continue
+            total += len(supprimes)
+            touches += 1
+        if invocation_id is not None:
+            try:
+                await ctx.message.delete()
+            except (discord.HTTPException, AttributeError):
+                pass
+        texte = (
+            f"{total} message(s) avec un lien supprimé(s)"
+            + (f" dans {touches} salon(s)." if serveur else ".")
+            if total else "Aucun message avec un lien parmi les derniers messages."
+        )
+        try:
+            await journaliser(self.bot, ctx, "moderation", "🔗 Liens supprimés", {
+                "🧹 Messages": str(total),
+                "📍 Portée": f"tout le serveur ({touches} salon(s))" if serveur else f"<#{ctx.channel.id}>",
+                "🔎 Examinés": f"{requested} derniers messages par salon",
+            })
+        except Exception:  # noqa: BLE001 — le journal ne bloque pas la réponse
+            logger.debug("Journal des liens supprimés indisponible.", exc_info=True)
+        if ctx.interaction is None:
+            await panels.texte_court(ctx.channel, texte, supprimer_apres=6)
+        else:
+            await panels.texte_court(ctx, texte, ephemere=True)
 
     async def _log_clear_safely(self, ctx: commands.Context, messages: list, requested: int) -> None:
         """Journal de purge hors du chemin critique : un échec ici ne casse pas la commande."""

@@ -1261,6 +1261,9 @@ AUTOMOD_SETTINGS_NEW_COLUMNS = {
     # Anti-liens strict : bloque réellement tous les liens, y compris dans les salons
     # ignorés, pour le staff et sans appliquer la whitelist de domaines.
     "antilink_strict": "INTEGER DEFAULT 0",
+    # 27/11/2026 : anti-liens « sauf GIFs » (Tenor, Giphy, GIF Discord) — choisi
+    # dans /setup → Réglages avancés → Anti-liens. 0 = tous les liens bloqués.
+    "antilink_gifs": "INTEGER DEFAULT 0",
     # Escalade automatique OFF tant qu'un administrateur ne l'a pas activée.
     "escalation": "INTEGER DEFAULT 0",
     # Filtre multilingue d'insultes : un filtre comme les autres, désactivé par défaut.

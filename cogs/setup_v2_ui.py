@@ -307,6 +307,11 @@ async def _security_center_state(bot, guild_id: int, filter_name: str) -> tuple[
         enabled = bool(conf and conf[filter_name])
     except (KeyError, IndexError, TypeError):
         enabled = False
+    if filter_name == "antilink":
+        try:
+            return enabled, {"antilink_gifs": bool(conf and conf["antilink_gifs"])}
+        except (KeyError, IndexError, TypeError):
+            return enabled, {"antilink_gifs": False}
     return enabled, {}
 
 
@@ -359,6 +364,12 @@ async def _security_policy_setup_panel(owner, author_id: int, filter_name: str =
     elif filter_name == "antiraid":
         details.append(
             f"**Intensité** · {advanced.get('raid_intensity', 'normal').replace('eleve', 'élevé').title()}"
+        )
+    if filter_name == "antilink":
+        details.append(
+            "**Liens autorisés** · "
+            + ("GIFs seulement (Tenor, Giphy, GIF Discord) — les autres liens sont supprimés"
+               if advanced.get("antilink_gifs") else "Aucun — tous les liens sont supprimés")
         )
     elif filter_name == "honeypot":
         details.append(
@@ -610,6 +621,37 @@ class SecurityPolicyView(discord.ui.View):
 
             threshold.callback = threshold_cb
             self.add_item(threshold)
+
+        if filter_name == "antilink":
+            # 27/11/2026 : « choisir entre tous les liens ou laisser les GIFs ».
+            gifs = bool(self.advanced.get("antilink_gifs"))
+            mode_liens = discord.ui.Select(
+                placeholder="Liens autorisés",
+                options=[
+                    discord.SelectOption(label="Bloquer tous les liens", value="0", default=not gifs,
+                                         description="Aucun lien ne passe (sauf liste blanche)."),
+                    discord.SelectOption(label="Laisser passer les GIFs", value="1", default=gifs,
+                                         description="Tenor, Giphy et GIF Discord passent ; le reste est supprimé."),
+                ],
+                row=4,
+            )
+
+            async def mode_liens_cb(interaction: discord.Interaction):
+                valeur = 1 if mode_liens.values and mode_liens.values[0] == "1" else 0
+                await self.owner.bot.db.execute(
+                    "UPDATE automod_settings SET antilink_gifs = ? WHERE guild_id = ?",
+                    (valeur, self.owner.guild.id),
+                )
+                automod = self.owner.bot.get_cog("Automod")
+                if automod is not None:
+                    automod.automod_cache.pop(self.owner.guild.id, None)
+                await panels.editer(
+                    interaction.response,
+                    await _security_policy_setup_panel(self.owner, interaction.user.id, "antilink"),
+                )
+
+            mode_liens.callback = mode_liens_cb
+            self.add_item(mode_liens)
 
         toggle = discord.ui.Button(
             label="Désactiver" if enabled else "Activer",
