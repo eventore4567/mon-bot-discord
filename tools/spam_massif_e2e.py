@@ -54,6 +54,15 @@ async def main() -> int:
     check(mute, "5 messages en 1 s : mute immédiat (pas de rappel d'abord)", texte[-200:])
     check("spam massif" in texte, "le message public dit « spam massif »", texte[-200:])
 
+    # Revue Codex (PR #734) : deux floods massifs successifs → le mute s'allonge.
+    def durees(auteur):
+        return [js.get("communication_disabled_until") for m, p, js in h.CALLS
+                if m == "PATCH" and p.endswith(f"/members/{auteur}") and (js or {}).get("communication_disabled_until")]
+    automod._spam_dernier_avertissement = {}
+    automod.incidents.clear()  # le 2e flood est un NOUVEL incident (plus tard)
+    _mute2, texte2 = await serie(100000000000000501, 5, 0.2)
+    check("mute de 10 min" in texte2, "un 2e flood massif donne un mute plus long (10 min)", texte2[-200:])
+
     mute, texte = await serie(100000000000000502, 5, 1.1)
     check(not mute, "5 messages en 5 s (rafale ordinaire) : rappel d'abord, pas de mute", texte[-200:])
 

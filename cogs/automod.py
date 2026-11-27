@@ -2989,6 +2989,15 @@ class AutoMod(commands.Cog, name="Automod"):
         massifs = self.__dict__.setdefault("_spam_massifs", {})
         if time.monotonic() - massifs.pop(cle, -9999.0) < 30:
             stage = max(await self._next_spam_stage(guild.id, member.id) + (SPAM_PREMIER_PALIER - 1), 3)
+            # Revue Codex (PR #734) : le palier APPLIQUÉ est enregistré, sinon le
+            # flood suivant repartait du rappel (même mute de 5 min à chaque fois).
+            try:
+                await self.bot.db.execute(
+                    "UPDATE sentrix_spam_escalation SET stage=? WHERE guild_id=? AND user_id=?",
+                    (int(stage - (SPAM_PREMIER_PALIER - 1)), int(guild.id), int(member.id)),
+                )
+            except Exception:  # noqa: BLE001 — la sanction passe avant sa trace
+                logger.debug("Palier anti-spam non enregistré guild=%s", guild.id, exc_info=True)
             duree = SPAM_MUTE_DURATIONS_SECONDS[min(stage - 3, len(SPAM_MUTE_DURATIONS_SECONDS) - 1)]
             resultat = await self._muter(guild, member, duree, f"spam massif — {reason}")
             if resultat == "mute_failed":
