@@ -1154,13 +1154,25 @@ def _que_des_gifs(contenu: str) -> bool:
     liens = [m.group(0) for m in LINK_RE.finditer(str(contenu or ""))]
     if not liens:
         return False
+    from urllib.parse import urlsplit
+
     for lien in liens:
-        brut = re.sub(r"^(?:https?://)?", "", lien.strip("<>()[]{}.,;!?").casefold())
-        hote, _, chemin = brut.partition("/")
-        hote = hote.rsplit("@", 1)[-1].split(":", 1)[0]
+        brut = lien.strip("<>()[]{}.,;!?").casefold()
+        if not re.match(r"^[a-z][a-z0-9+.-]*://", brut):
+            brut = "https://" + brut
+        # Revue Codex (PR #735) : le VRAI hôte, lu par urlsplit. Couper sur « / »
+        # puis prendre ce qui suit « @ » faisait de « evil.com?@tenor.com » un
+        # lien Tenor alors qu'il mène à evil.com.
+        try:
+            morceaux = urlsplit(brut)
+            hote = (morceaux.hostname or "").strip(".")
+        except ValueError:
+            return False
+        if not hote:
+            return False
         if any(hote == d or hote.endswith("." + d) for d in GIF_HOTES):
             continue
-        if hote in GIF_HOTES_DISCORD and chemin.split("?", 1)[0].endswith(".gif"):
+        if hote in GIF_HOTES_DISCORD and morceaux.path.endswith(".gif"):
             continue
         return False
     return True

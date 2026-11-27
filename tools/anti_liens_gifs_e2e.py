@@ -70,6 +70,11 @@ async def main() -> int:
     check(await poster(GIF + " et https://site-random.example", 100000000000000604),
           "mode GIFs : un GIF accompagné d'un autre lien est supprimé")
 
+    # Revue Codex (PR #735) : le vrai hôte, pas ce qui suit un « @ » de la requête.
+    for piege in ("https://evil.com?@tenor.com", "https://evil.com#@giphy.com", "https://tenor.com.evil.com/x"):
+        check(await poster(f"clique {piege}", 100000000000000610 + len(piege)),
+              f"mode GIFs : « {piege} » (pas un vrai GIF) est supprimé")
+
     failed = [r for r in RESULTS if not r[0]]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} étapes réussies.")
     sys.stdout.flush()
