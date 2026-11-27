@@ -50,7 +50,7 @@ async def main() -> int:
         debut = len(h.CALLS)
         bot.dispatch("raw_bulk_message_delete", discord.RawBulkMessageDeleteEvent(
             {"ids": [str(i) for i in ids], "channel_id": str(h.CID), "guild_id": str(h.GID)}))
-        await h.settle(idle=2.0, maximum=10)
+        await h.settle(idle=3.5, maximum=12)
         return cartes_de_logs(h.CALLS[debut:])
 
     ids = await poster(12)
@@ -68,6 +68,44 @@ async def main() -> int:
     check(f"<@{h.TARGET_ID}>" in texte and f"<@{h.SECOND_ID}>" in texte, "la carte liste les auteurs")
     check("attachment://suppression-" in texte, "le transcript complet est visible dans la carte (revue Codex #729)")
     check("photo-souvenir" in texte, "les pièces jointes du lot restent dans le log (revue Codex #729)")
+
+    # 27/11/2026 : « quand on fait un clear, ça dit l'auteur lui-même ». Un lot
+    # supprimé par un AUTRE bot est tracé sous message_bulk_delete (cible : le
+    # salon) ; la carte doit nommer ce bot.
+    from types import SimpleNamespace
+    AUTRE_BOT_ID = 100000000000000999
+    autre_bot = await bot.fetch_user(AUTRE_BOT_ID)
+    original_audit = discord.Guild.audit_logs
+
+    def audit_lot(self, *, limit=100, action=None, **kwargs):
+        async def generateur():
+            if action == discord.AuditLogAction.message_bulk_delete:
+                yield SimpleNamespace(_target_id=h.CID, created_at=discord.utils.utcnow(),
+                                      extra=SimpleNamespace(count=6), user=autre_bot)
+        return generateur()
+
+    discord.Guild.audit_logs = audit_lot
+    try:
+        cartes = await supprimer(await poster(6))
+    finally:
+        discord.Guild.audit_logs = original_audit
+    rendu = h.visible_text([("POST", "x", c) for c in cartes])
+    check(f"par <@{AUTRE_BOT_ID}>" in rendu, "un lot supprimé par un autre bot est attribué à ce bot", rendu[:400])
+
+    def audit_vide(self, *, limit=100, action=None, **kwargs):
+        async def generateur():
+            if False:
+                yield None
+        return generateur()
+
+    discord.Guild.audit_logs = audit_vide
+    try:
+        cartes = await supprimer(await poster(6))
+    finally:
+        discord.Guild.audit_logs = original_audit
+    rendu = h.visible_text([("POST", "x", c) for c in cartes])
+    check("auteur lui" not in rendu and "par un bot ou un modérateur" in rendu,
+          "sans trace d'audit : « un bot ou un modérateur », jamais « l'auteur lui-même »", rendu[:400])
 
     cartes = await supprimer(await poster(2))
     check(len(cartes) == 2, "2 messages gardent leur carte chacun (pas de regroupement inutile)",

@@ -555,6 +555,8 @@ class Logs(commands.Cog, name="Logs"):
         # Ne jamais réutiliser la même preuve pour attribuer plusieurs messages
         # différents à un membre du staff (cas très fréquent en rafale).
         self._delete_audit_seen: dict[tuple[int, int], float] = {}
+        #: Dernier compteur vu par entrée d'audit regroupée (guild, entrée) → n.
+        self._delete_audit_counts: dict[tuple[int, int], int] = {}
 
     async def _send(
         self,
@@ -706,33 +708,88 @@ class Logs(commands.Cog, name="Logs"):
                 ):
                     if audit_entries.cible_id(entry) != int(author_id):
                         continue
-                    if abs((now - entry.created_at).total_seconds()) > 4:
+                    # Une entrée regroupée garde la date de sa PREMIÈRE suppression
+                    # (Discord regroupe sur quelques minutes) : fenêtre large ici,
+                    # la fraîcheur est vérifiée plus bas selon le compteur.
+                    if abs((now - entry.created_at).total_seconds()) > 600:
                         continue
                     extra = getattr(entry, "extra", None)
                     extra_channel_id = getattr(getattr(extra, "channel", None), "id", None)
                     if extra_channel_id is None or int(extra_channel_id) != int(channel_id):
                         continue
-                    # Pour les suppressions par lot, une entrée "count=3" ne
-                    # permet PAS d'associer un message précis à un exécuteur :
-                    # éviter toute attribution trompeuse.
-                    count = getattr(extra, "count", None)
-                    if count is not None and int(count) != 1:
-                        continue
                     entry_id = getattr(entry, "id", None)
                     if entry_id is None:
                         continue
                     key = (int(guild.id), int(entry_id))
+                    count = int(getattr(extra, "count", None) or 1)
+                    # 27/11/2026 (« après un clear, ça dit l'auteur lui-même ») :
+                    # Discord REGROUPE les suppressions successives d'un même
+                    # exécuteur, sur un même auteur et un même salon, dans UNE
+                    # entrée dont le compteur monte (sa date reste celle de la
+                    # première). Ignorer tout compteur > 1 laissait chaque
+                    # suppression suivante « sans exécuteur ». Un compteur qui
+                    # vient d'augmenter désigne bien cet exécuteur.
+                    compteurs = getattr(self, "_delete_audit_counts", None)
+                    if compteurs is None:
+                        compteurs = {}
+                        try:
+                            self._delete_audit_counts = compteurs
+                        except AttributeError:
+                            pass
+                    if len(compteurs) > 2000:
+                        compteurs.clear()
+                    precedent = compteurs.get(key)
+                    if count > 1:
+                        if precedent is None or count <= precedent:
+                            compteurs[key] = max(count, precedent or 0)
+                            continue
+                        compteurs[key] = count
+                        return entry.user, entry
+                    if abs((now - entry.created_at).total_seconds()) > 4:
+                        continue
                     if key in self._delete_audit_seen:
                         continue
                     self._delete_audit_seen[key] = now_mono
+                    compteurs[key] = 1
                     return entry.user, entry
             except (discord.Forbidden, discord.HTTPException):
                 return None, None
         return None, None
 
+    async def _bulk_delete_actor(self, guild: discord.Guild, channel_id: int, nombre: int):
+        """Qui a supprimé un LOT de messages (27/11/2026).
+
+        Discord trace une suppression en lot sous message_bulk_delete, avec le
+        SALON pour cible et le nombre de messages — pas sous message_delete.
+        Chercher l'auteur des messages (comme pour une suppression isolée) ne
+        trouvait jamais rien : la carte disait « l'auteur lui-même ou un bot ».
+        """
+        if guild.me is None or not guild.me.guild_permissions.view_audit_log:
+            return None
+        for delay in (0.3, 0.8, 1.5):
+            await asyncio.sleep(delay)
+            maintenant = discord.utils.utcnow()
+            try:
+                async for entry in guild.audit_logs(limit=10, action=discord.AuditLogAction.message_bulk_delete):
+                    if audit_entries.cible_id(entry) != int(channel_id):
+                        continue
+                    if abs((maintenant - entry.created_at).total_seconds()) > 15:
+                        continue
+                    compte = getattr(getattr(entry, "extra", None), "count", None)
+                    if compte is not None and int(compte) < max(1, int(nombre) // 2):
+                        continue  # un autre lot, plus petit, dans le même salon
+                    return entry.user
+            except (discord.Forbidden, discord.HTTPException):
+                return None
+        return None
+
     @staticmethod
-    def _delete_actor_text(actor) -> str:
+    def _delete_actor_text(actor, *, lot: bool = False) -> str:
         if actor is None:
+            if lot:
+                # Un membre ne peut pas supprimer un lot : c'est un bot ou un
+                # modérateur, que le journal d'audit n'a pas permis d'identifier.
+                return "Un bot ou un modérateur (journal d’audit indisponible)"
             # Pas d'entrée d'audit : Discord n'en crée pas quand l'auteur supprime
             # son propre message (ni pour un bot).
             return "L’auteur lui-même ou un bot"
@@ -1018,11 +1075,11 @@ class Logs(commands.Cog, name="Logs"):
             texte = " ".join(str(r["content"] or "").split()) or "(pièce jointe ou message vide)"
             extraits.append(f"<@{int(r['author_id'])}> : {_short(texte, 90)}")
         premier = int(rows[0]["author_id"])
-        actor, _audit = await self._message_delete_actor(guild, premier, channel_id, message_id=int(rows[0]["message_id"]))
+        actor = await self._bulk_delete_actor(guild, channel_id, total)
         fields = [
             ("Salon", _channel_ref(channel_id), True),
             ("Messages supprimés", str(int(total)), True),
-            ("Supprimé par", self._delete_actor_text(actor), True),
+            ("Supprimé par", self._delete_actor_text(actor, lot=True), True),
             ("Auteurs", auteurs, False),
             ("Aperçu", _short("\n".join(extraits), 1024), False),
             ("Pièces jointes", _attachment_summary(pieces), False),
