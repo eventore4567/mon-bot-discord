@@ -120,25 +120,22 @@ async def _rafale(cog, member, nombre: int):
 
 @pytest.mark.asyncio
 async def test_une_rafale_de_30_messages_produit_une_seule_sanction_un_avertissement_un_log():
-    # 07/11/2026 : rappel, avertissement, puis 5 min, 10 min… à la récidive ; la
-    # rafale reste UN seul incident.
+    # 27/11/2026 (Jayden : « un vrai gros spam, mute instantané ») : 30 messages
+    # envoyés d'un coup sont un FLOOD MASSIF (seuil atteint en bien moins de la
+    # moitié de la fenêtre). Avant : rappel seul, messages laissés. Désormais :
+    # mute immédiat, tout est supprimé — et la rafale reste UN seul incident.
     cog = _cog(conf={"antispam": 1, "escalation": 1})
     member = _member()
     messages, court = await _rafale(cog, member, 30)
 
-    assert member.timeout.await_count == 0
+    assert member.timeout.await_count == 1
     assert court.await_count == 1
     assert cog.log_action.await_count == 1
-    # 07/11/2026 : « pas de suppression au premier avertissement ». Les messages qui
-    # déclenchent le rappel restent ; tout ce qui suit le rappel est supprimé.
-    supprimes = [m.delete.await_count > 0 for m in messages]
-    premiers = supprimes.index(True)
-    assert premiers >= 1 and not any(supprimes[:premiers]) and all(supprimes[premiers:])
+    assert all(m.delete.await_count > 0 for m in messages)
     fields = {f.name: f.value for f in cog.log_action.await_args.args[1].fields}
-    assert fields["Messages supprimés"] == str(30 - premiers), fields
-    assert fields["Niveau anti-spam"] == "1"
+    assert fields["Messages supprimés"] == "30", fields
     note = court.await_args.args[1]
-    assert "<@7>" in note and "spam" in note
+    assert "<@7>" in note and "spam massif" in note
 
 
 @pytest.mark.asyncio
